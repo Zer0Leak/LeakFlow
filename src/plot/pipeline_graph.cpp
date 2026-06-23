@@ -2128,6 +2128,26 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
     std::jthread worker([&session, &control_runtime, &element_mutex, &failure](std::stop_token token) {
         using namespace std::chrono_literals;
         try {
+            // Live + Queue: drive the threaded segment runner (S10). run_once blocks
+            // until every segment reaches EOS or the window closes (cooperative
+            // stop), visualizing the stream through the observer as segment threads
+            // emit. Property edits submitted during a threaded run are applied after
+            // it returns (mid-threaded-run live editing is a follow-up: it needs a
+            // per-segment safe point, since segments run continuously with no sweep
+            // boundary). The graph and tooltips stay responsive throughout.
+            if (session.pipeline().should_run_threaded()) {
+                session.set_stop_token(token);
+                (void)session.run_once();
+                while (!token.stop_requested()) {
+                    {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
+                        (void)session.drain_commands();
+                    }
+                    std::this_thread::sleep_for(8ms);
+                }
+                return;
+            }
+
             bool live = false;
             {
                 const std::lock_guard<std::mutex> lock(element_mutex);
