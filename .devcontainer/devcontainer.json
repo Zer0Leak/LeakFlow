@@ -1,0 +1,35 @@
+{
+  "name": "LeakFlow",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/LeakFlow",
+  "remoteUser": "leakflow",
+  "updateRemoteUserUID": true,
+  "runArgs": [
+    "--gpus=all",
+    "--env=NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics"
+  ],
+  "mounts": [
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
+  ],
+  "containerEnv": {
+    "CC": "clang",
+    "CXX": "clang++",
+    "CMAKE_PREFIX_PATH": "/opt/libtorch",
+    "LD_LIBRARY_PATH": "/opt/libtorch/lib",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "LEAKFLOW_LOG_LEVEL": "warning",
+    "LEAKFLOW_LOG_COLOR": "auto",
+    "LEAKFLOW_SUMMARIES": "1"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "cmake.generator": "Ninja",
+        "C_Cpp.default.compilerPath": "/usr/bin/clang++"
+      }
+    }
+  }
+}

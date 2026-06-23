@@ -1,0 +1,217 @@
+# Metadata, Caps, and Klass Taxonomy
+
+This is the authoritative design document for how LeakFlow classifies metadata,
+how metadata is forwarded between elements, how element `klass` strings are
+structured, and how those map to a side-channel-attack (SCA) building-block
+taxonomy.
+
+The compact day-to-day version lives in
+`docs/context/ARCHITECTURE_CONTRACTS.md`. This document is the source of truth.
+
+## Motivation
+
+LeakFlow is a Lego of SCA building blocks: techniques can be mixed, a block can
+be swapped for another that fills the same slot, and the same block can be reused
+with different parameters. For that to work:
+
+- buffers must carry the right metadata to the right downstream blocks, and
+- elements must not blindly propagate facts that stop being true once they
+  transform or fuse data.
+
+Before this design, a multi-input element such as `AesLeakage` simply copied
+one arbitrarily-chosen input's entire metadata map. That preserved some facts
+(for example `sample_rate_hz`, because it happened to be on the copied input)
+while silently dropping others (for example `capture.source`, which was only on
+the traces input), and it left misleading provenance on derived buffers (a
+leakage buffer claiming `file.path=.../plain_texts.pt`).
+
+## 1. Metadata taxonomy — four groups
+
+Every metadata key belongs to exactly one group, chosen by the question:
+*is this fact still true of the output buffer after the element acts?*
+
+| Group | Meaning | Lifetime |
+|---|---|---|
+| **capture** | physical acquisition / dataset / countermeasure facts | true of anything derived from the experiment |
+| **origin** | provenance of one specific input (file + role) | true only while the buffer *is* that input |
+| **payload** | a producer's assertion about the current payload bytes | invalidated when the payload is replaced |
+| **routing** | transient pipeline-topology / identity scratch | valid only on the immediate link |
+
+`capture.countermeasure.*` (masking order, shuffling, desynchronization, ...) is
+a first-class **capture** fact: nearly all SCA results are meaningless without
+it, so it must survive transforms and fusion.
+
+## 2. Group resolution
+
+Every stamped metadata key carries its group as the **leading segment**, so
+`leakflow::metadata_group(key)` is a direct lookup of that segment:
+
+```text
+leading capture.*    -> capture   (capture.source, capture.sample_rate_hz, capture.dataset.name, capture.countermeasure.*)
+leading origin.*     -> origin    (origin.file.*, origin.role, and fused origin.<pad>.*)
+leading routing.*    -> routing   (routing.element, routing.branch.*)
+leading payload.*    -> payload   (payload.leakage.*, payload.crypto.*, payload.poi.*, payload.conversion.*, ...)
+DEFAULT (unprefixed) -> payload
+```
+
+`leakflow_core` only needs the four group names; it never lists any domain
+vocabulary. Unprefixed or unknown keys default to payload, the safe choice for
+facts that should ride pass-through but not be forwarded onto derived buffers.
+
+Every element stamps keys in the prefixed form (for example `TorchFileSrc` stamps
+`origin.file.path` and `payload.leakage.inverted`). Hand-typed CLI metadata
+annotations should follow the same convention; a bare annotation key resolves to
+payload.
+
+## 3. Klass scheme and forwarding profiles
+
+Element `klass` is `<Profile>/<Domain>[/<Specific>]`. The **leading token is the
+forwarding profile** (a refinement of GStreamer's Source/Sink/Filter split); the
+remaining tokens are descriptive.
+
+`leakflow::profile_for_klass(klass)` maps the leading token:
+
+| Leading token | Profile | Meaning |
+|---|---|---|
+| `Source` | Source | produces buffers; owns its metadata |
+| `Sink` | Sink | terminal; forwards nothing |
+| `PassThrough` | PassThrough | forwards the buffer envelope unchanged |
+| `Convert` | Reframe | single-input representation change |
+| `Analyze` | Analyze | multi-input fusion or derivation of new knowledge |
+| *(other, e.g. `Control`)* | PassThrough | conservative default |
+
+## 4. Forwarding matrix
+
+`leakflow::forward_metadata(inputs, profile, output)` applies, before the element
+stamps its own keys:
+
+| Profile | capture | origin | payload | routing |
+|---|---|---|---|---|
+| **Source** | own | own | own | — |
+| **PassThrough** | copy | copy | copy | drop |
+| **Reframe** | copy | copy | **drop** | drop |
+| **Analyze** | **union** (conflict → error) | **`origin.<pad>.<key>`** | drop | drop |
+| **Sink** | — | — | — | — |
+
+Rules and rationale:
+
+- **Routing is never forwarded** by the helper. `element` is re-stamped by each
+  producing element; `branch.*` is stamped per-output at the link by `Tee` and
+  CLI pad-metadata annotations. Pass-through elements that simply return the
+  input buffer (Tee, Queue, Summary) keep the envelope intact and so carry
+  routing to the immediate consumer; the next reframe/analyze drops it.
+- **Analyze unions capture** across all connected inputs and **throws** on a
+  conflicting value (for example two different `sample_rate_hz`). Capture values
+  are non-secret, so the error names them.
+- **Analyze relabels origin** as `origin.<pad>.<key>` so multiple inputs cannot
+  collide and the output schema is stable. Example: the traces input's
+  `file.path` becomes `origin.traces.file.path`. When an input's origin key is
+  itself already forwarded (`origin.<prev>.<...>`, e.g. a prior Analyze output),
+  the redundant leading `origin.` is stripped before relabeling, yielding a flat
+  provenance path such as `origin.targets.keys.file.path` rather than a nested
+  `origin.targets.origin.keys.file.path`.
+- **Reframe copies origin as-is** (single input, no relabel) and copies capture,
+  but **drops upstream payload** — the element re-owns only the payload facts it
+  can vouch for (for example `conversion.*`).
+- An Analyze element may additionally **re-own a curated subset** of payload
+  facts it is asserting about its output. `PearsonPoiFinder` does this for
+  `leakage.*`/`crypto.*`/`trace.*` that describe the target model, since the PoI
+  results remain *about* those targets.
+
+A future refinement, not yet implemented: a Reframe brick that legitimately
+rewrites a capture key it owns (for example a `Resample` brick updating
+`sample_rate_hz`). The mechanism for declaring such own-overrides will be added
+when the signal-processing bricks are built.
+
+## 5. Caps and payload model
+
+Caps stay **general**; generality is set by the most generic *consumer*, not by
+the producer. If a generic statistical routine consumes from two producers, both
+producers emit the same general caps so the routine is a drop-in slot. Therefore
+LeakFlow does **not** mint a distinct caps type per semantic role.
+
+- Raw loaders (`TorchFileSrc`, `NumpySrc`) emit the generic transport caps
+  (`leakflow/torch-tensor`, `leakflow/numpy-array`). Semantic meaning is layered
+  downstream by a semantic-aware element, a CLI caps annotation, or the first
+  SCA-aware element, using the existing generic↔concrete compatibility rule.
+- Numeric semantics (traces, leakage, labels, scores, key-as-bytes,
+  oracle-answers-as-bits) reuse `TorchTensorPayload`, distinguished by
+  `dtype`/`rank`/`shape` and metadata `role`.
+- A new payload type is introduced **only** when the structure is not a tensor.
+  The single near-term case is `sca-model` (a trained template/NN). Oracle
+  answers and recovered keys stay tensors until something proves otherwise.
+- semantic role stays **metadata** (`origin.role`), not a blocking caps param, so
+  genericity remains the default.
+
+## 6. Library layering
+
+```text
+leakflow_core   framework kernel; no domain knowledge
+  -> leakflow_base    minimal numeric transport + generic statistics
+       -> leakflow_sca     (future) algorithm-agnostic SCA: shared caps/role
+                            vocabulary + SCA math (SNR, TVLA, labeling, POI
+                            selection, signal-processing primitives)
+            -> leakflow_plugins_sca   (future) generic SCA elements
+       -> leakflow_crypto  algorithm-specific helpers (Hamming, S-box, Kyber)
+            -> leakflow_plugins_crypto  algorithm-specific elements
+```
+
+- `leakflow_base` stays minimal but is the right home for *generic* statistics
+  (it already owns `pearson_correlation`).
+- `leakflow_sca` is for side-channel work that still applies across algorithms
+  (AES, Kyber, ...).
+- `leakflow_crypto` is for truly algorithm-specific helpers.
+- `PearsonPoiFinder` is generic SCA and will eventually move to
+  `leakflow_plugins_sca`; for now only its klass was updated.
+
+## 7. SCA building-block taxonomy (the Lego slots)
+
+Derived from a 27-paper SLR corpus of SCA attacks on PQC (Kyber/ML-KEM,
+Dilithium/ML-DSA, Falcon, and generalization targets). Each family is a swappable
+**slot**; concrete elements are interchangeable **bricks**; properties give brick
+variants.
+
+| Slot (Klass family) | Profile | Representative bricks |
+|---|---|---|
+| `Source/Acquire/*` | Source | trace/known-data/dataset/simulated sources |
+| `Source/AttackInput/*` | Source | chosen-ciphertext crafting for PC-oracle attacks |
+| `Convert/Signal/*` | Reframe | Align, Resample, Filter, Trim, Standardize, Segment, ShareCombine, Average (distinct small bricks) |
+| `Analyze/Leakage/*` | Analyze | leakage models (HW/HD/ID) per target op (S-box, NTT, message-decode, unpacking, modular reduction, CDT) |
+| `Analyze/Label/*` | Analyze | labelers, cluster/MC labeling, blind labeling |
+| `Analyze/Poi/*` | Analyze | Pearson, SNR, TVLA/t-test, higher-order PoI finders |
+| `Analyze/Model/*` (train) + `Convert/Predict/*`→Analyze | Analyze | template/CNN/MLP/GNN/LR/RL/LLM distinguishers |
+| `Analyze/Oracle/*` | Analyze | PC (binary), MV-PC, decryption-failure, re-encryption oracles |
+| `Analyze/Solver/*` | Analyze | linear-system, lattice reduction, belief propagation, ILP, key enumeration, residual-opt |
+| `Sink/Eval/*` | Sink | success rate, guessing entropy, key rank, accuracy/F1 |
+| `Sink/Plot/*` | Sink | TracePlot, correlation plot, PoI overlay, GE curve |
+| `Control/Fault/*` | (future) | voltage-glitch injector and other active perturbation |
+| `*/Design/*` | (future) | pre-silicon RTL leakage localization (e.g. GNN on CDFG) |
+
+Models exist as **both** a live `Analyze/Model/*` element emitting an `sca-model`
+payload and a `Source/File/Model` (`ModelFileSrc`) / `Sink/File/Model` loader,
+feeding a `Predict` brick.
+
+## 8. Current element klasses
+
+| Element | Klass | Profile |
+|---|---|---|
+| FakeSrc / FileSrc / NumpySrc / TorchFileSrc | `Source/Fake`, `Source/File`, `Source/File/Numpy`, `Source/File/Torch` | Source |
+| FakeSink / FileSink / TorchFileSink / TracePlot | `Sink/Fake`, `Sink/File`, `Sink/File/Torch`, `Sink/Plot/Trace` | Sink |
+| Tee / Queue / Summary | `PassThrough/Branch`, `PassThrough/Queue`, `PassThrough/Summary` | PassThrough |
+| TorchConvert / NumpyToTorch | `Convert/Tensor/Torch`, `Convert/Tensor/NumpyToTorch` | Reframe |
+| CorrelationPoiToPlotAnnotations | `Convert/SCA/Plot/Annotations` | Reframe |
+| AesLeakage / PearsonPoiFinder | `Analyze/SCA/Crypto/LeakageModel`, `Analyze/SCA/Statistics/PoI` | Analyze |
+
+## 9. Deferred work
+
+- **Oracle and Solver execution.** These families are taxonomized (klass + caps
+  reserved) but their iterative query→measure→refine execution is deferred to a
+  future multi-input / feedback executor. The current executor is synchronous and
+  linear.
+- **Active fault injection** (`Control/Fault/*`) and **pre-silicon RTL**
+  (`*/Design/*`) are scoped as future families; LeakFlow may replicate those
+  attacks later.
+- **Reframe capture own-override** mechanism (e.g. `Resample` rewriting
+  `sample_rate_hz`) is deferred to the signal-processing brick phase.
+- **`leakflow_sca` / `leakflow_plugins_sca`** targets and the physical move of
+  generic SCA elements are a later phase.
