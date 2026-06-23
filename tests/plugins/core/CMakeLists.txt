@@ -27,3 +27,13 @@ target_link_libraries(leakflow_sync_tests
 )
 leakflow_configure_test_target(leakflow_sync_tests)
 add_test(NAME leakflow_sync COMMAND leakflow_sync_tests)
+
+add_executable(leakflow_sync_threaded_tests
+    sync_threaded_test.cpp
+)
+target_link_libraries(leakflow_sync_threaded_tests
+    PRIVATE
+        leakflow_plugins_core
+)
+leakflow_configure_test_target(leakflow_sync_threaded_tests)
+add_test(NAME leakflow_sync_threaded COMMAND leakflow_sync_threaded_tests)
