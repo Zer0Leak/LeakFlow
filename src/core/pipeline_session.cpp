@@ -93,9 +93,48 @@ void PipelineSession::set_safe_point_mutex(std::mutex *mutex)
     safe_point_mutex_ = mutex;
 }
 
+void PipelineSession::request_pause()
+{
+    paused_.store(true);
+    auto expected = PipelineSessionState::Running;
+    state_.compare_exchange_strong(expected, PipelineSessionState::Paused);
+}
+
+void PipelineSession::request_resume()
+{
+    auto expected = PipelineSessionState::Paused;
+    state_.compare_exchange_strong(expected, PipelineSessionState::Running);
+    {
+        std::lock_guard<std::mutex> lock(pause_mutex_);
+        paused_.store(false);
+    }
+    pause_cv_.notify_all();
+}
+
+bool PipelineSession::is_paused() const
+{
+    return paused_.load();
+}
+
+void PipelineSession::wait_while_paused(std::stop_token stop)
+{
+    if (!paused_.load()) {
+        return;
+    }
+    std::unique_lock<std::mutex> lock(pause_mutex_);
+    // Wakes on resume (predicate) or teardown (stop token); never blocks once
+    // stop is requested, so a paused pipeline still tears down promptly.
+    pause_cv_.wait(lock, std::move(stop), [this]() { return !paused_.load(); });
+}
+
 PipelineSessionState PipelineSession::state() const
 {
-    return state_;
+    return state_.load();
+}
+
+void PipelineSession::set_state(PipelineSessionState state)
+{
+    state_.store(state);
 }
 
 std::uint64_t PipelineSession::generation() const
@@ -105,16 +144,16 @@ std::uint64_t PipelineSession::generation() const
 
 void PipelineSession::start()
 {
-    if (state_ != PipelineSessionState::Stopped) {
+    if (state_.load() != PipelineSessionState::Stopped) {
         return;
     }
     pipeline_.start_all();
-    state_ = PipelineSessionState::Started;
+    state_ = PipelineSessionState::Running;
 }
 
 std::optional<Buffer> PipelineSession::run_sweep()
 {
-    if (state_ == PipelineSessionState::Stopped) {
+    if (state_.load() == PipelineSessionState::Stopped) {
         start();
     }
     auto output = pipeline_.run_sweep();
@@ -136,7 +175,8 @@ std::optional<Buffer> PipelineSession::run_once()
             // Each segment thread applies its own pending commands at a between-buffer
             // safe point, so live edits forward-apply mid-stream (S11.5).
             output = pipeline_.run_threaded(
-                stop_token_, [this](const std::vector<std::shared_ptr<Element>> &elements) {
+                stop_token_, [this](const std::vector<std::shared_ptr<Element>> &elements, std::stop_token stop) {
+                    wait_while_paused(std::move(stop));
                     apply_commands_for(elements);
                 });
         } catch (...) {
@@ -166,7 +206,7 @@ std::optional<Buffer> PipelineSession::run_once()
 
 void PipelineSession::stop()
 {
-    if (state_ != PipelineSessionState::Stopped) {
+    if (state_.load() != PipelineSessionState::Stopped) {
         pipeline_.stop_all();
     }
     state_ = PipelineSessionState::Stopped;
@@ -183,7 +223,7 @@ void PipelineSession::restart()
 
 std::optional<Buffer> PipelineSession::rerun_from_sources()
 {
-    if (state_ == PipelineSessionState::Stopped) {
+    if (state_.load() == PipelineSessionState::Stopped) {
         start();
     }
     ++generation_;
@@ -192,16 +232,41 @@ std::optional<Buffer> PipelineSession::rerun_from_sources()
     return output;
 }
 
-void PipelineSession::submit(SetPropertyCommand command)
+namespace {
+
+void merge_command(std::vector<SetPropertyCommand> &queue, SetPropertyCommand command)
 {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    for (auto &existing : pending_) {
+    for (auto &existing : queue) {
         if (existing.element_name == command.element_name && existing.property_name == command.property_name) {
-            existing.value = std::move(command.value);
+            existing.value = std::move(command.value); // last-wins per (element, property)
             return;
         }
     }
-    pending_.push_back(std::move(command));
+    queue.push_back(std::move(command));
+}
+
+} // namespace
+
+void PipelineSession::submit(SetPropertyCommand command)
+{
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    // Manual mode stages the edit; otherwise it queues live for immediate apply.
+    merge_command(manual_apply_ ? staged_ : pending_, std::move(command));
+}
+
+void PipelineSession::set_manual_apply(bool on)
+{
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    manual_apply_ = on;
+}
+
+void PipelineSession::apply_staged()
+{
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    for (auto &command : staged_) {
+        merge_command(pending_, std::move(command));
+    }
+    staged_.clear();
 }
 
 std::size_t PipelineSession::drain_commands()
@@ -387,7 +452,7 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
         try {
             // forward_only_apply_: a threaded run streams continuously, so never
             // rerun -- the next buffer reprocesses with the new value (S11.5).
-            if (state_ != PipelineSessionState::Stopped && !forward_only_apply_) {
+            if (state_.load() != PipelineSessionState::Stopped && !forward_only_apply_) {
                 if (pipeline_.caching_enabled()) {
                     (void)pipeline_.rerun_from(element);
                 } else {
@@ -425,7 +490,7 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
     }
 
     try {
-        if (state_ == PipelineSessionState::Stopped) {
+        if (state_.load() == PipelineSessionState::Stopped) {
             // No live run to update; the next run_sweep will pick up the change.
         } else if (live_driven || forward_only_apply_) {
             // Forward: the change applies to the next pumped buffer. No cache

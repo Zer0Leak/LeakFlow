@@ -1,5 +1,6 @@
 #include "leakflow/plot/plot_runtime.hpp"
 
+#include "leakflow/core/pipeline_session.hpp"
 #include "leakflow/log/logger.hpp"
 #include "leakflow/plot/pipeline_graph.hpp"
 
@@ -1249,16 +1250,53 @@ void run_until_closed_impl(PlotRuntime &runtime, PipelineGraphRuntime *graph_run
         if (!screenshot_status.empty()) {
             ImGui::TextUnformatted(screenshot_status.c_str());
         }
-        // Session controls (Phase 25). The UI only sets a request; the worker
-        // applies it at a safe point.
+        // Player controls (Stopped/Running/Paused/Idle). The UI calls the request;
+        // the worker drives the state machine. Buttons enable/disable by state.
         if (control_runtime != nullptr && control_runtime->session() != nullptr) {
             ImGui::Separator();
-            if (ImGui::Button("Re-run from sources")) {
-                control_runtime->request_rerun_from_sources();
+            const auto state = control_runtime->session()->state();
+            const bool stopped = state == leakflow::PipelineSessionState::Stopped;
+            const bool running = state == leakflow::PipelineSessionState::Running;
+            const bool paused = state == leakflow::PipelineSessionState::Paused;
+            const bool idle = state == leakflow::PipelineSessionState::Idle;
+            const char *label = stopped ? "Stopped" : running ? "Running" : paused ? "Paused" : "Idle";
+
+            const auto gated_button = [](const char *text, bool enabled) {
+                ImGui::BeginDisabled(!enabled);
+                const bool clicked = ImGui::Button(text);
+                ImGui::EndDisabled();
+                return clicked;
+            };
+
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine();
+            if (gated_button("Start", stopped || idle)) { // in Idle, Start re-runs from sources
+                control_runtime->request_start();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Stop/Start cycle")) {
-                control_runtime->request_restart();
+            if (gated_button("Stop", running || paused || idle)) {
+                control_runtime->request_stop();
+            }
+            ImGui::SameLine();
+            if (gated_button("Pause", running)) {
+                control_runtime->request_pause();
+            }
+            ImGui::SameLine();
+            if (gated_button("Resume", paused)) {
+                control_runtime->request_resume();
+            }
+
+            // Auto-apply vs manual is orthogonal to the state: in manual mode edits
+            // stage until Apply, in any state (Stopped/Running/Paused/Idle).
+            bool auto_recompute = control_runtime->auto_recompute();
+            if (ImGui::Checkbox("Auto-apply edits", &auto_recompute)) {
+                control_runtime->set_auto_recompute(auto_recompute);
+            }
+            if (!auto_recompute) {
+                ImGui::SameLine();
+                if (ImGui::Button("Apply")) {
+                    control_runtime->request_apply();
+                }
             }
         }
         ImGui::End();

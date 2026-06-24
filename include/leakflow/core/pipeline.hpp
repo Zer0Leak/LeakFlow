@@ -106,11 +106,12 @@ public:
     [[nodiscard]] std::optional<Buffer> run();
 
     // Invoked by each segment thread at a between-buffer safe point with that
-    // segment's elements. The callee applies pending property changes to those
-    // elements ON the segment thread, so the change forward-applies to the next
-    // buffer with no data race (the same thread reads the property in process()).
-    // See the session's safe-point control plane (S11.5).
-    using SegmentSafePoint = std::function<void(const std::vector<std::shared_ptr<Element>> &)>;
+    // segment's elements and the run's stop token. The callee parks while paused and
+    // applies pending property changes to those elements ON the segment thread, so a
+    // change forward-applies to the next buffer with no data race (the same thread
+    // reads the property in process()). See the session's safe-point control plane
+    // (S11.5) and the pause primitive.
+    using SegmentSafePoint = std::function<void(const std::vector<std::shared_ptr<Element>> &, std::stop_token)>;
 
     // Threaded live runner (live phase, S10/S11.8). Decomposes the pipeline into
     // segments (cut at every Queue) and runs one std::jthread per segment, with a

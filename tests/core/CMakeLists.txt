@@ -217,3 +217,23 @@ target_link_libraries(leakflow_threaded_safe_point_tests
 )
 leakflow_configure_test_target(leakflow_threaded_safe_point_tests)
 add_test(NAME leakflow_threaded_safe_point COMMAND leakflow_threaded_safe_point_tests)
+
+add_executable(leakflow_threaded_pause_tests
+    threaded_pause_test.cpp
+)
+target_link_libraries(leakflow_threaded_pause_tests
+    PRIVATE
+        leakflow_core
+)
+leakflow_configure_test_target(leakflow_threaded_pause_tests)
+add_test(NAME leakflow_threaded_pause COMMAND leakflow_threaded_pause_tests)
+
+add_executable(leakflow_aggregator_latest_tests
+    aggregator_latest_test.cpp
+)
+target_link_libraries(leakflow_aggregator_latest_tests
+    PRIVATE
+        leakflow_core
+)
+leakflow_configure_test_target(leakflow_aggregator_latest_tests)
+add_test(NAME leakflow_aggregator_latest COMMAND leakflow_aggregator_latest_tests)

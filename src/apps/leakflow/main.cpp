@@ -15,7 +15,7 @@ namespace {
 void print_help() {
     std::cout << "Usage: leakflow [OPTIONS] [--help]\n";
     std::cout << "       leakflow [OPTIONS] run EXPRESSION\n";
-    std::cout << "       leakflow [OPTIONS] run --graph EXPRESSION\n";
+    std::cout << "       leakflow [OPTIONS] run [--graph] [--auto-start] EXPRESSION\n";
     std::cout << "       leakflow [OPTIONS] --pipeline NAME [--set "
                  "ELEMENT.PROPERTY=VALUE]\n";
     std::cout << '\n';
@@ -183,11 +183,17 @@ int main(int argc, char **argv) {
 
         if (first_argument == "run") {
             auto graph = false;
+            auto auto_start = false;
             auto expression_index = command_index + 1;
             while (expression_index < argc) {
                 const std::string_view run_option(argv[expression_index]);
                 if (run_option == "--graph") {
                     graph = true;
+                    ++expression_index;
+                    continue;
+                }
+                if (run_option == "--auto-start") {
+                    auto_start = true;
                     ++expression_index;
                     continue;
                 }
@@ -202,7 +208,7 @@ int main(int argc, char **argv) {
             return leakflow::cli::run_expression(
                 join_expression_arguments(
                     std::span(argv + expression_index, static_cast<std::size_t>(argc - expression_index))),
-                std::cout, leakflow::cli::RunExpressionOptions{.graph = graph});
+                std::cout, leakflow::cli::RunExpressionOptions{.graph = graph, .auto_start = auto_start});
         }
 
         std::string pipeline_name;

@@ -57,6 +57,21 @@ BufferQueue::Pull BufferQueue::pull(std::stop_token stop)
     return Pull{std::nullopt, false}; // NoData (stop requested / transient)
 }
 
+BufferQueue::Pull BufferQueue::try_pull()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!buffers_.empty()) {
+        Buffer buffer = std::move(buffers_.front());
+        buffers_.pop_front();
+        not_full_.notify_one();
+        return Pull{std::move(buffer), false}; // Data
+    }
+    if (closed_) {
+        return Pull{std::nullopt, true}; // EndOfStream
+    }
+    return Pull{std::nullopt, false}; // NoData (empty, not closed)
+}
+
 void BufferQueue::close()
 {
     {

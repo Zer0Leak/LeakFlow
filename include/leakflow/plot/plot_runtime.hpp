@@ -90,6 +90,9 @@ struct PlotLoopOptions {
     std::string window_title = "LeakFlow TracePlot";
     int width = 1280;
     int height = 720;
+    // Begin the run immediately on open (--auto-start); otherwise the graph opens in
+    // Stopped and waits for the Start button.
+    bool auto_start = false;
 };
 
 [[nodiscard]] std::string_view to_string(PlotBackend backend);

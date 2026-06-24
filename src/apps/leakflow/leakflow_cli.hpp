@@ -21,6 +21,7 @@ struct PipelineExpressionBuildResult {
 
 struct RunExpressionOptions {
     bool graph = false;
+    bool auto_start = false; // --auto-start: begin the run on open (else opens Stopped)
 };
 
 [[nodiscard]] std::string normalized_identifier(std::string_view text);

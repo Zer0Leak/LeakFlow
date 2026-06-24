@@ -42,6 +42,11 @@ public:
     // queue is closed-and-drained. See Pull for the 3-state result.
     [[nodiscard]] Pull pull(std::stop_token stop);
 
+    // Non-blocking consumer side: returns immediately. Data if a buffer is ready,
+    // EndOfStream if closed and drained, NoData otherwise. Used by the Latest join
+    // mode to sample the newest buffer without waiting.
+    [[nodiscard]] Pull try_pull();
+
     // Producer signals end-of-stream. Drained consumers then see EndOfStream;
     // blocked producers/consumers wake.
     void close();

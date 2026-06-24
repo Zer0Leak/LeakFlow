@@ -1186,7 +1186,7 @@ std::optional<Buffer> Pipeline::run_source_segment(const PipelineSegment &segmen
         // Between buffers, apply pending property changes (forward-apply, S11.5).
         while (!stop.stop_requested() && !sources_at_eos()) {
             if (safe_point) {
-                safe_point(segment.elements);
+                safe_point(segment.elements, stop);
             }
             last = execute_segment(segment.elements, {}, queues, stop, shared);
         }
@@ -1213,15 +1213,22 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
     // (its partner was dropped) and is discarded to realign; a Held input (a static
     // / non-live-driven branch) is a permanent wildcard, reused across many driving
     // fires and not consumed. A single input queue degenerates to a plain pull.
+    // Per-input aggregation mode (S11.1): Driving (consume; Barrier-realign by clock),
+    // Held (a static input reused as a wildcard), or Latest (sample the newest, drop
+    // intermediates). Chosen from the join element's `policy` property below.
+    enum class Mode { Driving, Held, Latest };
     struct Head {
         BufferQueue *queue = nullptr;
         const Element *queue_element = nullptr;
         const PadLink *out_link = nullptr; // Queue -> consumer, for observation + seeding
         std::string source_pad;
-        bool held = false; // reuse, never consume; its EOS does not end the segment
+        std::string sink_pad;   // the join input pad this queue feeds
+        bool auto_held = false; // not live-driven: Held under the default policy
+        Mode mode = Mode::Driving;
         std::optional<Buffer> buffer;
         bool eos = false;
     };
+    const auto retained = [](Mode mode) { return mode != Mode::Driving; };
 
     std::vector<Head> heads;
     heads.reserve(segment.input_queues.size());
@@ -1234,25 +1241,63 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
         for (const auto &link : links_) {
             if (link.source_element.get() == queue.get()) {
                 head.out_link = &link;
+                head.sink_pad = link.sink_pad_name;
             }
             // The producing branch is Held iff it is not live-driven: a static /
             // one-run input reused across the live driver's buffers (S11.3).
             if (link.sink_element.get() == queue.get()) {
-                head.held = !is_live_driven(link.source_element);
+                head.auto_held = !is_live_driven(link.source_element);
             }
         }
         heads.push_back(std::move(head));
     }
 
+    // Select the join policy from the element all input queues feed (Sync exposes a
+    // `policy` property, S11.4). Default Barrier. The primary input is the lowest-
+    // named join pad (in_0 / in0); under held/latest the rest are reused/sampled.
+    const Element *join = nullptr;
+    bool single_join = !heads.empty();
+    for (const auto &head : heads) {
+        const Element *sink = head.out_link != nullptr ? head.out_link->sink_element.get() : nullptr;
+        if (join == nullptr) {
+            join = sink;
+        } else if (join != sink) {
+            single_join = false;
+        }
+    }
+    std::string policy = "barrier";
+    if (single_join && join != nullptr) {
+        if (const auto value = join->property_as<std::string>("policy")) {
+            policy = *value;
+        }
+    }
+    std::size_t primary = 0;
+    for (std::size_t i = 1; i < heads.size(); ++i) {
+        if (heads[i].sink_pad < heads[primary].sink_pad) {
+            primary = i;
+        }
+    }
+    for (std::size_t i = 0; i < heads.size(); ++i) {
+        if (policy == "latest") {
+            heads[i].mode = (i == primary) ? Mode::Driving : Mode::Latest;
+        } else if (policy == "held") {
+            heads[i].mode = (i == primary) ? Mode::Driving : Mode::Held;
+        } else { // barrier / zip / all-required-once: auto-Held a static input, else Driving
+            heads[i].mode = heads[i].auto_held ? Mode::Held : Mode::Driving;
+        }
+    }
+
     std::optional<Buffer> last;
     while (!stop.stop_requested()) {
-        // Between fires, apply pending property changes to this segment's elements
-        // (forward-apply on the segment thread, S11.5).
+        // Between fires, park while paused and apply pending property changes to
+        // this segment's elements (forward-apply on the segment thread, S11.5).
         if (safe_point) {
-            safe_point(segment.elements);
+            safe_point(segment.elements, stop);
         }
 
-        // 1. Fill every empty head (Held heads retain their buffer across fires).
+        // 1a. Fill every empty head, blocking for a Driving input's next buffer (and
+        // for a Latest input's very first sample). Held/Latest inputs do not end the
+        // segment on EOS; a Driving input that ends, does.
         bool finished = false;
         for (auto &head : heads) {
             if (head.buffer) {
@@ -1263,11 +1308,11 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
                 break;
             }
             if (head.eos) {
-                if (!head.held) { // a driving input ended -> the segment ends
+                if (!retained(head.mode)) { // a driving input ended -> the segment ends
                     finished = true;
                     break;
                 }
-                continue; // Held + EOS without a buffer: handled by completeness below
+                continue; // retained + EOS without a buffer: handled by completeness below
             }
             auto pull = head.queue->pull(stop);
             if (pull.buffer) {
@@ -1281,7 +1326,7 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
                 head.buffer = std::move(pull.buffer);
             } else if (pull.end_of_stream) {
                 head.eos = true;
-                if (!head.held) {
+                if (!retained(head.mode)) {
                     finished = true;
                     break;
                 }
@@ -1294,6 +1339,33 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
             break;
         }
 
+        // 1b. Now that the Driving inputs are present, refresh Latest heads to the
+        // newest buffer available at fire time (sample-and-hold, dropping
+        // intermediates); never blocks.
+        for (auto &head : heads) {
+            if (head.mode != Mode::Latest || head.queue == nullptr) {
+                continue;
+            }
+            while (true) {
+                auto sample = head.queue->try_pull();
+                if (sample.buffer) {
+                    if (head.out_link != nullptr) {
+                        const std::lock_guard<std::mutex> lock(shared);
+                        emit(PipelineEvent{
+                            .kind = PipelineEventKind::BufferObserved,
+                            .buffer = buffer_observation_for(*head.out_link, *sample.buffer, next_buffer_sequence_++),
+                        });
+                    }
+                    head.buffer = std::move(sample.buffer);
+                    continue; // keep draining to the newest
+                }
+                if (sample.end_of_stream) {
+                    head.eos = true;
+                }
+                break;
+            }
+        }
+
         // 2. Every input must present a buffer to fire (a Held input that never
         // delivered cannot complete the set).
         const bool complete = std::all_of(heads.begin(), heads.end(),
@@ -1302,13 +1374,18 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
             break;
         }
 
-        // 3. Barrier realign. For every clock slot non-zero in >=2 heads (a shared
-        // generation slot), heads below the max are orphans -- monotonicity says
-        // their partner is gone -- so discard them and refill. Held inputs share no
-        // generation slot, so they are never flagged.
+        // 3. Barrier realign over the Driving inputs only (Held/Latest are wildcards).
+        // For every clock slot non-zero in >=2 driving heads (a shared generation
+        // slot), heads below the max are orphans -- monotonicity says their partner is
+        // gone -- so discard them and refill.
         std::vector<std::uint32_t> max_slot(next_slot_, 0u);
         std::vector<int> shared_count(next_slot_, 0);
+        std::size_t driving_count = 0;
         for (const auto &head : heads) {
+            if (retained(head.mode)) {
+                continue;
+            }
+            ++driving_count;
             const auto &clock = head.buffer->provenance();
             for (std::size_t s = 0; s < clock.size() && s < max_slot.size(); ++s) {
                 if (clock[s] != 0u) {
@@ -1319,6 +1396,9 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
         }
         std::vector<std::size_t> behind;
         for (std::size_t i = 0; i < heads.size(); ++i) {
+            if (retained(heads[i].mode)) {
+                continue;
+            }
             const auto &clock = heads[i].buffer->provenance();
             for (std::size_t s = 0; s < clock.size() && s < max_slot.size(); ++s) {
                 if (clock[s] != 0u && shared_count[s] >= 2 && clock[s] < max_slot[s]) {
@@ -1328,8 +1408,8 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
             }
         }
         if (!behind.empty()) {
-            if (behind.size() == heads.size()) {
-                // No head is the max on every conflicting slot: the inputs are
+            if (behind.size() == driving_count) {
+                // No driving head is the max on every conflicting slot: the inputs are
                 // mutually inconsistent, not a recoverable drop. Surface it.
                 throw std::invalid_argument("aggregator: inputs have no matchable generation");
             }
@@ -1346,9 +1426,9 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
         }
         last = execute_segment(segment.elements, std::move(live), queues, stop, shared);
 
-        // 5. Consume driving heads; retain Held heads for reuse.
+        // 5. Consume driving heads; retain Held/Latest heads for reuse.
         for (auto &head : heads) {
-            if (!head.held) {
+            if (!retained(head.mode)) {
                 head.buffer.reset();
             }
         }

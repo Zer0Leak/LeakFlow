@@ -792,7 +792,7 @@ public:
         parse_expression(normalized_expression);
 
         if (options.graph) {
-            return run_with_graph();
+            return run_with_graph(options.auto_start);
         }
 
         // Headless front door (Phase 25): execute through a PipelineSession so the
@@ -816,9 +816,10 @@ public:
     }
 
 private:
-    int run_with_graph() {
+    int run_with_graph(bool auto_start) {
         leakflow::plot::PlotLoopOptions options;
         options.window_title = "LeakFlow Pipeline Graph";
+        options.auto_start = auto_start;
         // Phase 25: drive the graph through a PipelineSession so live property
         // edits apply at safe points with downstream rerun.
         leakflow::PipelineSession session(std::move(pipeline_));

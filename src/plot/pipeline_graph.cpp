@@ -1302,22 +1302,57 @@ void PipelineControlRuntime::set_element_mutex(std::mutex *element_mutex) { elem
 
 std::mutex *PipelineControlRuntime::element_mutex() const { return element_mutex_; }
 
-void PipelineControlRuntime::request_rerun_from_sources() { rerun_requested_.store(true); }
+void PipelineControlRuntime::request_start() { start_requested_.store(true); }
 
-void PipelineControlRuntime::request_restart() { restart_requested_.store(true); }
-
-bool PipelineControlRuntime::apply_pending_actions(PipelineSession &session) {
-    bool did_work = false;
-    if (restart_requested_.exchange(false)) {
-        session.restart();
-        did_work = true;
+void PipelineControlRuntime::request_stop() {
+    user_stopped_.store(true);
+    std::function<void()> stopper;
+    {
+        const std::lock_guard<std::mutex> lock(run_stopper_mutex_);
+        stopper = run_stopper_;
     }
-    if (rerun_requested_.exchange(false)) {
-        (void)session.rerun_from_sources();
-        did_work = true;
+    if (stopper) {
+        stopper(); // interrupt a blocking run immediately
     }
-    return did_work;
 }
+
+void PipelineControlRuntime::request_pause() {
+    if (session_ != nullptr) {
+        session_->request_pause();
+    }
+}
+
+void PipelineControlRuntime::request_resume() {
+    if (session_ != nullptr) {
+        session_->request_resume();
+    }
+}
+
+void PipelineControlRuntime::request_apply() {
+    if (session_ != nullptr) {
+        session_->apply_staged(); // flush staged edits into the live queue
+    }
+}
+
+bool PipelineControlRuntime::take_start_request() { return start_requested_.exchange(false); }
+
+bool PipelineControlRuntime::take_user_stopped() { return user_stopped_.exchange(false); }
+
+void PipelineControlRuntime::set_run_stopper(std::function<void()> stopper) {
+    const std::lock_guard<std::mutex> lock(run_stopper_mutex_);
+    run_stopper_ = std::move(stopper);
+}
+
+void PipelineControlRuntime::set_auto_recompute(bool on) {
+    auto_recompute_.store(on);
+    // Orthogonal to state: manual (auto off) stages edits until Apply; auto queues
+    // them live for immediate effect, in every state.
+    if (session_ != nullptr) {
+        session_->set_manual_apply(!on);
+    }
+}
+
+bool PipelineControlRuntime::auto_recompute() const { return auto_recompute_.load(); }
 
 bool PipelineControlRuntime::set_property(std::string_view element_name, std::string_view property_name,
                                           PropertyValue value) {
@@ -2138,68 +2173,112 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
         });
     });
 
+    // Show the pipeline structure immediately, before any run -- so a graph opened in
+    // Stopped (no --auto-start) is not blank while waiting for the Start button.
+    graph_runtime->observe(PipelineEvent{
+        .kind = PipelineEventKind::TopologySnapshot,
+        .topology = session.pipeline().topology_snapshot(),
+    });
+
     std::exception_ptr failure;
-    std::jthread worker([&session, &control_runtime, &element_mutex, &failure](std::stop_token token) {
+    const bool auto_start = options.auto_start;
+    std::jthread worker([&session, &control_runtime, &element_mutex, &failure, auto_start](std::stop_token token) {
         using namespace std::chrono_literals;
         try {
-            // Live + Queue: run the threaded segment runner (S10). Each segment
-            // applies pending property edits at a between-buffer safe point, so live
-            // editing forward-applies mid-stream (S11.5) -- the safe-point mutex
-            // (element_mutex) serializes those writes against the control windows'
-            // reads. run_once blocks until EOS or window-close; the observer drives
-            // the live graph throughout.
-            if (session.pipeline().should_run_threaded()) {
-                session.set_stop_token(token);
-                session.set_safe_point_mutex(&element_mutex);
-                (void)session.run_once();
-                session.set_safe_point_mutex(nullptr);
-                while (!token.stop_requested()) {
-                    {
-                        const std::lock_guard<std::mutex> lock(element_mutex);
-                        (void)session.drain_commands(); // apply any post-stream edits
-                    }
-                    std::this_thread::sleep_for(8ms);
-                }
-                return;
-            }
-
-            bool live = false;
-            {
-                const std::lock_guard<std::mutex> lock(element_mutex);
-                // Window-close (worker stop) interrupts a paced live source
-                // mid-trace and exits the pump promptly (S11.8).
-                session.set_stop_token(token);
-                session.start();
-                live = session.pipeline().has_live_source();
-                if (!live) {
-                    (void)session.run_sweep(); // offline: one sweep up front
-                }
-            }
+            // Request-driven streaming lifecycle (Stopped/Running/Paused/Idle). A
+            // "run" produces until EOS (live) or one sweep (offline). Pause/Resume are
+            // handled inside the run by the session's safe-point park; Stop interrupts
+            // it via a run-stopper; natural completion lands in Idle (held & editable).
+            bool start_pending = auto_start;
+            session.set_state(PipelineSessionState::Stopped);
 
             while (!token.stop_requested()) {
-                bool did_work = false;
-                {
-                    const std::lock_guard<std::mutex> lock(element_mutex);
-                    if (session.pending_command_count() > 0) {
+                // ---- Stopped: wait for Start; edits only stage (no cache) ----
+                if (!start_pending) {
+                    start_pending = control_runtime.take_start_request();
+                }
+                if (!start_pending) {
+                    {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
                         (void)session.drain_commands();
-                        did_work = true;
                     }
-                    did_work = control_runtime.apply_pending_actions(session) || did_work;
+                    std::this_thread::sleep_for(8ms);
+                    continue;
                 }
-                // Live: pump one sweep (one buffer) per loop until end-of-stream so
-                // the graph and indexes advance with the stream (S11.8). Pumped
-                // OUTSIDE the element lock: a paced source blocks here on its
-                // (interruptible) pacing wait, and holding the lock across that wait
-                // would freeze open control windows for the whole inter-buffer gap.
-                // run_sweep only mutates internal element state (e.g. source
-                // cursors), never the property map the control UI reads; property
-                // writes (drain_commands) stay locked above. So the gear controls
-                // open and update live while streaming.
-                if (live && !session.pipeline().all_live_sources_at_eos()) {
-                    (void)session.run_sweep();
-                    did_work = true;
+                start_pending = false;
+                (void)control_runtime.take_user_stopped(); // clear any stale stop
+
+                // ---- Launch a run ----
+                std::stop_source run_stop;
+                const auto stop_the_run = [&run_stop, &session]() {
+                    run_stop.request_stop();
+                    session.request_resume(); // wake a paused run so it tears down
+                };
+                std::stop_callback window_cb(token, stop_the_run);
+                control_runtime.set_run_stopper(stop_the_run);
+                session.request_resume(); // never start a run paused
+                session.set_stop_token(run_stop.get_token());
+                session.set_state(PipelineSessionState::Running);
+
+                if (session.pipeline().should_run_threaded()) {
+                    session.set_safe_point_mutex(&element_mutex);
+                    (void)session.run_once(); // blocks; pause/stop handled inside the segments
+                    session.set_safe_point_mutex(nullptr);
+                } else {
+                    {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
+                        session.start();
+                        (void)session.run_sweep(); // first sweep (populates the rerun cache offline)
+                    }
+                    // A live-no-queue source streams single-threaded here, with pause
+                    // and edits applied between buffers.
+                    while (!run_stop.stop_requested() && session.pipeline().has_live_source()
+                           && !session.pipeline().all_live_sources_at_eos()) {
+                        session.wait_while_paused(run_stop.get_token());
+                        if (run_stop.stop_requested()) {
+                            break;
+                        }
+                        {
+                            const std::lock_guard<std::mutex> lock(element_mutex);
+                            (void)session.drain_commands();
+                        }
+                        (void)session.run_sweep();
+                    }
                 }
-                if (!did_work) {
+
+                control_runtime.set_run_stopper(nullptr);
+                if (token.stop_requested()) {
+                    break;
+                }
+
+                // ---- Run ended: Stopped (user) or Idle (EOS / sweep done) ----
+                if (control_runtime.take_user_stopped()) {
+                    const std::lock_guard<std::mutex> lock(element_mutex);
+                    session.stop();
+                    session.set_state(PipelineSessionState::Stopped);
+                    continue;
+                }
+                session.set_state(PipelineSessionState::Idle);
+
+                // ---- Idle: held & editable. Auto-recompute applies each edit from
+                // cache immediately; manual waits for an Apply. Start re-runs. ----
+                while (!token.stop_requested() && session.state() == PipelineSessionState::Idle) {
+                    if (control_runtime.take_start_request()) {
+                        start_pending = true;
+                        break;
+                    }
+                    if (control_runtime.take_user_stopped()) {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
+                        session.stop();
+                        session.set_state(PipelineSessionState::Stopped);
+                        break;
+                    }
+                    // Live-queued edits recompute from cache; manual-staged edits
+                    // wait in staging until Apply flushes them here. Uniform drain.
+                    if (session.pending_command_count() > 0) {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
+                        (void)session.drain_commands();
+                    }
                     std::this_thread::sleep_for(8ms);
                 }
             }

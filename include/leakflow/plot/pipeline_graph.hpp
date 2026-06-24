@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -136,11 +137,20 @@ public:
     void set_element_mutex(std::mutex *element_mutex);
     [[nodiscard]] std::mutex *element_mutex() const;
 
-    // Session control buttons (UI thread sets the request; the worker consumes it
-    // at a safe point via apply_pending_actions).
-    void request_rerun_from_sources();
-    void request_restart();
-    bool apply_pending_actions(PipelineSession &session);
+    // Player controls (Stopped/Running/Paused/Idle). The UI thread calls these;
+    // Start/Apply set a flag the worker polls, Stop invokes the worker-registered
+    // run-stopper immediately (to interrupt a blocking run), and Pause/Resume forward
+    // straight to the session's pause primitive.
+    void request_start();
+    void request_stop();
+    void request_pause();
+    void request_resume();
+    void request_apply(); // flush staged edits (manual mode); orthogonal to state
+    [[nodiscard]] bool take_start_request();
+    [[nodiscard]] bool take_user_stopped();
+    void set_run_stopper(std::function<void()> stopper); // worker registers how to stop the current run
+    void set_auto_recompute(bool on);
+    [[nodiscard]] bool auto_recompute() const;
 
     [[nodiscard]] bool set_property(std::string_view element_name, std::string_view property_name,
                                     PropertyValue value);
@@ -167,8 +177,11 @@ private:
     bool edits_enabled_ = true;
     PipelineSession *session_ = nullptr;
     std::mutex *element_mutex_ = nullptr;
-    std::atomic<bool> rerun_requested_ = false;
-    std::atomic<bool> restart_requested_ = false;
+    std::atomic<bool> start_requested_ = false;
+    std::atomic<bool> user_stopped_ = false;
+    std::atomic<bool> auto_recompute_ = true; // default: apply edits immediately
+    std::mutex run_stopper_mutex_;
+    std::function<void()> run_stopper_;
 };
 
 void draw_pipeline_graph(PipelineGraphRuntime &runtime);
