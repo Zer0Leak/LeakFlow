@@ -1167,7 +1167,8 @@ std::optional<Buffer> Pipeline::execute_segment(const std::vector<std::shared_pt
 }
 
 std::optional<Buffer> Pipeline::run_source_segment(const PipelineSegment &segment, const QueueRuntimes &queues,
-                                                   std::stop_token stop, std::mutex &shared) {
+                                                   std::stop_token stop, std::mutex &shared,
+                                                   const SegmentSafePoint &safe_point) {
     const bool has_live = std::any_of(segment.elements.begin(), segment.elements.end(),
                                       [](const auto &element) { return element->is_live(); });
     const auto sources_at_eos = [&segment]() {
@@ -1182,7 +1183,11 @@ std::optional<Buffer> Pipeline::run_source_segment(const PipelineSegment &segmen
     std::optional<Buffer> last;
     if (has_live) {
         // Pump one buffer per sweep until this segment's live sources reach EOS.
+        // Between buffers, apply pending property changes (forward-apply, S11.5).
         while (!stop.stop_requested() && !sources_at_eos()) {
+            if (safe_point) {
+                safe_point(segment.elements);
+            }
             last = execute_segment(segment.elements, {}, queues, stop, shared);
         }
     } else if (!stop.stop_requested()) {
@@ -1200,7 +1205,8 @@ std::optional<Buffer> Pipeline::run_source_segment(const PipelineSegment &segmen
 }
 
 std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segment, const QueueRuntimes &queues,
-                                                     std::stop_token stop, std::mutex &shared) {
+                                                     std::stop_token stop, std::mutex &shared,
+                                                     const SegmentSafePoint &safe_point) {
     // The aggregator (S11.1-2). One held "head" per input queue. Each fire it
     // Barrier-matches the heads by vector clock (default policy): heads sharing a
     // clock slot must agree; a head strictly behind on a shared slot is an orphan
@@ -1240,6 +1246,12 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
 
     std::optional<Buffer> last;
     while (!stop.stop_requested()) {
+        // Between fires, apply pending property changes to this segment's elements
+        // (forward-apply on the segment thread, S11.5).
+        if (safe_point) {
+            safe_point(segment.elements);
+        }
+
         // 1. Fill every empty head (Held heads retain their buffer across fires).
         bool finished = false;
         for (auto &head : heads) {
@@ -1350,7 +1362,7 @@ std::optional<Buffer> Pipeline::run_consumer_segment(const PipelineSegment &segm
     return last;
 }
 
-std::optional<Buffer> Pipeline::run_threaded(std::stop_token stop) {
+std::optional<Buffer> Pipeline::run_threaded(std::stop_token stop, SegmentSafePoint safe_point) {
     // Unify the external stop with an internal one so a segment failure can stop
     // peers (otherwise a consumer could block forever on a queue the failed
     // producer never closed). Elements and queue waits observe this unified token.
@@ -1387,12 +1399,12 @@ std::optional<Buffer> Pipeline::run_threaded(std::stop_token stop) {
         threads.reserve(segments.size());
         for (std::size_t index = 0; index < segments.size(); ++index) {
             threads.emplace_back([this, &segments, index, &queues, &shared, token, &terminal_outputs, &failure,
-                                  &failure_mutex, &run_stop]() {
+                                  &failure_mutex, &run_stop, &safe_point]() {
                 try {
                     const auto &segment = segments[index];
                     terminal_outputs[index] = segment.input_queues.empty()
-                                                  ? run_source_segment(segment, queues, token, shared)
-                                                  : run_consumer_segment(segment, queues, token, shared);
+                                                  ? run_source_segment(segment, queues, token, shared, safe_point)
+                                                  : run_consumer_segment(segment, queues, token, shared, safe_point);
                 } catch (...) {
                     {
                         const std::lock_guard<std::mutex> lock(failure_mutex);

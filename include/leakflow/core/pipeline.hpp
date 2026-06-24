@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -104,13 +105,21 @@ public:
 
     [[nodiscard]] std::optional<Buffer> run();
 
+    // Invoked by each segment thread at a between-buffer safe point with that
+    // segment's elements. The callee applies pending property changes to those
+    // elements ON the segment thread, so the change forward-applies to the next
+    // buffer with no data race (the same thread reads the property in process()).
+    // See the session's safe-point control plane (S11.5).
+    using SegmentSafePoint = std::function<void(const std::vector<std::shared_ptr<Element>> &)>;
+
     // Threaded live runner (live phase, S10/S11.8). Decomposes the pipeline into
     // segments (cut at every Queue) and runs one std::jthread per segment, with a
     // BufferQueue per Queue as the thread-safe cross-segment handoff. A Queue-free
     // pipeline is a single segment and runs on one streaming thread (equivalent to
     // run()). Honors the cooperative stop token; on a segment failure, peers are
     // stopped so none hang on a queue. Elements stay synchronous and thread-unaware.
-    [[nodiscard]] std::optional<Buffer> run_threaded(std::stop_token stop);
+    // The optional safe_point is called between buffers per segment (S11.5).
+    [[nodiscard]] std::optional<Buffer> run_threaded(std::stop_token stop, SegmentSafePoint safe_point = {});
 
 private:
     [[nodiscard]] std::vector<std::shared_ptr<Element>> linked_execution_order() const;
@@ -126,9 +135,11 @@ private:
     // outputs to BufferQueues. `shared` guards the pipeline's cross-thread counters.
     using QueueRuntimes = std::map<const Element *, std::shared_ptr<BufferQueue>>;
     std::optional<Buffer> run_source_segment(const PipelineSegment &segment, const QueueRuntimes &queues,
-                                             std::stop_token stop, std::mutex &shared);
+                                             std::stop_token stop, std::mutex &shared,
+                                             const SegmentSafePoint &safe_point);
     std::optional<Buffer> run_consumer_segment(const PipelineSegment &segment, const QueueRuntimes &queues,
-                                               std::stop_token stop, std::mutex &shared);
+                                               std::stop_token stop, std::mutex &shared,
+                                               const SegmentSafePoint &safe_point);
     std::optional<Buffer> execute_segment(const std::vector<std::shared_ptr<Element>> &order,
                                           std::map<const Element *, std::map<std::string, Buffer>> live,
                                           const QueueRuntimes &queues, std::stop_token stop, std::mutex &shared);

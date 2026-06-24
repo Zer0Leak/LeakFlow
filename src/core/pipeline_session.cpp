@@ -3,7 +3,10 @@
 #include "leakflow/log/logger.hpp"
 
 #include <exception>
+#include <memory>
+#include <set>
 #include <utility>
+#include <vector>
 
 namespace leakflow {
 namespace {
@@ -85,6 +88,11 @@ void PipelineSession::set_stop_token(std::stop_token token)
     pipeline_.set_stop_token(std::move(token));
 }
 
+void PipelineSession::set_safe_point_mutex(std::mutex *mutex)
+{
+    safe_point_mutex_ = mutex;
+}
+
 PipelineSessionState PipelineSession::state() const
 {
     return state_;
@@ -122,7 +130,21 @@ std::optional<Buffer> PipelineSession::run_once()
     // door has no mid-run control plane, so running to completion is the whole job.
     if (pipeline_.should_run_threaded()) {
         state_ = PipelineSessionState::Running;
-        auto output = pipeline_.run_threaded(stop_token_);
+        forward_only_apply_ = true;
+        std::optional<Buffer> output;
+        try {
+            // Each segment thread applies its own pending commands at a between-buffer
+            // safe point, so live edits forward-apply mid-stream (S11.5).
+            output = pipeline_.run_threaded(
+                stop_token_, [this](const std::vector<std::shared_ptr<Element>> &elements) {
+                    apply_commands_for(elements);
+                });
+        } catch (...) {
+            forward_only_apply_ = false;
+            state_ = PipelineSessionState::Stopped;
+            throw;
+        }
+        forward_only_apply_ = false;
         state_ = PipelineSessionState::Stopped;
         return output;
     }
@@ -245,8 +267,55 @@ void PipelineSession::emit(PipelineEvent event)
     }
 }
 
+void PipelineSession::apply_commands_for(const std::vector<std::shared_ptr<Element>> &elements)
+{
+    if (elements.empty()) {
+        return;
+    }
+    std::set<std::string> names;
+    for (const auto &element : elements) {
+        names.insert(element->name());
+    }
+
+    // Atomically remove the commands for this segment's elements from the shared
+    // queue (last-wins per element/property is preserved by submit()).
+    std::vector<SetPropertyCommand> mine;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        std::vector<SetPropertyCommand> rest;
+        rest.reserve(pending_.size());
+        for (auto &command : pending_) {
+            if (names.contains(command.element_name)) {
+                mine.push_back(std::move(command));
+            } else {
+                rest.push_back(std::move(command));
+            }
+        }
+        pending_.swap(rest);
+    }
+
+    if (mine.empty()) {
+        return;
+    }
+
+    // Serialize against a concurrent UI reader (the graph) only when there is
+    // actually something to apply, so the common no-command safe point is lock-free.
+    std::unique_lock<std::mutex> ui_lock;
+    if (safe_point_mutex_ != nullptr) {
+        ui_lock = std::unique_lock<std::mutex>(*safe_point_mutex_);
+    }
+    for (const auto &command : mine) {
+        apply_command(command);
+    }
+}
+
 void PipelineSession::apply_command(const SetPropertyCommand &command)
 {
+    // Serialize session-state mutations (generation_, event sequence, observer)
+    // against other segment threads applying commands concurrently. Per-element
+    // property writes are already single-thread (the element's owning segment).
+    std::lock_guard<std::mutex> control_lock(control_mutex_);
+
     const PropertyEffect no_effect{};
     auto element = pipeline_.find_element(command.element_name);
     if (!element) {
@@ -316,7 +385,9 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
         // downstream) from cached inputs. No new configuration epoch: a display
         // change is not a new data generation.
         try {
-            if (state_ != PipelineSessionState::Stopped) {
+            // forward_only_apply_: a threaded run streams continuously, so never
+            // rerun -- the next buffer reprocesses with the new value (S11.5).
+            if (state_ != PipelineSessionState::Stopped && !forward_only_apply_) {
                 if (pipeline_.caching_enabled()) {
                     (void)pipeline_.rerun_from(element);
                 } else {
@@ -356,9 +427,10 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
     try {
         if (state_ == PipelineSessionState::Stopped) {
             // No live run to update; the next run_sweep will pick up the change.
-        } else if (live_driven) {
+        } else if (live_driven || forward_only_apply_) {
             // Forward: the change applies to the next pumped buffer. No cache
-            // re-emit, no stall (S11.5).
+            // re-emit, no stall (S11.5). During a threaded run (forward_only_apply_)
+            // every change is forward -- segments stream with no rerun point.
         } else if (force_restart) {
             pipeline_.stop_all();
             pipeline_.start_all();

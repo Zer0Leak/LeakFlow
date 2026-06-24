@@ -207,3 +207,13 @@ target_link_libraries(leakflow_threaded_runner_tests
 )
 leakflow_configure_test_target(leakflow_threaded_runner_tests)
 add_test(NAME leakflow_threaded_runner COMMAND leakflow_threaded_runner_tests)
+
+add_executable(leakflow_threaded_safe_point_tests
+    threaded_safe_point_test.cpp
+)
+target_link_libraries(leakflow_threaded_safe_point_tests
+    PRIVATE
+        leakflow_core
+)
+leakflow_configure_test_target(leakflow_threaded_safe_point_tests)
+add_test(NAME leakflow_threaded_safe_point COMMAND leakflow_threaded_safe_point_tests)

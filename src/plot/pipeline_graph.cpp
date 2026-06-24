@@ -841,10 +841,19 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
         return;
     }
 
+    // Commit a numeric edit only when the user finishes (Enter / focus-out) or
+    // clicks a +/- step -- never on each typed digit, which would apply half-typed
+    // values (e.g. 0 while typing "0.5"). While actively typing, IsItemActive() is
+    // true, so the intermediate value is never committed.
+    const auto numeric_commit = [](bool changed) {
+        return ImGui::IsItemDeactivatedAfterEdit() || (changed && !ImGui::IsItemActive());
+    };
+
     if (auto integer_value = std::get_if<std::int64_t>(&value)) {
         auto edited = *integer_value;
         const auto step = std::int64_t{1};
-        if (ImGui::InputScalar("##value", ImGuiDataType_S64, &edited, &step)) {
+        const bool changed = ImGui::InputScalar("##value", ImGuiDataType_S64, &edited, &step);
+        if (numeric_commit(changed)) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
         return;
@@ -852,7 +861,8 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
 
     if (auto double_value = std::get_if<double>(&value)) {
         auto edited = *double_value;
-        if (ImGui::InputDouble("##value", &edited, 0.0, 0.0, "%.6g")) {
+        const bool changed = ImGui::InputDouble("##value", &edited, 0.0, 0.0, "%.6g");
+        if (numeric_commit(changed)) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
         return;
@@ -883,11 +893,13 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
     if (auto interval = std::get_if<IntInterval>(&value)) {
         auto edited = *interval;
         const auto step = std::int64_t{1};
-        auto changed = false;
-        changed = ImGui::InputScalar("begin", ImGuiDataType_S64, &edited.begin, &step) || changed;
+        bool commit = false;
+        const bool changed_begin = ImGui::InputScalar("begin", ImGuiDataType_S64, &edited.begin, &step);
+        commit = numeric_commit(changed_begin) || commit;
         ImGui::SameLine();
-        changed = ImGui::InputScalar("end", ImGuiDataType_S64, &edited.end, &step) || changed;
-        if (changed) {
+        const bool changed_end = ImGui::InputScalar("end", ImGuiDataType_S64, &edited.end, &step);
+        commit = numeric_commit(changed_end) || commit;
+        if (commit) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
         return;
@@ -895,11 +907,13 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
 
     if (auto interval = std::get_if<DoubleInterval>(&value)) {
         auto edited = *interval;
-        auto changed = false;
-        changed = ImGui::InputDouble("begin", &edited.begin, 0.0, 0.0, "%.6g") || changed;
+        bool commit = false;
+        const bool changed_begin = ImGui::InputDouble("begin", &edited.begin, 0.0, 0.0, "%.6g");
+        commit = numeric_commit(changed_begin) || commit;
         ImGui::SameLine();
-        changed = ImGui::InputDouble("end", &edited.end, 0.0, 0.0, "%.6g") || changed;
-        if (changed) {
+        const bool changed_end = ImGui::InputDouble("end", &edited.end, 0.0, 0.0, "%.6g");
+        commit = numeric_commit(changed_end) || commit;
+        if (commit) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
         return;
@@ -2128,20 +2142,21 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
     std::jthread worker([&session, &control_runtime, &element_mutex, &failure](std::stop_token token) {
         using namespace std::chrono_literals;
         try {
-            // Live + Queue: drive the threaded segment runner (S10). run_once blocks
-            // until every segment reaches EOS or the window closes (cooperative
-            // stop), visualizing the stream through the observer as segment threads
-            // emit. Property edits submitted during a threaded run are applied after
-            // it returns (mid-threaded-run live editing is a follow-up: it needs a
-            // per-segment safe point, since segments run continuously with no sweep
-            // boundary). The graph and tooltips stay responsive throughout.
+            // Live + Queue: run the threaded segment runner (S10). Each segment
+            // applies pending property edits at a between-buffer safe point, so live
+            // editing forward-applies mid-stream (S11.5) -- the safe-point mutex
+            // (element_mutex) serializes those writes against the control windows'
+            // reads. run_once blocks until EOS or window-close; the observer drives
+            // the live graph throughout.
             if (session.pipeline().should_run_threaded()) {
                 session.set_stop_token(token);
+                session.set_safe_point_mutex(&element_mutex);
                 (void)session.run_once();
+                session.set_safe_point_mutex(nullptr);
                 while (!token.stop_requested()) {
                     {
                         const std::lock_guard<std::mutex> lock(element_mutex);
-                        (void)session.drain_commands();
+                        (void)session.drain_commands(); // apply any post-stream edits
                     }
                     std::this_thread::sleep_for(8ms);
                 }

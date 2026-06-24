@@ -56,6 +56,12 @@ public:
     // interruptible on Ctrl+C / window-close.
     void set_stop_token(std::stop_token token);
 
+    // Optional mutex held while applying commands at a threaded-run safe point
+    // (S11.5). A UI that reads live element state concurrently (the graph's control
+    // windows) passes the same mutex so its reads serialize against these writes.
+    // Headless (no concurrent reader) leaves it null. Not owned.
+    void set_safe_point_mutex(std::mutex *mutex);
+
     [[nodiscard]] PipelineSessionState state() const;
     // Control-plane configuration-generation counter (Phase 27, renamed from
     // epoch). Per-buffer generation now lives in the vector clock; this is
@@ -76,6 +82,9 @@ public:
     [[nodiscard]] std::size_t pending_command_count() const;
 
 private:
+    // Safe-point callback for the threaded runner (S11.5): apply pending commands
+    // targeting `elements` on the calling segment thread, forward-only (no rerun).
+    void apply_commands_for(const std::vector<std::shared_ptr<Element>> &elements);
     void apply_command(const SetPropertyCommand &command);
     [[nodiscard]] bool replay_set_is_replayable(const std::shared_ptr<Element> &element) const;
     void emit_command(PipelineCommandStatus status, const std::shared_ptr<Element> &element,
@@ -92,6 +101,17 @@ private:
     mutable std::mutex queue_mutex_;
     std::vector<SetPropertyCommand> pending_;
     std::stop_token stop_token_;
+
+    // Serializes apply_command across segment threads during a threaded run (it
+    // touches generation_ / event sequence). Property writes themselves are
+    // single-thread-per-element (the owning segment), so no per-element lock.
+    std::mutex control_mutex_;
+    // While a threaded run is active, every command applies forward-only (no rerun):
+    // segments stream continuously, so the change lands on the next buffer (S11.5).
+    bool forward_only_apply_ = false;
+    // Serializes safe-point command application against a concurrent UI reader (the
+    // graph). Null when there is no such reader (headless). Not owned.
+    std::mutex *safe_point_mutex_ = nullptr;
 };
 
 } // namespace leakflow
