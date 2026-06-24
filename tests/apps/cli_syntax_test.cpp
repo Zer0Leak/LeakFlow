@@ -436,6 +436,51 @@ int main()
         return 1;
     }
 
+    // Creation-with-pad: `Sync@s.in_0` creates and addresses an (on-request) input
+    // pad inline, so a fan-in join can be wired without a separate declaration. The
+    // join is declared after its inputs (source-before-sink add order).
+    {
+        auto join = leakflow::cli::build_builtin_pipeline_from_expression(
+            "FakeSrc@a ! Queue@qa ; FakeSrc@b ! Queue@qb ; "
+            "@qa.src ! Sync@s.in_0 ; @qb.src ! @s.in_1 ; @s.out_0 ! FakeSink ; @s.out_1 ! FakeSink");
+        const auto &links = join.pipeline.links();
+        const auto links_into = [&](const char *sink, const char *pad) {
+            for (const auto &link : links) {
+                if (link.sink_element->name() == sink && link.sink_pad_name == pad) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const auto links_from = [&](const char *source, const char *pad) {
+            for (const auto &link : links) {
+                if (link.source_element->name() == source && link.source_pad_name == pad) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (!expect(join.pipeline.find_element("s") != nullptr, "creation-with-pad did not create the Sync element")) {
+            return 1;
+        }
+        if (!expect(links_into("s", "in_0") && links_into("s", "in_1"),
+                    "creation-with-pad did not wire Sync.in_0 / in_1")) {
+            return 1;
+        }
+        if (!expect(links_from("s", "out_0") && links_from("s", "out_1"),
+                    "creation-with-pad did not wire Sync.out_0 / out_1")) {
+            return 1;
+        }
+    }
+
+    // A pad selector that matches no template is rejected at parse time.
+    if (!expect(throws_invalid_argument([] {
+            (void)leakflow::cli::build_builtin_pipeline_from_expression("FakeSrc@a ! Queue@qa ; @qa.src ! Sync@s.nope");
+        }),
+            "creation-with-pad accepted an unknown pad")) {
+        return 1;
+    }
+
     leakflow::ElementFactoryRegistry core_factories;
     leakflow::plugins::core::register_element_factories(core_factories);
     auto custom_pipeline = leakflow::cli::build_pipeline_from_expression(

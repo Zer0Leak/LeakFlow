@@ -904,10 +904,24 @@ private:
         const auto element = create_element(type_name, creation_name);
         apply_properties(*element, property_text, NamePropertyMode::Allow);
 
+        // Optional pad selector on creation: `Type@name.pad` addresses a specific
+        // (possibly on-request) pad of the just-created element -- e.g. a fan-in join
+        // `... ! Sync@s.in_0` or a fan-out `Tee@t.src_0 ! ...`. The same instance is
+        // referenced later with `@name.other_pad` (see parse_reference). Note the
+        // join must be declared after its inputs (source-before-sink add order).
+        std::optional<std::string> pad_name;
+        bool pad_is_template = false;
+        if (index < text.size() && text[index] == '.') {
+            ++index;
+            pad_name = parse_pad_selector(text, index);
+            pad_is_template = has_unsigned_pad_placeholder(*pad_name);
+            skip_spaces(text, index);
+        }
+
         while (index < text.size()) {
             if (text[index] == '[') {
                 const auto close = find_matching(text, index, '[', ']');
-                add_pad_caps_annotation(element, std::nullopt,
+                add_pad_caps_annotation(element, pad_name,
                                         parse_caps_annotation(text.substr(index + 1, close - index - 1)));
                 index = close + 1;
                 skip_spaces(text, index);
@@ -915,7 +929,7 @@ private:
             }
             if (text[index] == '{') {
                 const auto close = find_matching(text, index, '{', '}');
-                add_pad_metadata_annotation(element, std::nullopt, false,
+                add_pad_metadata_annotation(element, pad_name, pad_is_template,
                                             parse_metadata_annotation(text.substr(index + 1, close - index - 1)));
                 index = close + 1;
                 skip_spaces(text, index);
@@ -924,10 +938,14 @@ private:
 
             throw std::invalid_argument("unexpected token " + token_preview(text, index) + " after element creation " +
                                         creation_label(type_name, explicit_name) +
-                                        "; expected '(', '[', '{', '!', or ';'");
+                                        "; expected '.', '(', '[', '{', '!', or ';'");
         }
 
-        return Endpoint{element, std::nullopt};
+        if (pad_name && !pad_is_template) {
+            validate_pad_exists(*element, *pad_name);
+        }
+
+        return Endpoint{element, std::move(pad_name), pad_is_template};
     }
 
     [[nodiscard]] Endpoint parse_reference(std::string_view text) {
