@@ -78,6 +78,9 @@ public:
     void request_resume();
     [[nodiscard]] bool is_paused() const;
     void wait_while_paused(std::stop_token stop);
+    // Wait briefly (a tick) for resume/stop while paused, so a caller can re-apply
+    // pending edits during the pause rather than only on resume.
+    void wait_paused_tick(std::stop_token stop);
 
     [[nodiscard]] PipelineSessionState state() const;
     // Worker-facing: drive the streaming lifecycle (Running on a run start, Idle when

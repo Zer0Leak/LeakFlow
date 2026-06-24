@@ -841,28 +841,32 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
         return;
     }
 
-    // Commit a numeric edit only when the user finishes (Enter / focus-out) or
-    // clicks a +/- step -- never on each typed digit, which would apply half-typed
-    // values (e.g. 0 while typing "0.5"). While actively typing, IsItemActive() is
-    // true, so the intermediate value is never committed.
-    const auto numeric_commit = [](bool changed) {
-        return ImGui::IsItemDeactivatedAfterEdit() || (changed && !ImGui::IsItemActive());
-    };
-
+    // A typed numeric value commits only on finish (Enter / focus-out), never on each
+    // keystroke (which would apply half-typed values like 0 while typing "0.5"). The
+    // built-in InputScalar +/- steps are unreliable to detect, so we render our own
+    // -/+ buttons that commit immediately.
     if (auto integer_value = std::get_if<std::int64_t>(&value)) {
         auto edited = *integer_value;
-        const auto step = std::int64_t{1};
-        const bool changed = ImGui::InputScalar("##value", ImGuiDataType_S64, &edited, &step);
-        if (numeric_commit(changed)) {
+        ImGui::SetNextItemWidth(140.0F);
+        ImGui::InputScalar("##value", ImGuiDataType_S64, &edited, nullptr); // no built-in steps
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
             (void)runtime.set_property(element.name(), spec.name, edited);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("-")) {
+            (void)runtime.set_property(element.name(), spec.name, *integer_value - 1);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("+")) {
+            (void)runtime.set_property(element.name(), spec.name, *integer_value + 1);
         }
         return;
     }
 
     if (auto double_value = std::get_if<double>(&value)) {
         auto edited = *double_value;
-        const bool changed = ImGui::InputDouble("##value", &edited, 0.0, 0.0, "%.6g");
-        if (numeric_commit(changed)) {
+        ImGui::InputDouble("##value", &edited, 0.0, 0.0, "%.6g"); // step 0: no built-in buttons
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
         return;
@@ -892,13 +896,12 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
 
     if (auto interval = std::get_if<IntInterval>(&value)) {
         auto edited = *interval;
-        const auto step = std::int64_t{1};
         bool commit = false;
-        const bool changed_begin = ImGui::InputScalar("begin", ImGuiDataType_S64, &edited.begin, &step);
-        commit = numeric_commit(changed_begin) || commit;
+        ImGui::InputScalar("begin", ImGuiDataType_S64, &edited.begin, nullptr);
+        commit = ImGui::IsItemDeactivatedAfterEdit() || commit;
         ImGui::SameLine();
-        const bool changed_end = ImGui::InputScalar("end", ImGuiDataType_S64, &edited.end, &step);
-        commit = numeric_commit(changed_end) || commit;
+        ImGui::InputScalar("end", ImGuiDataType_S64, &edited.end, nullptr);
+        commit = ImGui::IsItemDeactivatedAfterEdit() || commit;
         if (commit) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }
@@ -908,11 +911,11 @@ void draw_property_editor(PipelineControlRuntime &runtime, const Element &elemen
     if (auto interval = std::get_if<DoubleInterval>(&value)) {
         auto edited = *interval;
         bool commit = false;
-        const bool changed_begin = ImGui::InputDouble("begin", &edited.begin, 0.0, 0.0, "%.6g");
-        commit = numeric_commit(changed_begin) || commit;
+        ImGui::InputDouble("begin", &edited.begin, 0.0, 0.0, "%.6g");
+        commit = ImGui::IsItemDeactivatedAfterEdit() || commit;
         ImGui::SameLine();
-        const bool changed_end = ImGui::InputDouble("end", &edited.end, 0.0, 0.0, "%.6g");
-        commit = numeric_commit(changed_end) || commit;
+        ImGui::InputDouble("end", &edited.end, 0.0, 0.0, "%.6g");
+        commit = ImGui::IsItemDeactivatedAfterEdit() || commit;
         if (commit) {
             (void)runtime.set_property(element.name(), spec.name, edited);
         }

@@ -2,6 +2,7 @@
 
 #include "leakflow/log/logger.hpp"
 
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <set>
@@ -127,6 +128,13 @@ void PipelineSession::wait_while_paused(std::stop_token stop)
     pause_cv_.wait(lock, std::move(stop), [this]() { return !paused_.load(); });
 }
 
+void PipelineSession::wait_paused_tick(std::stop_token stop)
+{
+    std::unique_lock<std::mutex> lock(pause_mutex_);
+    pause_cv_.wait_for(lock, std::move(stop), std::chrono::milliseconds(50),
+                       [this]() { return !paused_.load(); });
+}
+
 PipelineSessionState PipelineSession::state() const
 {
     return state_.load();
@@ -176,8 +184,16 @@ std::optional<Buffer> PipelineSession::run_once()
             // safe point, so live edits forward-apply mid-stream (S11.5).
             output = pipeline_.run_threaded(
                 stop_token_, [this](const std::vector<std::shared_ptr<Element>> &elements, std::stop_token stop) {
-                    wait_while_paused(std::move(stop));
+                    // Apply pending edits now; while paused, keep applying edits made
+                    // during the pause so they are SET on the element immediately
+                    // (Auto mode) -- the stream stays frozen, the visible result
+                    // updates on Resume. (Manual mode stages edits, so nothing here
+                    // applies until Apply flushes them: batch-on-resume.)
                     apply_commands_for(elements);
+                    while (is_paused() && !stop.stop_requested()) {
+                        wait_paused_tick(stop);
+                        apply_commands_for(elements);
+                    }
                 });
         } catch (...) {
             forward_only_apply_ = false;
