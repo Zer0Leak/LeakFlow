@@ -22,11 +22,18 @@ def _unquote(s: str) -> str:
 
 
 def tensor_summary(valobj: lldb.SBValue, _internal_dict) -> str:
-    p = _expr_path(valobj)
-    if not p:
-        return ""
-
-    expr = f"dtv(&({p}))"
+    # CodeLLDB's Watch evaluator may expose a C++ reference through an
+    # expression path such as `*(targets)`, even though `targets` is already a
+    # reference. Calling dtv through the value's load address avoids generating
+    # invalid expressions such as `&(*(targets))`.
+    address = valobj.GetLoadAddress()
+    if address != lldb.LLDB_INVALID_ADDRESS:
+        expr = f"dtv((const at::Tensor*){address})"
+    else:
+        p = _expr_path(valobj)
+        if not p:
+            return ""
+        expr = f"dtv(&({p}))"
     opts = lldb.SBExpressionOptions()
     opts.SetTimeoutInMicroSeconds(200000)  # 200 ms
     opts.SetFetchDynamicValue(lldb.eDynamicCanRunTarget)
@@ -34,7 +41,8 @@ def tensor_summary(valobj: lldb.SBValue, _internal_dict) -> str:
 
     v = valobj.GetFrame().EvaluateExpression(expr, opts)
     if not v.IsValid() or v.GetError().Fail():
-        return "<tensor: eval failed>"
+        error = v.GetError().GetCString() if v.IsValid() else "invalid result"
+        return f"<tensor: eval failed: {error}>"
 
     return _unquote(v.GetSummary() or v.GetValue() or "")
 

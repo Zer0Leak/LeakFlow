@@ -5,6 +5,7 @@
       "name": "Debug leakflow run --graph (lldb / CodeLLDB)",
       "type": "lldb",
       "request": "launch",
+      "expressions": "simple",
       "program": "${workspaceFolder}/build/leakflow",
       "args": [
         "--log-level",
