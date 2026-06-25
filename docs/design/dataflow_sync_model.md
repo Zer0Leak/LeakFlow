@@ -733,10 +733,18 @@ uniform everywhere.
 |---|---|---|---|---|
 | live-driven element (e.g. source `sample_rate_hz`) | forward → next buffer | set now (Auto) / staged (Manual); effect on Resume | stage forward (effect on next Start) | stage for next Start |
 | one-run / offline element | n/a (forward) | n/a | **recompute from cache** (`rerun_from`) | stage for next Start |
-| `Queue.max_size` (the `BufferQueue` capacity) | applied at the **next Start** only — capacity is fixed per run; you cannot resize a live queue | — | takes effect at next Start | takes effect at next Start |
+| **restart-scoped structural** — `Queue.max_size`, `Sync.policy` | value sticks, but effect only at the **next Start** | value sticks; effect at next Start | takes effect at next Start | takes effect at next Start |
 
-`Queue.max_size` is intentionally **restart-scoped**: the `BufferQueue` is created
-when the run starts, and resizing a live queue would drop/reorder in-flight buffers.
+These are intentionally **restart-scoped** (read once when the run starts):
+
+- **`Queue.max_size`** — the `BufferQueue` capacity is fixed per run; resizing a live
+  queue would drop/reorder in-flight buffers.
+- **`Sync.policy`** — the aggregator reads the join's policy once and fixes each
+  input's mode (Driving / Held / Latest) before streaming. Re-pairing mid-stream
+  would mishandle buffers already held at the queue heads (a `Held`/`Latest` wildcard
+  becoming `Driving`, etc.), and a pairing change *is* a new output generation. So
+  edit it in Stopped/Idle, then **Start**. (You may type a new value while
+  Running/Paused — it sticks — but it bites on the next Start.)
 
 ### 13.6 Implementation pointers
 
@@ -852,9 +860,19 @@ the same instance. Note the idiom: **declare each input chain first, then the jo
 
 ### 14.7 Sync policy — Latest (sample-newest)
 
-Set `Sync(policy=...)` to choose how it pairs (`barrier` default | `zip` |
-`all-required-once` | `held` | `latest`). `latest` makes the primary input drive and
-the rest sample the **newest** buffer, dropping intermediates:
+Set `Sync(policy=...)` to choose how it pairs. The five policies:
+
+- **symmetric** (all inputs treated alike — no per-pad config): `barrier` (default,
+  match by vector-clock identity), `zip` (pair by arrival position, 1:1), and
+  `all-required-once` (fire once when all present).
+- **asymmetric** (one input drives, the rest are reused/sampled): `held` (reuse a
+  static input as a wildcard) and `latest` (sample the **newest**, dropping
+  intermediates, never waiting).
+
+For the asymmetric policies the **driver is `in_0`** (the lowest-numbered input pad)
+by convention; `in_1`, `in_2`, … are the held/sampled inputs. There is **one policy
+per `Sync`**, not per pad, and it is **restart-scoped** (read once per run — see
+§13.5). `latest` example (traces drive `in_0`, plaintexts sampled on `in_1`):
 
 ```bash
 ./build/leakflow run \
