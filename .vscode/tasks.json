@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build leakflow (debug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build", "-j", "--target", "leakflow"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": {
+        "owner": "cpp",
+        "fileLocation": ["autoDetect", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.*?):(\\d+):(\\d+):\\s+(warning|error|note):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      },
+      "detail": "Incremental build of the leakflow target (assumes build/ is already configured)."
+    },
+    {
+      "label": "configure (debug, clang + libtorch)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", ".",
+        "-B", "build",
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_PREFIX_PATH=${env:HOME}/.local/lib/libtorch"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "CXX": "clang++"
+        }
+      },
+      "problemMatcher": [],
+      "detail": "Run once (or after CMakeLists changes) before the build task."
+    }
+  ]
+}

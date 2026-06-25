@@ -7,6 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(LEAKFLOW_WITH_CUDA "Build the optional CUDA smoke executable" OFF)
 option(LEAKFLOW_BUILD_EXAMPLES "Build optional LeakFlow tutorial example applications" OFF)
+option(LEAKFLOW_TORCH_DEBUG "Build and link tensor debug helpers (dtv/ptv/ps) for LLDB/GDB" ON)
 
 include(CTest)
 include(FetchContent)
@@ -42,6 +43,11 @@ add_subdirectory(src/plugins/base)
 add_subdirectory(src/plugins/extras)
 add_subdirectory(src/plugins/crypto)
 add_subdirectory(src/plugins/plot)
+
+if(LEAKFLOW_TORCH_DEBUG)
+    add_subdirectory(src/debug)
+endif()
+
 add_subdirectory(src/apps)
 
 if(LEAKFLOW_BUILD_EXAMPLES)

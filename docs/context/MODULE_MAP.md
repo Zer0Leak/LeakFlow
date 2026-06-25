@@ -68,7 +68,13 @@ plugins for `leakflow run` and tutorial applications.
 | Plot / graph UI | `leakflow_plot` | `include/leakflow/plot` | `src/plot` | focused non-visual tests only | `docs/context/modules/plot.md` |
 | Plot plugins | `leakflow_plugins_plot` | `include/leakflow/plugins/plot` | `src/plugins/plot` | `tests/plugins/plot` plus manual GUI checks | `docs/context/modules/plot.md` |
 | Apps / CLI | `leakflow`, `leakflow-ls`, `leakflow_cli` | `src/apps/leakflow/leakflow_cli.hpp` | `src/apps/{common,leakflow,leakflow_ls,cuda_smoke}` | `tests/apps` | relevant plugin/module context |
+| Torch debug | `leakflow_torch_debug` | `include/leakflow/debug` | `src/debug` | none (dev-only) | this row + `.vscode/launch.json`, `torch_lldb.py` |
 | GUI | none yet | none yet | none yet | none yet | `docs/context/modules/gui.md` |
+
+`leakflow_torch_debug` is a **dev-only** helper, not part of the runtime
+architecture: an `OBJECT` library (gated by `-DLEAKFLOW_TORCH_DEBUG`, default ON)
+providing C-linkage tensor-inspection entry points (`dtv`/`ptv`/`ps`/`pt`) that
+LLDB/GDB calls. It links into `leakflow`; any debuggable target may opt in.
 
 ## Source Reading Patterns
 

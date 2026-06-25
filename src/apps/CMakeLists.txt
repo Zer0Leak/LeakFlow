@@ -34,6 +34,15 @@ set_target_properties(leakflow PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
+# Link the tensor debug helpers (dtv/ptv/ps) into leakflow for LLDB/GDB. The
+# leakflow_torch_debug OBJECT library (src/debug) lands its objects directly in
+# the executable, so the C-linkage entry points are never pruned. Built and
+# linked only when -DLEAKFLOW_TORCH_DEBUG=ON (the default).
+if(LEAKFLOW_TORCH_DEBUG)
+    target_link_libraries(leakflow PRIVATE leakflow_torch_debug)
+    target_compile_definitions(leakflow PRIVATE LEAKFLOW_TORCH_DEBUG=1)
+endif()
+
 add_executable(leakflow-ls
     common/terminal_pager.cpp
     leakflow_ls/main.cpp

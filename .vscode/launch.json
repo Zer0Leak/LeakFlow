@@ -1,0 +1,65 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug leakflow run --graph (lldb / CodeLLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/leakflow",
+      "args": [
+        "--log-level",
+        "info",
+        "run",
+        "--graph",
+        "TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt){capture.source=ChipWhisperer; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); Tee@trace_tee; @trace_tee.src_%u{routing.branch.family=trace-fanout}; @trace_tee.src_0{routing.branch=plot-traces}; @trace_tee.src_1{routing.branch=analysis-poi}; @trace_tee.src_2{routing.branch=analysis-leakage}; AesLeakage@leakage(channels=[HW(m)],byte_indexes=[0]); PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title=\"AES byte 0 PoIs\",group=aes,label=traces,x_axis=sample); @traces_src ! @trace_tee; @trace_tee.src_0 ! @plot.sink; @trace_tee.src_1 ! @poi.features; @trace_tee.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @leakage ! @poi.targets; @key_src ! @leakage.keys; @poi ! @ann ! @plot.annotations"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "LD_LIBRARY_PATH": "${env:HOME}/.local/lib/libtorch/lib:${env:LD_LIBRARY_PATH}"
+      },
+      "initCommands": [
+        "command script import ${workspaceFolder}/torch_lldb.py",
+        "command regex ptf 's/(.+)/expression -l c++ -- dtv(&(%1))/'",
+        "settings set target.max-children-count 256"
+      ],
+      "preLaunchTask": "build leakflow (debug)"
+    },
+    {
+      "name": "Debug leakflow run --graph (cppdbg / gdb fallback)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/leakflow",
+      "args": [
+        "--log-level",
+        "info",
+        "run",
+        "--graph",
+        "TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt){capture.source=ChipWhisperer; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); Tee@trace_tee; @trace_tee.src_%u{routing.branch.family=trace-fanout}; @trace_tee.src_0{routing.branch=plot-traces}; @trace_tee.src_1{routing.branch=analysis-poi}; @trace_tee.src_2{routing.branch=analysis-leakage}; AesLeakage@leakage(channels=[HW(m)],byte_indexes=[0]); PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title=\"AES byte 0 PoIs\",group=aes,label=traces,x_axis=sample); @traces_src ! @trace_tee; @trace_tee.src_0 ! @plot.sink; @trace_tee.src_1 ! @poi.features; @trace_tee.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @leakage ! @poi.targets; @key_src ! @leakage.keys; @poi ! @ann ! @plot.annotations"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "${env:HOME}/.local/lib/libtorch/lib:${env:LD_LIBRARY_PATH}"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "build leakflow (debug)",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Do not stop on SIGINT (Ctrl+C is used for cooperative stop)",
+          "text": "handle SIGINT nostop noprint pass",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}
