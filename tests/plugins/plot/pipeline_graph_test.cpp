@@ -171,6 +171,20 @@ int main() {
         return 1;
     }
 
+    runtime.observe(leakflow::PipelineEvent{
+        .kind = leakflow::PipelineEventKind::CommandRejected,
+        .command = leakflow::PipelineCommandObservation{
+            .status = leakflow::PipelineCommandStatus::Rejected,
+            .detail = "property change blocked by incremental correlation",
+        },
+    });
+    runtime.drain_events();
+    if (!expect(runtime.last_error()
+                    && *runtime.last_error() == "property change blocked by incremental correlation",
+            "graph runtime did not surface command rejection detail")) {
+        return 1;
+    }
+
     runtime.clear();
     if (!expect(!runtime.has_topology(), "graph runtime clear did not reset topology")) {
         return 1;

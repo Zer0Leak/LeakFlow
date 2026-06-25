@@ -117,7 +117,8 @@ private:
     // targeting `elements` on the calling segment thread, forward-only (no rerun).
     void apply_commands_for(const std::vector<std::shared_ptr<Element>> &elements);
     void apply_command(const SetPropertyCommand &command);
-    [[nodiscard]] bool replay_set_is_replayable(const std::shared_ptr<Element> &element) const;
+    [[nodiscard]] std::shared_ptr<Element>
+    first_non_replayable_in_replay_set(const std::shared_ptr<Element> &element) const;
     void emit_command(PipelineCommandStatus status, const std::shared_ptr<Element> &element,
                       const SetPropertyCommand &command, const PropertyEffect &effect, std::string previous_value,
                       std::string detail);

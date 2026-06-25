@@ -305,14 +305,15 @@ std::size_t PipelineSession::pending_command_count() const
     return pending_.size();
 }
 
-bool PipelineSession::replay_set_is_replayable(const std::shared_ptr<Element> &element) const
+std::shared_ptr<Element>
+PipelineSession::first_non_replayable_in_replay_set(const std::shared_ptr<Element> &element) const
 {
     for (const auto &member : pipeline_.replay_set(element)) {
         if (!member->can_replay()) {
-            return false;
+            return member;
         }
     }
-    return true;
+    return nullptr;
 }
 
 void PipelineSession::emit_command(PipelineCommandStatus status, const std::shared_ptr<Element> &element,
@@ -408,16 +409,50 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
         return;
     }
 
-    PropertyEffect effect{};
+    const PropertySpec *property_spec = nullptr;
     for (const auto &spec : element->property_specs()) {
         if (spec.name == command.property_name) {
-            effect = spec.effect;
+            property_spec = &spec;
             break;
         }
     }
+    if (property_spec == nullptr) {
+        emit_command(PipelineCommandStatus::Rejected, element, command, no_effect, std::string(), "unknown property");
+        return;
+    }
+    const auto effect = property_spec->effect;
 
     const PropertyValue previous_property = element->property(command.property_name);
     std::string previous_value = property_value_to_string(previous_property);
+
+    try {
+        element->validate_property_change(command.property_name, command.value);
+    } catch (const std::exception &error) {
+        emit_command(PipelineCommandStatus::Rejected, element, command, effect, std::move(previous_value),
+                     error.what());
+        return;
+    }
+
+    const bool live_driven = pipeline_.is_live_driven(element);
+    const bool restart_scoped = effect.kind == PropertyEffectKind::Lifecycle
+        || effect.scope == PropertyInvalidationScope::FullPipeline;
+    const bool would_reprocess_existing_data =
+        state_.load() != PipelineSessionState::Stopped
+        && !live_driven
+        && !forward_only_apply_
+        && !restart_scoped
+        && (effect.kind == PropertyEffectKind::SinkDisplay || is_dataflow_effect(effect.kind));
+    if (would_reprocess_existing_data) {
+        if (const auto blocker = first_non_replayable_in_replay_set(element)) {
+            auto detail = std::string("property change rejected: it would reprocess existing buffers through "
+                                      "non-replayable element '");
+            detail += blocker->name();
+            detail += "'; stop the pipeline or switch that element to a replayable mode";
+            emit_command(PipelineCommandStatus::Rejected, element, command, effect, std::move(previous_value),
+                         std::move(detail));
+            return;
+        }
+    }
 
     try {
         element->set_property(command.property_name, command.value);
@@ -492,9 +527,7 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
     // applies FORWARD -- the next pumped buffer naturally uses the new config -- so
     // we do NOT re-emit from cache. On a one-run-driven element we re-emit from
     // cache (the historical behavior), because no future buffer is coming.
-    const bool live_driven = pipeline_.is_live_driven(element);
-    const bool force_restart = effect.kind == PropertyEffectKind::Lifecycle
-        || effect.scope == PropertyInvalidationScope::FullPipeline || !replay_set_is_replayable(element);
+    const bool force_restart = restart_scoped;
 
     {
         auto record = element->make_log_record(log::LogLevel::Info, "session", "applying property change");

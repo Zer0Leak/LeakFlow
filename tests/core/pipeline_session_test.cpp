@@ -159,6 +159,9 @@ public:
             break;
         case PipelineEventKind::CommandRejected:
             ++rejected;
+            if (event.command) {
+                last_rejection_detail = event.command->detail;
+            }
             break;
         case PipelineEventKind::CommandApplied:
             if (event.command && event.command->status == PipelineCommandStatus::Failed) {
@@ -186,6 +189,7 @@ public:
     int failed = 0;
     int element_started = 0;
     std::uint32_t last_buffer_generation = 0;
+    std::string last_rejection_detail;
 };
 
 leakflow::Pipeline make_chain(std::shared_ptr<NumberSource>& src, std::shared_ptr<PassThrough>& mid,
@@ -308,25 +312,40 @@ int main()
         }
     }
 
-    // Escalation: a non-replayable downstream element forces a full restart.
+    // A cached rerun crossing a non-replayable downstream element is rejected
+    // transactionally instead of silently restarting or double-processing data.
     {
         std::shared_ptr<NumberSource> src;
         std::shared_ptr<PassThrough> mid;
         std::shared_ptr<CapturingSink> sink;
+        auto observer = std::make_shared<RecordingObserver>();
         leakflow::PipelineSession session(make_chain(src, mid, sink, /*sink_replay=*/false));
+        session.set_observer(observer);
         (void)session.run_sweep();
         if (!expect(sink->start_count == 1, "sink was not started once initially")) {
             return 1;
         }
         session.submit({"src", "value", std::int64_t{3}});
         (void)session.drain_commands();
-        if (!expect(sink->start_count == 2, "non-replayable element did not force a full restart")) {
+        if (!expect(sink->start_count == 1, "rejected non-replayable change restarted the pipeline")) {
             return 1;
         }
-        if (!expect(sink->last_value == "3", "full restart did not propagate the new value")) {
+        if (!expect(src->property_as<std::int64_t>("value") == std::optional<std::int64_t>{0},
+                    "rejected non-replayable change mutated the source property")) {
             return 1;
         }
-        if (!expect(session.generation() == 2, "escalated change did not bump the epoch")) {
+        if (!expect(sink->last_value == "0", "rejected non-replayable change propagated a new value")) {
+            return 1;
+        }
+        if (!expect(session.generation() == 1, "rejected non-replayable change bumped the generation")) {
+            return 1;
+        }
+        if (!expect(observer->rejected == 1 && observer->accepted == 0 && observer->applied == 0,
+                    "non-replayable change did not emit only a rejection")) {
+            return 1;
+        }
+        if (!expect(observer->last_rejection_detail.find("sink") != std::string::npos,
+                    "non-replayable rejection did not identify the blocking element")) {
             return 1;
         }
     }
@@ -403,7 +422,7 @@ int main()
     {
         auto src = std::make_shared<LiveNumberSource>("livesrc");
         auto mid = std::make_shared<PassThrough>("mid");
-        auto sink = std::make_shared<CapturingSink>("sink", /*replay=*/true);
+        auto sink = std::make_shared<CapturingSink>("sink", /*replay=*/false);
         leakflow::Pipeline pipeline;
         pipeline.add(src);
         pipeline.add(mid);

@@ -657,10 +657,7 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
 
 bool PearsonPoiFinder::can_replay() const
 {
-    return effective_correlation_mode(
-               correlation_mode_for(string_property_or(*this, "correlation_mode", "auto")),
-               is_live_driven())
-        == CorrelationMode::Recompute;
+    return string_property_or(*this, "active_correlation_mode", "recompute") == "recompute";
 }
 
 void PearsonPoiFinder::reset_incremental_correlation()

@@ -341,6 +341,11 @@ int main()
     if (!expect(!incremental_finder.can_replay(), "PearsonPoiFinder incremental mode was marked replay-safe")) {
         return 1;
     }
+    incremental_finder.set_property("correlation_mode", std::string("recompute"));
+    if (!expect(incremental_finder.can_replay(), "PearsonPoiFinder recompute mode was marked non-replayable")) {
+        return 1;
+    }
+    incremental_finder.set_property("correlation_mode", std::string("incremental"));
 
     std::optional<leakflow::Buffer> incremental_output;
     for (std::int64_t row = 0; row < streamed_features.size(0); ++row) {

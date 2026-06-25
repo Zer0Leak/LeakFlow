@@ -73,6 +73,7 @@ public:
     [[nodiscard]] bool has_property(std::string_view name) const;
     [[nodiscard]] const PropertyValue& property(std::string_view name) const;
 
+    void validate_property_change(std::string_view name, const PropertyValue& value) const;
     void set_property(std::string_view name, PropertyValue value);
 
     template <typename T>

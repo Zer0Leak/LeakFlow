@@ -271,7 +271,7 @@ const PropertyValue& Element::property(std::string_view name) const
     return properties_.at(std::string(name));
 }
 
-void Element::set_property(std::string_view name, PropertyValue value)
+void Element::validate_property_change(std::string_view name, const PropertyValue& value) const
 {
     const auto& spec = property_spec_named(property_specs_, name);
     if (!spec.writable) {
@@ -286,6 +286,14 @@ void Element::set_property(std::string_view name, PropertyValue value)
         if (new_name == nullptr || new_name->empty()) {
             throw std::invalid_argument("element name cannot be empty");
         }
+    }
+}
+
+void Element::set_property(std::string_view name, PropertyValue value)
+{
+    validate_property_change(name, value);
+    if (name == "name") {
+        const auto* new_name = std::get_if<std::string>(&value);
         name_ = *new_name;
         properties_["name"] = name_;
         property_changed(name);
