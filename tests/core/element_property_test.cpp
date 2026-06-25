@@ -54,6 +54,11 @@ public:
         stopped = true;
     }
 
+    void update_status(std::string status)
+    {
+        set_read_only_property("status", std::move(status));
+    }
+
     bool started = false;
     bool processed = false;
     bool stopped = false;
@@ -105,11 +110,21 @@ int main()
     element.add_property(leakflow::PropertySpec("poi_indexes", leakflow::IntList{12, 40, 91}));
     element.add_property(leakflow::PropertySpec("thresholds", leakflow::DoubleList{0.1, 0.25, 0.5}));
     element.add_property(leakflow::PropertySpec("columns", leakflow::StringList{"traces", "plaintexts", "key"}));
+    element.add_property(leakflow::PropertySpec(
+        "status",
+        std::string("idle"),
+        "derived status",
+        "",
+        leakflow::StringEnumConstraint{{"idle", "running"}},
+        "",
+        leakflow::PropertyEffect{},
+        false,
+        false));
 
-    if (!expect(element.property_specs().size() == 10, "property specs were not stored")) {
+    if (!expect(element.property_specs().size() == 11, "property specs were not stored")) {
         return 1;
     }
-    if (!expect(element.properties().size() == 10, "property defaults were not initialized")) {
+    if (!expect(element.properties().size() == 11, "property defaults were not initialized")) {
         return 1;
     }
     if (!expect(element.has_property("poi_count"), "has_property failed for declared property")) {
@@ -153,6 +168,21 @@ int main()
     if (!expect(element.property_as<leakflow::StringList>("columns")
                 == std::optional<leakflow::StringList>{leakflow::StringList{"traces", "plaintexts", "key"}},
             "string list property default was wrong")) {
+        return 1;
+    }
+    if (!expect(element.property_as<std::string>("status") == std::optional<std::string>{"idle"},
+            "read-only property default was wrong")) {
+        return 1;
+    }
+    if (!expect(throws_invalid_argument([&element] {
+            element.set_property("status", std::string("running"));
+        }),
+            "public setter accepted a read-only property")) {
+        return 1;
+    }
+    element.update_status("running");
+    if (!expect(element.property_as<std::string>("status") == std::optional<std::string>{"running"},
+            "internal read-only property update failed")) {
         return 1;
     }
 

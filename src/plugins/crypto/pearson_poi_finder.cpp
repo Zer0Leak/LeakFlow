@@ -29,6 +29,12 @@ enum class RankBy {
     Negative,
 };
 
+enum class CorrelationMode {
+    Auto,
+    Recompute,
+    Incremental,
+};
+
 struct CorrelationTargetLayout {
     torch::Tensor grouped_correlation;
     std::vector<std::uint16_t> byte_indexes;
@@ -131,6 +137,30 @@ struct CorrelationTargetLayout {
     }
 
     throw std::invalid_argument("PearsonPoiFinder compute_dtype must be input, float32, or float64");
+}
+
+[[nodiscard]] CorrelationMode correlation_mode_for(std::string_view text)
+{
+    const auto lowered = lower_string(text);
+    if (lowered == "auto") {
+        return CorrelationMode::Auto;
+    }
+    if (lowered == "recompute") {
+        return CorrelationMode::Recompute;
+    }
+    if (lowered == "incremental") {
+        return CorrelationMode::Incremental;
+    }
+
+    throw std::invalid_argument("PearsonPoiFinder correlation_mode must be auto, recompute, or incremental");
+}
+
+[[nodiscard]] CorrelationMode effective_correlation_mode(CorrelationMode configured_mode, bool live_driven)
+{
+    if (configured_mode == CorrelationMode::Auto) {
+        return live_driven ? CorrelationMode::Incremental : CorrelationMode::Recompute;
+    }
+    return configured_mode;
 }
 
 [[nodiscard]] RankBy rank_by_for(std::string_view text)
@@ -440,6 +470,29 @@ ElementDescriptor PearsonPoiFinder::descriptor()
                     .output_pads = {"poi"},
                 }),
             PropertySpec(
+                "correlation_mode",
+                std::string("auto"),
+                "Correlation mode: auto follows upstream liveness; recompute uses only the current buffer; "
+                "incremental accumulates across buffers",
+                "",
+                StringEnumConstraint{{"auto", "recompute", "incremental"}},
+                "",
+                PropertyEffect{
+                    .kind = PropertyEffectKind::PayloadOutput,
+                    .scope = PropertyInvalidationScope::Downstream,
+                    .output_pads = {"poi"},
+                }),
+            PropertySpec(
+                "active_correlation_mode",
+                std::string("recompute"),
+                "Resolved correlation mode currently selected by correlation_mode",
+                "",
+                StringEnumConstraint{{"recompute", "incremental"}},
+                "",
+                PropertyEffect{},
+                false,
+                false),
+            PropertySpec(
                 "compute_dtype",
                 std::string("input"),
                 "Pearson compute dtype",
@@ -481,6 +534,16 @@ ElementDescriptor PearsonPoiFinder::descriptor()
                 std::int64_t{},
                 "number of input features searched for PoI selection",
                 {"5000"}),
+            make_element_metadata_descriptor(
+                "payload.poi.correlation_mode",
+                std::string(),
+                "effective correlation mode used for this PoI result",
+                {"recompute", "incremental"}),
+            make_element_metadata_descriptor(
+                "payload.poi.observation_count",
+                std::int64_t{},
+                "number of trace observations represented by this PoI result",
+                {"1", "50", "10000"}),
         },
         .metadata_suggestions = {
             make_element_metadata_descriptor(
@@ -508,6 +571,12 @@ PearsonPoiFinder::PearsonPoiFinder(std::string name)
     configure_from_descriptor(descriptor());
 }
 
+void PearsonPoiFinder::start()
+{
+    update_active_correlation_mode();
+    reset_incremental_correlation();
+}
+
 std::optional<Buffer> PearsonPoiFinder::process(std::optional<Buffer>)
 {
     throw std::invalid_argument("PearsonPoiFinder requires named features and targets inputs");
@@ -524,10 +593,34 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
     correlation_options.compute_dtype = compute_dtype_for(string_property_or(*this, "compute_dtype", "input"));
     correlation_options.epsilon = double_property_or(*this, "epsilon", 1.0e-12);
 
-    const auto correlation = leakflow::base::pearson_correlation(
-        features_payload->tensor(),
-        targets_payload->tensor(),
-        correlation_options);
+    update_active_correlation_mode();
+    const auto correlation_mode = correlation_mode_for(
+        string_property_or(*this, "active_correlation_mode", "recompute"));
+    torch::Tensor correlation;
+    std::int64_t observation_count = features_payload->tensor().size(0);
+
+    if (correlation_mode == CorrelationMode::Recompute) {
+        reset_incremental_correlation();
+        correlation = leakflow::base::pearson_correlation(
+            features_payload->tensor(),
+            targets_payload->tensor(),
+            correlation_options);
+    } else {
+        const auto options_changed =
+            !incremental_options_
+            || incremental_options_->compute_dtype != correlation_options.compute_dtype
+            || incremental_options_->epsilon != correlation_options.epsilon;
+        if (!incremental_correlation_ || options_changed) {
+            incremental_correlation_.emplace(correlation_options);
+            incremental_options_ = correlation_options;
+        }
+
+        correlation = incremental_correlation_->update(
+            features_payload->tensor(),
+            targets_payload->tensor());
+        observation_count = incremental_correlation_->observation_count();
+    }
+
     const auto layout = correlation_target_layout(correlation, targets_buffer);
     const auto result_group_count = static_cast<std::int64_t>(layout.byte_indexes.size());
     const auto rank_modes = rank_modes_for(*this, layout.channel_count);
@@ -542,6 +635,10 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
     output.set_metadata("routing.element", name());
     output.set_metadata("payload.poi.method", pearson_poi_method_id);
     output.set_metadata("payload.poi.features_count", std::to_string(layout.feature_count));
+    output.set_metadata(
+        "payload.poi.correlation_mode",
+        correlation_mode == CorrelationMode::Recompute ? "recompute" : "incremental");
+    output.set_metadata("payload.poi.observation_count", std::to_string(observation_count));
     output.set_payload(std::make_shared<CorrelationPoiPayload>(std::move(results), score_name));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "selected Pearson correlation PoIs");
@@ -551,9 +648,47 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
     record.fields.emplace("channel_count", std::to_string(layout.channel_count));
     record.fields.emplace("target_count", std::to_string(layout.flattened_target_count));
     record.fields.emplace("features_count", std::to_string(layout.feature_count));
+    record.fields.emplace("correlation_mode", output.metadata("payload.poi.correlation_mode"));
+    record.fields.emplace("observation_count", std::to_string(observation_count));
     leakflow::log::write(std::move(record));
 
     return output;
+}
+
+bool PearsonPoiFinder::can_replay() const
+{
+    return effective_correlation_mode(
+               correlation_mode_for(string_property_or(*this, "correlation_mode", "auto")),
+               is_live_driven())
+        == CorrelationMode::Recompute;
+}
+
+void PearsonPoiFinder::reset_incremental_correlation()
+{
+    incremental_correlation_.reset();
+    incremental_options_.reset();
+}
+
+void PearsonPoiFinder::update_active_correlation_mode()
+{
+    const auto configured_mode =
+        correlation_mode_for(string_property_or(*this, "correlation_mode", "auto"));
+    const auto active_mode = effective_correlation_mode(configured_mode, is_live_driven());
+    set_read_only_property(
+        "active_correlation_mode",
+        std::string(active_mode == CorrelationMode::Recompute ? "recompute" : "incremental"));
+}
+
+void PearsonPoiFinder::property_changed(std::string_view name)
+{
+    if (name == "correlation_mode") {
+        update_active_correlation_mode();
+    }
+}
+
+void PearsonPoiFinder::live_driven_changed()
+{
+    update_active_correlation_mode();
 }
 
 } // namespace leakflow::plugins::crypto

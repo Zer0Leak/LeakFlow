@@ -25,6 +25,7 @@ struct PipelinePropertySnapshot {
     std::string value_type;
     std::string value;
     PropertyEffect effect;
+    bool writable = true;
 };
 
 struct PipelineElementSnapshot {

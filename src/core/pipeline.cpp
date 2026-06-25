@@ -121,9 +121,11 @@ PipelineElementSnapshot element_snapshot(const Element &element) {
     properties.reserve(element.properties().size());
     for (const auto &[name, value] : element.properties()) {
         auto effect = PropertyEffect{};
+        auto writable = true;
         for (const auto &spec : element.property_specs()) {
             if (spec.name == name) {
                 effect = spec.effect;
+                writable = spec.writable;
                 break;
             }
         }
@@ -132,6 +134,7 @@ PipelineElementSnapshot element_snapshot(const Element &element) {
             .value_type = property_value_type_name(value),
             .value = property_value_to_string(value),
             .effect = std::move(effect),
+            .writable = writable,
         });
     }
 
@@ -443,6 +446,7 @@ std::shared_ptr<Element> Pipeline::add(std::shared_ptr<Element> element) {
     }
 
     log::write(elements_.back()->make_log_record(log::LogLevel::Debug, "pipeline", "added element"));
+    refresh_live_driven_flags();
     return elements_.back();
 }
 
@@ -519,6 +523,7 @@ void Pipeline::link(std::shared_ptr<Element> source_element, std::string source_
     log::write(std::move(record));
 
     links_.push_back(std::move(candidate));
+    refresh_live_driven_flags();
 }
 
 std::size_t Pipeline::size() const { return elements_.size(); }
@@ -911,6 +916,7 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
 
 void Pipeline::start_all() {
     started_count_ = 0;
+    refresh_live_driven_flags();
 
     log::LogRecord start_record{
         .level = log::LogLevel::Debug,
@@ -1579,6 +1585,12 @@ bool Pipeline::is_live_driven(const std::shared_ptr<Element> &element) const {
         }
     }
     return false;
+}
+
+void Pipeline::refresh_live_driven_flags() {
+    for (const auto &element : elements_) {
+        element->set_live_driven(is_live_driven(element));
+    }
 }
 
 bool Pipeline::all_live_sources_at_eos() const {

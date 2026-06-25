@@ -1,5 +1,6 @@
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/plot_annotation_payload.hpp"
+#include "leakflow/base/statistics.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/pipeline.hpp"
 #include "leakflow/core/summary_document.hpp"
@@ -80,6 +81,30 @@ private:
     torch::Tensor tensor_;
 };
 
+class LiveTensorSource final : public leakflow::Element {
+public:
+    explicit LiveTensorSource(std::string name)
+        : Element(std::move(name))
+    {
+        leakflow::ElementDescriptor descriptor;
+        descriptor.type_name = "LiveTensorSource";
+        descriptor.klass = "Source/Live/Test";
+        descriptor.output_pads = {
+            leakflow::Pad(
+                "src",
+                leakflow::PadDirection::Output,
+                leakflow::Caps(leakflow::base::torch_tensor_caps_type)),
+        };
+        descriptor.live_source = true;
+        configure_from_descriptor(descriptor);
+    }
+
+    std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer>) override
+    {
+        return std::nullopt;
+    }
+};
+
 } // namespace
 
 int main()
@@ -109,6 +134,24 @@ int main()
     finder.set_property("top_k", leakflow::IntList{1, 1});
     // rank_by is per leakage feature/channel; this generic target has one channel.
     finder.set_property("rank_by", leakflow::StringList{"abs"});
+    if (!expect(finder.property_as<std::string>("correlation_mode") == std::optional<std::string>("auto"),
+            "PearsonPoiFinder correlation_mode default was not auto")) {
+        return 1;
+    }
+    if (!expect(finder.property_as<std::string>("active_correlation_mode")
+                == std::optional<std::string>("recompute"),
+            "PearsonPoiFinder static active mode was not recompute")) {
+        return 1;
+    }
+    if (!expect(throws_invalid_argument([&finder] {
+            finder.set_property("active_correlation_mode", std::string("incremental"));
+        }),
+            "PearsonPoiFinder active_correlation_mode was writable")) {
+        return 1;
+    }
+    if (!expect(finder.can_replay(), "PearsonPoiFinder static auto mode was not replay-safe")) {
+        return 1;
+    }
 
     leakflow::ElementInputs inputs;
     inputs.emplace("features", torch_buffer(features));
@@ -127,6 +170,14 @@ int main()
     }
     if (!expect(output->metadata("payload.poi.features_count") == "3",
             "PearsonPoiFinder did not stamp searched feature count metadata")) {
+        return 1;
+    }
+    if (!expect(output->metadata("payload.poi.correlation_mode") == "recompute",
+            "PearsonPoiFinder static auto mode did not resolve to recompute")) {
+        return 1;
+    }
+    if (!expect(output->metadata("payload.poi.observation_count") == "5",
+            "PearsonPoiFinder did not stamp recompute observation count metadata")) {
         return 1;
     }
     if (!expect(!output->has_metadata("payload.poi.result_groups"),
@@ -192,6 +243,149 @@ int main()
     }
     if (!expect(variable_payload->result(1).result.size(1) == 1,
             "PearsonPoiFinder did not honor second target top_k")) {
+        return 1;
+    }
+
+    const auto streamed_features = torch::tensor(
+        {
+            {0.0, 0.0},
+            {1.0, 0.0},
+            {2.0, 0.0},
+            {5.0, 0.0},
+            {4.0, 0.0},
+            {3.0, 0.0},
+        },
+        torch::TensorOptions().dtype(torch::kFloat32));
+    const auto streamed_targets = torch::tensor(
+        {
+            {0.0},
+            {1.0},
+            {2.0},
+            {3.0},
+            {4.0},
+            {5.0},
+        },
+        torch::TensorOptions().dtype(torch::kFloat32));
+
+    crypto_plugin::PearsonPoiFinder recompute_finder;
+    recompute_finder.set_property("top_k", leakflow::IntList{1});
+    leakflow::ElementInputs first_recompute_inputs;
+    first_recompute_inputs.emplace("features", torch_buffer(streamed_features.slice(0, 0, 3)));
+    first_recompute_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, 0, 3)));
+    (void)recompute_finder.process_inputs(std::move(first_recompute_inputs));
+    leakflow::ElementInputs second_recompute_inputs;
+    second_recompute_inputs.emplace("features", torch_buffer(streamed_features.slice(0, 3, 6)));
+    second_recompute_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, 3, 6)));
+    const auto second_recompute_output = recompute_finder.process_inputs(std::move(second_recompute_inputs));
+    const auto second_recompute_payload =
+        second_recompute_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
+    if (!expect_near(second_recompute_payload->result(0).result[0][0][1].item<double>(), -1.0,
+            "PearsonPoiFinder recompute mode did not use only the current buffer")) {
+        return 1;
+    }
+    if (!expect(second_recompute_output->metadata("payload.poi.observation_count") == "3",
+            "PearsonPoiFinder recompute mode accumulated its observation count")) {
+        return 1;
+    }
+
+    leakflow::Pipeline auto_live_pipeline;
+    auto auto_live_source = auto_live_pipeline.add(std::make_shared<LiveTensorSource>("live_features"));
+    auto auto_live_finder = std::make_shared<crypto_plugin::PearsonPoiFinder>("auto_live_finder");
+    auto_live_finder->set_property("top_k", leakflow::IntList{1});
+    auto auto_live_finder_handle = auto_live_pipeline.add(auto_live_finder);
+    auto_live_pipeline.link(auto_live_source, "src", auto_live_finder_handle, "features");
+    if (!expect(auto_live_finder->is_live_driven(),
+            "PearsonPoiFinder did not receive propagated upstream liveness")) {
+        return 1;
+    }
+    if (!expect(auto_live_finder->property_as<std::string>("active_correlation_mode")
+                == std::optional<std::string>("incremental"),
+            "PearsonPoiFinder live-driven active mode was not incremental")) {
+        return 1;
+    }
+    if (!expect(!auto_live_finder->can_replay(),
+            "PearsonPoiFinder live-driven auto mode was marked replay-safe")) {
+        return 1;
+    }
+
+    leakflow::ElementInputs first_auto_live_inputs;
+    first_auto_live_inputs.emplace("features", torch_buffer(streamed_features.slice(0, 0, 3)));
+    first_auto_live_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, 0, 3)));
+    (void)auto_live_finder->process_inputs(std::move(first_auto_live_inputs));
+    leakflow::ElementInputs second_auto_live_inputs;
+    second_auto_live_inputs.emplace("features", torch_buffer(streamed_features.slice(0, 3, 6)));
+    second_auto_live_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, 3, 6)));
+    const auto auto_live_output =
+        auto_live_finder->process_inputs(std::move(second_auto_live_inputs));
+    const auto auto_live_payload =
+        auto_live_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
+    const auto expected_auto_live_correlation =
+        leakflow::base::pearson_correlation(streamed_features, streamed_targets)[0][0].item<double>();
+    if (!expect_near(auto_live_payload->result(0).result[0][0][1].item<double>(),
+            expected_auto_live_correlation,
+            "PearsonPoiFinder live-driven auto mode did not incrementally merge multi-trace buffers")) {
+        return 1;
+    }
+    if (!expect(auto_live_output->metadata("payload.poi.correlation_mode") == "incremental",
+            "PearsonPoiFinder live-driven auto mode did not resolve to incremental")) {
+        return 1;
+    }
+    if (!expect(auto_live_output->metadata("payload.poi.observation_count") == "6",
+            "PearsonPoiFinder live-driven auto mode observation count was wrong")) {
+        return 1;
+    }
+
+    crypto_plugin::PearsonPoiFinder incremental_finder;
+    incremental_finder.set_property("top_k", leakflow::IntList{1});
+    incremental_finder.set_property("correlation_mode", std::string("incremental"));
+    if (!expect(!incremental_finder.can_replay(), "PearsonPoiFinder incremental mode was marked replay-safe")) {
+        return 1;
+    }
+
+    std::optional<leakflow::Buffer> incremental_output;
+    for (std::int64_t row = 0; row < streamed_features.size(0); ++row) {
+        leakflow::ElementInputs incremental_inputs;
+        incremental_inputs.emplace("features", torch_buffer(streamed_features.slice(0, row, row + 1)));
+        incremental_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, row, row + 1)));
+        incremental_output = incremental_finder.process_inputs(std::move(incremental_inputs));
+    }
+    const auto incremental_payload =
+        incremental_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
+    const auto expected_incremental_correlation =
+        leakflow::base::pearson_correlation(streamed_features, streamed_targets)[0][0].item<double>();
+    if (!expect_near(incremental_payload->result(0).result[0][0][0].item<double>(), 0.0,
+            "PearsonPoiFinder incremental mode selected the wrong feature")) {
+        return 1;
+    }
+    if (!expect_near(incremental_payload->result(0).result[0][0][1].item<double>(),
+            expected_incremental_correlation,
+            "PearsonPoiFinder incremental mode did not accumulate one-row buffers")) {
+        return 1;
+    }
+    if (!expect(incremental_output->metadata("payload.poi.correlation_mode") == "incremental",
+            "PearsonPoiFinder did not stamp incremental correlation mode metadata")) {
+        return 1;
+    }
+    if (!expect(incremental_output->metadata("payload.poi.observation_count") == "6",
+            "PearsonPoiFinder incremental observation count was wrong")) {
+        return 1;
+    }
+
+    incremental_finder.start();
+    leakflow::ElementInputs restarted_incremental_inputs;
+    restarted_incremental_inputs.emplace("features", torch_buffer(streamed_features.slice(0, 0, 1)));
+    restarted_incremental_inputs.emplace("targets", torch_buffer(streamed_targets.slice(0, 0, 1)));
+    const auto restarted_incremental_output =
+        incremental_finder.process_inputs(std::move(restarted_incremental_inputs));
+    if (!expect(restarted_incremental_output->metadata("payload.poi.observation_count") == "1",
+            "PearsonPoiFinder start did not reset incremental state")) {
+        return 1;
+    }
+
+    if (!expect(throws_invalid_argument([&incremental_finder] {
+            incremental_finder.set_property("correlation_mode", std::string("interactive"));
+        }),
+            "PearsonPoiFinder accepted an invalid correlation_mode")) {
         return 1;
     }
 

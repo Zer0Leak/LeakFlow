@@ -128,6 +128,7 @@ private:
     [[nodiscard]] std::vector<PadLink> outgoing_links_for(const std::shared_ptr<Element> &element) const;
     [[nodiscard]] std::optional<Buffer> execute(const std::vector<std::shared_ptr<Element>> &order,
                                                 bool seed_from_cache);
+    void refresh_live_driven_flags();
 
     // Threaded-runner helpers (live phase). A segment thread runs its elements
     // synchronously; a source-driven segment (no input queues) pumps until its live

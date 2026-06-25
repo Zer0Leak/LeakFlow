@@ -246,6 +246,10 @@ void draw_element_info_body(PipelineGraphRuntime &runtime, const PipelineElement
         for (const auto &property : element.properties) {
             const auto value = property.name + " = " + property.value + " (" + property.value_type + ")";
             ImGui::TextUnformatted(value.c_str());
+            if (!property.writable) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("[read-only]");
+            }
             if (property.effect.kind != PropertyEffectKind::UiOnly ||
                 property.effect.scope != PropertyInvalidationScope::None || !property.effect.output_pads.empty()) {
                 ImGui::Indent(12.0F);
@@ -686,6 +690,7 @@ void draw_help_marker(const PropertySpec &spec) {
         ImGui::TextUnformatted(spec.description.c_str());
     }
     tooltip_field("type", property_value_type_name(spec.default_value));
+    tooltip_field("access", spec.writable ? "read/write" : "read-only");
     if (!spec.unit.empty()) {
         tooltip_field("unit", spec.unit);
     }
@@ -946,7 +951,7 @@ void draw_element_controls(PipelineControlRuntime &runtime, const std::shared_pt
     for (const auto &spec : element->property_specs()) {
         const auto found = element->properties().find(spec.name);
         const auto &value = found == element->properties().end() ? spec.default_value : found->second;
-        const auto read_only = spec.name == "name" && element->name_locked();
+        const auto read_only = !spec.writable || (spec.name == "name" && element->name_locked());
 
         ImGui::PushID(spec.name.c_str());
         ImGui::AlignTextToFramePadding();
@@ -1038,6 +1043,7 @@ void apply_property_change_to_topology(PipelineTopologySnapshot &topology,
             .value_type = change.value_type,
             .value = change.new_value,
             .effect = change.effect,
+            .writable = true,
         });
         return;
     }

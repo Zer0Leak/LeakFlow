@@ -347,8 +347,11 @@ void print_property(const leakflow::PropertySpec& property, const RenderContext&
     print_label(property.name, context);
     std::cout << " : " << property.description << '\n';
     std::cout << "    " << styled(context, render::StyleRole::Section, "flags") << ": "
-              << styled(context, render::StyleRole::Value, "readable") << ", "
-              << styled(context, render::StyleRole::Value, "writable") << '\n';
+              << styled(context, render::StyleRole::Value, "readable");
+    if (property.writable) {
+        std::cout << ", " << styled(context, render::StyleRole::Value, "writable");
+    }
+    std::cout << '\n';
     auto type_text = leakflow::property_value_type_name(property.default_value);
     if (property.optional) {
         type_text += " (optional)";

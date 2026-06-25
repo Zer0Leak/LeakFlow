@@ -38,6 +38,11 @@ public:
     // Detected by run() to choose the pump loop; default false (one-run).
     [[nodiscard]] bool is_live() const;
 
+    // Propagated graph liveness: true when this element is a live source or has
+    // any live source upstream. Pipeline refreshes this when topology changes
+    // and before start(), so stateful elements can select live-aware behavior.
+    [[nodiscard]] bool is_live_driven() const;
+
     // Thread-boundary flag (live phase): true for a Queue, which cuts the pipeline
     // into segments handed off across threads. Segment decomposition splits here.
     // Default false. See docs/design/dataflow_sync_model.md S10.
@@ -116,6 +121,9 @@ public:
 
 protected:
     void set_element_identity(std::string type_name, std::string kclass);
+    void set_read_only_property(std::string_view name, PropertyValue value);
+    virtual void property_changed(std::string_view name);
+    virtual void live_driven_changed();
 
     // The cooperative-stop token for this element (see set_stop_token). Subclasses
     // with blocking waits poll it; the default token never reports a stop request.
@@ -125,6 +133,7 @@ private:
     friend class Pipeline;
 
     void lock_name();
+    void set_live_driven(bool live_driven);
 
     std::string name_;
     bool name_locked_ = false;
@@ -137,6 +146,7 @@ private:
     std::map<std::string, PropertyValue> properties_;
     int provenance_slots_ = 1;
     bool live_source_ = false;
+    bool live_driven_ = false;
     bool thread_boundary_ = false;
     std::stop_token stop_token_;
 };

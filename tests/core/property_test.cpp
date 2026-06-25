@@ -35,10 +35,27 @@ bool throws_invalid_argument(Function function)
 int main()
 {
     leakflow::PropertySpec enabled("enabled", true, "enable processing");
+    if (!expect(enabled.writable, "properties were not writable by default")) {
+        return 1;
+    }
     if (!expect(std::get<bool>(enabled.default_value), "bool default was not stored")) {
         return 1;
     }
     leakflow::validate_property_value(enabled, false);
+
+    leakflow::PropertySpec status(
+        "status",
+        std::string("idle"),
+        "derived status",
+        "",
+        leakflow::StringEnumConstraint{{"idle", "running"}},
+        "",
+        leakflow::PropertyEffect{},
+        false,
+        false);
+    if (!expect(!status.writable, "read-only property flag was not stored")) {
+        return 1;
+    }
 
     leakflow::PropertySpec poi_count(
         "poi_count",

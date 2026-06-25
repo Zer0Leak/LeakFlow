@@ -119,7 +119,8 @@ struct PropertySpec {
         PropertyConstraint constraint = std::monostate{},
         std::string value_hint = {},
         PropertyEffect effect = {},
-        bool optional = false);
+        bool optional = false,
+        bool writable = true);
 
     std::string name;
     PropertyValue default_value;
@@ -132,6 +133,10 @@ struct PropertySpec {
     // type exemplar (and the value used when filling in a null); an optional
     // property starts null.
     bool optional = false;
+    // Read-only properties are visible through the normal property APIs but
+    // reject public Element::set_property writes. Elements may update them
+    // internally through Element::set_read_only_property.
+    bool writable = true;
 };
 
 [[nodiscard]] std::string property_value_type_name(const PropertyValue& value);

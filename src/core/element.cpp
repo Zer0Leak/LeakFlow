@@ -108,6 +108,11 @@ bool Element::is_live() const
     return live_source_;
 }
 
+bool Element::is_live_driven() const
+{
+    return live_driven_;
+}
+
 bool Element::is_thread_boundary() const
 {
     return thread_boundary_;
@@ -269,6 +274,9 @@ const PropertyValue& Element::property(std::string_view name) const
 void Element::set_property(std::string_view name, PropertyValue value)
 {
     const auto& spec = property_spec_named(property_specs_, name);
+    if (!spec.writable) {
+        throw std::invalid_argument("property is read-only");
+    }
     validate_property_value(spec, value);
     if (name == "name") {
         if (name_locked_) {
@@ -280,10 +288,12 @@ void Element::set_property(std::string_view name, PropertyValue value)
         }
         name_ = *new_name;
         properties_["name"] = name_;
+        property_changed(name);
         return;
     }
 
     properties_[std::string(name)] = std::move(value);
+    property_changed(name);
 }
 
 void Element::start()
@@ -334,6 +344,12 @@ void Element::set_stop_token(std::stop_token token)
     stop_token_ = std::move(token);
 }
 
+void Element::set_live_driven(bool live_driven)
+{
+    live_driven_ = live_driven;
+    live_driven_changed();
+}
+
 const std::stop_token& Element::stop_token() const
 {
     return stop_token_;
@@ -363,6 +379,24 @@ void Element::set_element_identity(std::string type_name, std::string kclass)
 {
     element_type_ = std::move(type_name);
     element_kclass_ = std::move(kclass);
+}
+
+void Element::set_read_only_property(std::string_view name, PropertyValue value)
+{
+    const auto& spec = property_spec_named(property_specs_, name);
+    if (spec.writable) {
+        throw std::logic_error("internal read-only property update requires a read-only property");
+    }
+    validate_property_value(spec, value);
+    properties_[std::string(name)] = std::move(value);
+}
+
+void Element::property_changed(std::string_view)
+{
+}
+
+void Element::live_driven_changed()
+{
 }
 
 void Element::lock_name()

@@ -316,7 +316,8 @@ PropertySpec::PropertySpec(std::string name,
     PropertyConstraint constraint,
     std::string value_hint,
     PropertyEffect effect,
-    bool optional)
+    bool optional,
+    bool writable)
     : name(std::move(name))
     , default_value(std::move(default_value))
     , description(std::move(description))
@@ -325,6 +326,7 @@ PropertySpec::PropertySpec(std::string name,
     , value_hint(std::move(value_hint))
     , effect(std::move(effect))
     , optional(optional)
+    , writable(writable)
 {
     validate_property_spec(*this);
 }
