@@ -141,6 +141,48 @@ leakflow --log-level info run --graph \
   @poi ! @ann ! @plot.annotations'
 ```
 
+## Live Synchronized Version
+
+This version streams traces and plaintexts independently through queues, then
+uses `Sync(policy=zip)` to pair trace row `N` with plaintext row `N`. The fixed
+AES key is loaded once by `TorchFileSrc` and held by `AesLeakage` across live
+updates.
+
+```bash
+leakflow --log-level info run --graph \
+  'FakeLiveSrc@traces_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,sample_rate_hz=29454545.454545453) \
+      {payload.leakage.inverted=false;payload.leakage.range=[-0.5,0.5]}; \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,sample_rate_hz=29454545.454545453); \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+   Tee@trace_tee; \
+      @trace_tee.src_%u{routing.branch.family=trace-fanout}; \
+      @trace_tee.src_0{routing.branch=plot-traces}; \
+      @trace_tee.src_1{routing.branch=analysis-poi}; \
+      @trace_tee.src_2{routing.branch=analysis-leakage}; \
+   Sync@leakage_sync(policy=zip); \
+   AesLeakage@leakage(channels=[HW(y)],byte_indexes=[0]); \
+   PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); \
+   CorrelationPoiToPlotAnnotations@ann(precision=3); \
+   TracePlot@plot \
+      (title="AES byte 0 PoIs",group=aes,label=traces,x_axis=sample); \
+   @traces_src ! @traces_queue ! @trace_tee; \
+      @trace_tee.src_0 ! @plot.sink; \
+      @trace_tee.src_1 ! @poi.features; \
+      @trace_tee.src_2 ! @leakage_sync.in_0; \
+   @plain_src ! @plain_queue; \
+      @plain_queue.src ! @leakage_sync.in_1; \
+   @leakage_sync.out_0 ! @leakage.traces; \
+   @leakage_sync.out_1 ! @leakage.plaintexts; \
+   @key_src ! @leakage.keys; \
+   @leakage ! @poi.targets; \
+   @poi ! @ann ! @plot.annotations'
+```
+
 Notes:
 
 - `Tee@trace_tee` fans the trace tensor to three branches: `TracePlot.sink`
