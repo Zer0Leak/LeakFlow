@@ -510,6 +510,21 @@ Phase 9 uses links to drive one linear chain, but this is still not a general gr
 
 ## Near-Term Future Phases
 
+> **Numbering note (read this first).** The phase numbers in *this* section are the
+> **original high-level proposal** and have **diverged** from the numbering actually
+> used during implementation. They are kept for strategic history only. The
+> authoritative, as-built phase list is in `ROADMAP.md`,
+> `docs/context/CURRENT_STATE.md`, and `docs/context/ACTIVE_PHASE.md`.
+>
+> As actually built, the later phases were: 19 NumPy→Torch API, 20 `NumpyToTorch`
+> element, 21 logging, 22 ImGui/ImPlot `TracePlot`, 23 `leakflow_crypto` helpers,
+> 24 `leakflow_plugins_crypto` (AES leakage + Pearson PoI), 25
+> `PipelineSession`/control layer, 26 AES PoI numeric correctness, 27 DAG executor
+> + vector-clock provenance (`LinearPipeline` → `Pipeline`), then the **live phase**
+> (threaded segments, `BufferQueue`, `Sync`, `FakeLiveSrc`, liveness, cooperative
+> stop, player state machine). Deferred: 28 AES CPA/report, 29 overlay plots, 30+
+> Kyber. Do not treat the numbers below as current.
+
 The following phases are proposed at a high level. They should be reviewed and detailed one at a time in `ROADMAP.md` before implementation.
 
 ## Phase 10: Core Payload Interface

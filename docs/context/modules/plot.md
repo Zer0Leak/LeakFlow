@@ -216,9 +216,12 @@ Since Phase 25 the control plane is `PipelineSession` in `leakflow_core` (design
 
 `run_pipeline_graph_until_closed(PipelineSession&, PlotRuntime&, ...)` installs a
 graph observer, binds controls, and owns the shared graph/plot/control window
-loop with a persistent worker loop (pluggable `OneShotDrive` now). Graph control
-buttons submit session controls: re-run from sources, stop-start cycle, and live
-start/stop.
+loop with a persistent worker loop (the unified `run()` pump loop — live is
+auto-detected, not a separate drive). Graph control buttons are the player
+controls: **Start / Stop / Pause / Resume** plus an **Auto-apply edits** toggle.
+Pass `--auto-start` to begin Running on open; a finite live stream reaching EOS
+lands in **Idle** (held, inspectable). See `docs/design/dataflow_sync_model.md`
+§13.
 
 Example of a downstream-only rerun:
 
@@ -231,14 +234,17 @@ reruns from `AesLeakage.leakage` downstream through `PearsonPoiFinder`,
 annotation conversion, and plot sinks using cached/latest inputs, without
 rerunning upstream trace loading.
 
-Reserved live/queue seams (designed, not wired in Phase 25):
+Live/queue runtime (implemented — see `docs/design/dataflow_sync_model.md` §12–13):
 
-- `StreamingDrive` pulls from a live source between safe points.
-- Live control changes start a new config epoch instead of an offline rerun.
-- A threaded/live `Queue` uses `QueueEpochPolicy` (drain / flush / keep-mixed /
-  block / drop-oldest / drop-newest); silent epoch mixing is never the default.
-- A cooperative `std::stop_token` cancel lets a blocking source unwind to a safe
-  point; `Paused`/pause/resume/preroll are reserved session states.
+- The unified `run()` pump loop auto-detects a live source; live + `Queue` graphs
+  run threaded segments. No separate `StreamingDrive`.
+- Live control changes forward-apply at a between-buffer safe point (no offline
+  rerun); one-run-driven changes still recompute from cache.
+- A threaded/live `Queue` is `BufferQueue` (Block / DropOldest / DropNewest);
+  `QueueEpochPolicy` drain/flush is an optional generation-boundary policy.
+- A cooperative `std::stop_token` cancel (CLI SIGINT + window close) lets a
+  blocking source unwind to a safe point; the `Stopped/Running/Paused/Idle` player
+  state machine and pause/resume are wired. Only `preroll` is reserved.
 
 `leakflow run --graph EXPRESSION` uses this shape:
 

@@ -152,12 +152,14 @@ lookup is based on the element descriptor type name, not on C++ RTTI.
 Pad links are validated against element handles, pad names, pad directions, and
 simple caps compatibility.
 
-The current executor supports linked DAG paths, `Tee` fan-out, and **multi-input
-joins** (collect-then-fire, gathering one buffer per input pad and fold-matching
-their vector clocks). It is synchronous/one-shot.
+The executor supports linked DAG paths, `Tee` fan-out, and **multi-input joins**
+(collect-then-fire, gathering one buffer per input pad and fold-matching their
+vector clocks). Offline runs are synchronous/one-shot; **live runs are threaded**
+(segments cut at every `Queue`, one thread per segment) via the same
+`Pipeline::run()` pump loop.
 
-**Synchronization model (finalized; design of record
-`docs/design/dataflow_sync_model.md` Sections 10–11).** The default sync at every
+**Synchronization model (finalized AND implemented; design of record
+`docs/design/dataflow_sync_model.md` Sections 10–14).** The default sync at every
 join is the **per-slot Barrier** (the vector-clock fold-match): common-origin
 inputs are auto-synced, independent inputs fire free — **99.99% of pipelines need
 no tuning**. Each slot is **one counter** (generation); there is **no global
@@ -167,8 +169,9 @@ uses the default barrier) — not via per-pad flags. Property changes are
 **liveness-aware**: sources are `live` or `one-run` (default one-run, propagated
 downstream by OR); a change on a live-driven element applies **forward** (next
 buffer), on a one-run-driven element re-emits from cache. Threaded segments, the
-real `Queue`, the Sync element, and the liveness model are the **live phase**;
-bundles/`Mux`/`Demux` are **dropped** (superseded by the Sync element).
+real `Queue`/`BufferQueue`, the `Sync` element, and the liveness model are
+**implemented** (the live phase); bundles/`Mux`/`Demux` are **dropped** (superseded
+by the `Sync` element).
 
 ## Pipeline Observation
 
@@ -211,10 +214,12 @@ Property-change observations may include:
 The UI must consume snapshots/events and maintain its own display copy. It must
 not query live `Element` objects every frame from another thread.
 
-The current pipeline executor remains synchronous. `leakflow run --graph` runs
-that synchronous executor in a worker thread while the main thread owns ImGui.
-The worker emits observer events; the UI drains them. The pipeline worker must
-not call UI code, and the UI thread must not mutate pipeline internals.
+Offline execution is synchronous; live execution is threaded (segments cut at
+every `Queue`). `leakflow run --graph` runs the pipeline on a worker (and, for
+live + `Queue` graphs, additional segment threads) while the main thread owns
+ImGui. The worker emits observer events; the UI drains them. The pipeline worker
+must not call UI code, and the UI thread must not mutate pipeline internals
+(edits go through the session's safe-point control plane).
 
 Observer callbacks are best-effort diagnostics. They must not be required for
 experiment correctness, and observer failures must not break pipeline execution.
@@ -252,18 +257,21 @@ Authoritative design: `docs/design/pipeline_controller.md`. It owns a
   writer — `Buffer::epoch()` was removed. See `docs/design/dataflow_sync_model.md`;
 - catches rerun exceptions without tearing down the session, emitting
   `CommandApplied{status=failed}` and marking affected cache entries stale;
-- owns a `Stopped/Started/Running` state machine (`Paused`/pause/resume/preroll
-  reserved) and session controls (restart, re-run-from-sources, caching toggle);
+- owns a `Stopped/Running/Paused/Idle` player state machine (pause/resume wired;
+  only `preroll` reserved) and session controls (restart, re-run-from-sources,
+  caching toggle, pause/resume);
 - emits copied `CommandAccepted/Rejected/Applied` events on the observer stream.
 
-The graph runner uses a persistent worker loop. **Superseded framing:** the
-`OneShotDrive`/`StreamingDrive` split (Phase 25 reserved seams) collapses into a
-single **`run()` pump loop** in the live design — live is *not* a run mode; a
-one-run source ends after one buffer, a live source streams (see
-`docs/design/dataflow_sync_model.md` S11.8). Streaming results are 3-state
-(`Data`/`NoData`/`EndOfStream`), and `stop()`/SIGINT/window-close drive a
-cooperative `std::stop_token` for a graceful, prompt shutdown. Threaded
-`QueueEpochPolicy` enforcement remains a live-phase seam.
+The graph runner uses a persistent worker loop. The `OneShotDrive`/`StreamingDrive`
+split (Phase 25 reserved seams) was **collapsed into a single implemented `run()`
+pump loop** — live is *not* a run mode; a one-run source ends after one buffer, a
+live source streams (see `docs/design/dataflow_sync_model.md` §11.8, §12).
+Streaming results are 3-state (`Data`/`NoData`/`EndOfStream`), and
+`stop()`/SIGINT/window-close drive a cooperative `std::stop_token` for a graceful,
+prompt shutdown. The session owns a `Stopped/Running/Paused/Idle` player state
+machine (§13). `QueueEpochPolicy` drain/flush enforcement is left as an optional
+policy (not a correctness requirement, since the vector clock matches by
+config-independent ancestor identity).
 
 Element properties are the source of truth for property-backed controls. Graph
 gear controls, standalone control panels, and future element-local controls
@@ -284,11 +292,12 @@ Dataflow changes are changes to caps, metadata, payload, or lifecycle. They
 must not be represented as UI-only state. Metadata-output changes should create
 a new `Buffer` envelope when rerun, even if the payload pointer is reused.
 
-Future downstream-only rerun requires cached/latest input buffers per element
-input pad, cached/latest output buffers per output pad, dirty output tracking,
-and downstream link walking. Future live pipelines should use config epochs so
-old and new stream states do not mix silently. A future threaded/live `Queue`
-must define drain/flush/keep-mixed epoch policy explicitly.
+Downstream-only rerun uses cached/latest input buffers per element input pad,
+cached/latest output buffers per output pad, dirty output tracking, and downstream
+link walking. Live pipelines do not silently mix old and new stream states: a
+mid-run property change forward-applies and joins match by config-independent
+ancestor identity (the vector clock), so a `QueueEpochPolicy` drain/flush is an
+optional policy rather than a correctness requirement.
 
 ## Properties
 

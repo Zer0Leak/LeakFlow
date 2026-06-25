@@ -39,7 +39,14 @@ CLI/inspect files if affected:
   buffer envelope and sharing the payload pointer. A fresh `Tee` has only its
   always-available `sink` pad; `src_N` output pads are created on request from
   the `src_%u` pad template. Tee pad templates use `ANY` caps.
-- `Queue`: synchronous buffer storage/forwarding.
+- `Queue`: bounded buffer handoff. Offline it stores/forwards synchronously; live
+  it is the thread + rate-decouple boundary (`BufferQueue`: `max_size`, Block vs
+  `drop_oldest`).
+- `Sync`: generic `N→N` cross-source pairing — claims its own provenance slot and
+  stamps all aligned outputs alike (common-ancestor injection) so a downstream
+  default barrier pairs originally-independent streams. `policy` =
+  `barrier`/`zip`/`all-required-once`/`held`/`latest` (one per element,
+  restart-scoped; for `held`/`latest` the driver is `in_0`).
 
 ## Descriptor Catalog
 

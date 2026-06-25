@@ -17,6 +17,7 @@ leakflow_core
 leakflow_core
   -> leakflow_base
   -> leakflow_crypto
+  -> leakflow_plugins_crypto
 
 leakflow_core
   -> leakflow_base
@@ -28,6 +29,7 @@ leakflow_log + leakflow_core + leakflow_base
   -> leakflow_plugins_plot
 
 leakflow_plugins_core + leakflow_plugins_base + leakflow_plugins_extras
+  + leakflow_plugins_crypto
   -> leakflow_cli
   -> leakflow
 
@@ -62,6 +64,7 @@ plugins for `leakflow run` and tutorial applications.
 | Core plugins | `leakflow_plugins_core` | `include/leakflow/plugins/core` | `src/plugins/core` | `tests/plugins/core` | `docs/context/modules/plugins-core.md` |
 | Base plugins | `leakflow_plugins_base` | `include/leakflow/plugins/base` | `src/plugins/base` | `tests/plugins/base` | `docs/context/modules/plugins-base.md` |
 | Extras plugins | `leakflow_plugins_extras` | `include/leakflow/plugins/extras` | `src/plugins/extras` | `tests/plugins/extras` | `docs/context/modules/plugins-extras.md` |
+| Crypto plugins | `leakflow_plugins_crypto` | `include/leakflow/plugins/crypto` | `src/plugins/crypto` | `tests/plugins/crypto` | `docs/context/modules/plugins-crypto.md` |
 | Plot / graph UI | `leakflow_plot` | `include/leakflow/plot` | `src/plot` | focused non-visual tests only | `docs/context/modules/plot.md` |
 | Plot plugins | `leakflow_plugins_plot` | `include/leakflow/plugins/plot` | `src/plugins/plot` | `tests/plugins/plot` plus manual GUI checks | `docs/context/modules/plot.md` |
 | Apps / CLI | `leakflow`, `leakflow-ls`, `leakflow_cli` | `src/apps/leakflow/leakflow_cli.hpp` | `src/apps/{common,leakflow,leakflow_ls,cuda_smoke}` | `tests/apps` | relevant plugin/module context |
@@ -99,9 +102,11 @@ Keep target configuration target-based.
 - `tests/extras`: NumPy payload/loading.
 - `tests/apps`: CLI parser, expression-builder helper, CLI runner, and inspect
   tool behavior.
-- `tests/plugins/core`: generic core plugin elements.
-- `tests/plugins/base`: Torch-backed base plugin elements.
+- `tests/plugins/core`: generic core plugin elements (incl. `Sync`, threaded).
+- `tests/plugins/base`: Torch-backed base plugin elements (incl. `FakeLiveSrc`).
 - `tests/plugins/extras`: extras plugin elements.
+- `tests/plugins/crypto`: AES leakage, Pearson PoI, annotation conversion, and the
+  Phase 26 AES PoI numeric correctness test.
 - Plot GUI/window behavior is manual-only; `tests/plugins/plot` covers
   non-visual snapshot, graph-runtime, and descriptor behavior.
 - `tests/fixtures/aes`: deterministic AES `.pt` fixtures.

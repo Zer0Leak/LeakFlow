@@ -43,6 +43,10 @@ Instead:
 - For core plugin work, read `docs/context/modules/plugins-core.md`, then inspect
   only `include/leakflow/plugins/core`, `src/plugins/core`,
   `tests/plugins/core`, and CLI files if command syntax is affected.
+- For crypto plugin work (AES leakage / Pearson PoI / annotation conversion), read
+  `docs/context/modules/plugins-crypto.md`, then inspect only
+  `include/leakflow/plugins/crypto`, `src/plugins/crypto`, `tests/plugins/crypto`,
+  and CLI files if command syntax is affected.
 - For extras plugin work, read `docs/context/modules/plugins-extras.md`, then
   inspect only `include/leakflow/plugins/extras`, `src/plugins/extras`,
   `tests/plugins/extras`, and CLI files if command syntax is affected.

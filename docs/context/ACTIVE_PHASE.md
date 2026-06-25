@@ -4,37 +4,28 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-Phase 26 (AES PoI pipeline correctness validation) is implemented. A headless
-numeric test (`tests/plugins/crypto/aes_poi_correctness_test.cpp`, CTest
-`leakflow_plugins_crypto_aes_poi_correctness`) proves the AES PoI pipeline
-produces correct leakage/PoI/annotation values over the checked-in `key_01` and
-`key_02` fixtures, not just that it runs.
+**No active phase.** The live-streaming phase is implemented and there is no next
+default phase set. Pick the next phase explicitly before starting work (candidates:
+Phase 28 AES CPA/report; Phase 29 overlay/correlation plots; Phase 30+ Kyber).
 
-Phase 25 (Full `PipelineController`/session layer) remains implemented; design in
-`docs/design/pipeline_controller.md` (decisions `D1`..`D12`). The AES PoI plotting
-pipeline is built and runs end to end (manually validated in `leakflow run
---graph`, plus headless CLI smoke tests and the Phase 26 numeric test).
+Recently completed, in order:
 
-**Phase 27 is DONE** (offline). Authoritative design:
-`docs/design/dataflow_sync_model.md`. Delivered, all green (120/120):
+- **Phase 25** (`PipelineController`/session layer) — design in
+  `docs/design/pipeline_controller.md` (`D1`..`D12`).
+- **Phase 26** (AES PoI pipeline correctness validation) —
+  `tests/plugins/crypto/aes_poi_correctness_test.cpp` proves correct
+  leakage/PoI/annotation values over `key_01`/`key_02`.
+- **Phase 27** (DAG executor, per-pad outputs, vector clock) —
+  per-pad `ElementOutputs`; `Tee` explicit fan-out; the **vector clock**
+  (`provenance_slots`, dense `Buffer::provenance`, conflict-detecting fold-match);
+  `Buffer::epoch()` removed (session `generation` counter); `LinearPipeline` →
+  `Pipeline`. Bundles/`Mux`/`Demux` (old 27.4/27.5) were **not built** — the
+  vector clock subsumes their offline role.
+- **Live phase** (the largest) — implemented and green; offline unchanged.
+  Authoritative design: `docs/design/dataflow_sync_model.md` §10–14.
 
-- **27.1** per-pad `ElementOutputs`; `Tee` explicit fan-out; implicit broadcast
-  removed (topological validity/acyclicity guaranteed by the `link()` invariant);
-- **27.2** the **vector clock** (`provenance_slots`, slot allocation, dense
-  `Buffer::provenance`, engine increment, conflict-detecting fold-match at joins)
-  with `tests/core/vector_clock_test.cpp` (incl. fan-out rejoin + rerun supersede);
-- **27.3** `Buffer::epoch()` **removed**; session uses a `generation` counter,
-  per-buffer generation derived from the vector clock for observer/plot;
-- **27.6** class rename `LinearPipeline` → `Pipeline` (`pipeline.{hpp,cpp}`).
-
-**Bundles / `Mux` / `Demux` (old 27.4/27.5) were NOT built** — the vector clock
-subsumes their offline correctness role, so they move to the live phase. See the
-Section 4 status note in the design doc.
-
-The next task is the **live phase** (simulated live-capture source + threaded
-`Queue` + bundles/Mux/Demux + independent-source pairing). Generic `Convert`, the
-conversion registry, CPA/report (Phase 28), and overlay plots (Phase 29) remain
-deferred.
+Generic `Convert`, the conversion registry, CPA/report (Phase 28), and overlay
+plots (Phase 29) remain deferred.
 
 ## Phase 26 Brief (DONE)
 
@@ -85,36 +76,45 @@ Build/Test:
   cmake --build build -j && ctest --test-dir build --output-on-failure
 ```
 
-## Live phase — IN PROGRESS
+## Live phase — DONE
 
-Implemented and green (122/122), offline unchanged:
+Implemented and green, offline unchanged. Implementation map + tests:
+`docs/design/dataflow_sync_model.md` §12.
 
 - **Unified `run()` pump loop** (`Pipeline::run()`): auto-detects a live source and
   pumps until every live source is at end-of-stream; offline = one sweep. No
   `run_live()`. `Element::is_live()` (descriptor `live_source`) + `at_end_of_stream()`.
 - **`FakeLiveSrc`** (`leakflow_plugins_base`): reads a Torch `.pt`, streams one
-  `Buffer` per axis-0 row then EOS; declares itself live. Test
-  `tests/plugins/base/fake_live_src_test.cpp` (per-row indexes 1..50).
+  `Buffer` per axis-0 row then EOS; `sample_rate_hz` pacing; declares itself live.
+  Test `tests/plugins/base/fake_live_src_test.cpp`.
 - **Liveness propagation** `Pipeline::is_live_driven()` (OR-reachability from live
-  sources) + positive/negative test.
-- **Liveness-aware property change** in `PipelineSession::apply_command`: a
-  dataflow change on a live-driven element applies **forward** (no cache re-emit);
-  a one-run-driven element re-emits from cache. Test in `pipeline_session_test`.
+  sources); **liveness-aware property change** in `PipelineSession::apply_command`
+  (forward-apply on live-driven, cache re-emit on one-run-driven).
+- **Segment decomposition + threaded runner** (`pipeline_segments`,
+  `Pipeline::run_threaded` / `run_source_segment` / `run_consumer_segment`): cut at
+  every `Queue`, one `std::jthread` per connected component. Tests
+  `pipeline_segments_test`, `threaded_runner_test`.
+- **`Queue` = `BufferQueue`** (`buffer_queue`): bounded FIFO; Block backpressure vs
+  DropOldest/DropNewest; thread + generation boundary. Test `buffer_queue_test`.
+- **Aggregator**: Barrier fold-match across queue heads, realign-on-drop, Held
+  (auto from liveness), Latest. Tests `threaded_runner_test`, `aggregator_latest_test`.
 - **`Sync` element** (`leakflow_plugins_core`, `N→N`): claims a slot, stamps all
-  aligned outputs alike (common-ancestor injection); downstream uses the default
-  barrier. `policy` property declares the join-mode enum (only `all-required-once`
-  wired offline). Test `tests/plugins/core/sync_test.cpp` (Walkthrough Ex.3b).
+  aligned outputs alike (common-ancestor injection); `policy` =
+  barrier/zip/all-required-once/held/latest (restart-scoped). Tests
+  `tests/plugins/core/sync_test.cpp`, `sync_threaded_test.cpp`.
+- **Cooperative stop** (`std::stop_token` through element→pipeline→session; CLI
+  SIGINT bridge; `--graph` window close) and the **player state machine**
+  (`Stopped/Running/Paused/Idle`, pause/resume, safe-point forward-apply). Tests
+  `threaded_safe_point_test`, `threaded_pause_test`.
 
-Remaining (the largest, its own focused pass):
-
-- **Threaded segments + real `Queue`** (S10): threads only at sources/Queues;
-  push/pull with a passive bounded `Queue`; backpressure + drop policy; cooperative
-  `std::stop_token` cancel (poll-with-timeout / `NoData`); aggregator fold-match
-  across queue heads; no-drop on rejoining branches.
-- Streaming `Sync` policies (`Zip`/`Held`/`Latest`/`Barrier`) become live once the
-  threaded pump exists.
+Only `preroll` and the optional `QueueEpochPolicy` drain/flush enforcement remain
+unbuilt seams.
 
 ## (original brief) Live streaming + Sync element
+
+> **Status: DELIVERED.** This is the original planning brief, kept for history;
+> all work items below are implemented (see "Live phase — DONE" above and
+> `docs/design/dataflow_sync_model.md` §12).
 
 Design of record: `docs/design/dataflow_sync_model.md` Sections 10–12 (finalized
 synchronization & liveness model). **Implementation reference + validation:**

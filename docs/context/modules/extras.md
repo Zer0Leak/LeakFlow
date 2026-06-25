@@ -62,12 +62,12 @@ Rejected:
 - Fortran-order arrays,
 - unsupported dtype shapes.
 
-## Next Likely Work
+## Conversion Status
 
-Phase 19 is expected to add direct application-callable NumPy-to-Torch
-conversion using `NumpyPayload` and `TorchTensorPayload`.
-
-Do not add a pipeline `Convert` element unless Phase 20 is requested.
+Direct application-callable NumPy-to-Torch conversion
+(`convert_numpy_to_torch(...)`, Phase 19) is implemented, and the explicit
+`NumpyToTorch` pipeline element (Phase 20) exposes it. Generic `Convert`, a
+conversion registry, and dynamic pads remain deferred low-priority infrastructure.
 
 ## Common Tests
 

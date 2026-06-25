@@ -35,9 +35,10 @@ Tests:
 - `Element` always has a writable string `name` property synchronized with
   `Element::name()`.
 - `Pad`: named input/output declaration with caps.
-- `Pipeline`: synchronous execution with explicit links and current
-  `Tee` fan-out support, plus element lookup by instance name or descriptor
-  type.
+- `Pipeline`: DAG execution with explicit links, `Tee` fan-out, and multi-input
+  joins; offline is synchronous one-shot, live is a threaded pump loop (segments
+  cut at every `Queue`, `run_threaded`); plus element lookup by instance name or
+  descriptor type.
 - `PropertyValue` / `PropertySpec`: inspectable typed configuration.
 - `PropertyEffect`: per-property change behavior for UI-only, sink-display,
   metadata-output, payload-output, caps-output, and lifecycle changes, with an
@@ -63,7 +64,14 @@ Tests:
   `provenance_generation` for UI. Replaces the removed `Buffer::epoch()`. See
   `docs/design/dataflow_sync_model.md`.
 - `Element::can_replay()`: replay-safety signal (default true).
-- `QueueEpochPolicy`: contract-only enum reserved for the live-phase Queue.
+- `Element::is_live()` / `at_end_of_stream()` / `set_stop_token()`: liveness +
+  3-state stream result + cooperative stop.
+- `BufferQueue` (`buffer_queue.hpp`): thread-safe bounded FIFO with
+  Block/DropOldest/DropNewest; `pipeline_segments.hpp` decomposition and
+  `Pipeline::run_threaded` (one `std::jthread` per segment).
+- `QueueEpochPolicy`: documented enum; the drain/flush generation-boundary knob is
+  an optional policy (the vector clock matches by config-independent ancestor
+  identity), not a correctness requirement.
 - `DescriptorRegistry`: linked/static descriptor registry for current plugin
   catalogs; not dynamic plugin loading.
 - `ElementFactoryRegistry`: explicit linked/static factory registry that pairs
@@ -87,7 +95,9 @@ registration so `name` appears consistently before element-specific properties.
 Core must not depend on Torch, NumPy, AES, Kyber, GUI, YAML, plotting, hardware,
 or dynamic plugin loading.
 
-Keep the executor synchronous unless a roadmap phase changes that.
+Offline execution is synchronous; live execution is threaded (segments cut at
+every `Queue`). Elements stay synchronous and thread-unaware — only the engine and
+`Queue`/`BufferQueue` touch threading.
 
 Element name uniqueness is enforced by `Pipeline::add(...)`. Builders and
 CLIs may generate names such as `summary0` and `summary1`, but the pipeline is
@@ -101,8 +111,8 @@ name map and locks the element's `name` property against direct mutation.
 Factory registration is explicit at plugin-catalog level. Do not add static
 self-registration in element translation units.
 
-Do not add full caps negotiation, wildcard caps, dynamic pads, or multi-input
-graph execution without an explicit phase.
+Multi-input joins and the threaded live executor are implemented. Do not add full
+caps negotiation, wildcard caps, or dynamic pads without an explicit phase.
 
 Pipeline observation is diagnostic. Core may emit copied topology/property/pad
 snapshots and copied routed-buffer summaries, but it must not expose mutable
@@ -142,8 +152,12 @@ The executor is a single engine: `run()` is sugar over
 from cache. The executor is the single writer of `Buffer::provenance()` (the
 vector clock); joins fold-match it, so partial rerun is verified, not assumed.
 `Element::can_replay()` (default true, mirrored to the descriptor) signals replay
-safety. `QueueEpochPolicy` is a contract-only enum; `StreamingDrive`, cooperative
-cancel, and `Paused`/pause/resume/preroll are reserved seams.
+safety. The live machinery is **implemented**: the unified `run()` pump loop,
+threaded segments + `BufferQueue`, the aggregator fold-match, cooperative
+`std::stop_token` cancel, and the `Stopped/Running/Paused/Idle` player state
+machine with safe-point forward-apply. `QueueEpochPolicy` drain/flush enforcement
+and `preroll` are the only remaining seams. See
+`docs/design/dataflow_sync_model.md` §12–13.
 
 Metadata-output changes are dataflow changes: they create a new `Buffer` envelope
 with updated metadata (shared payload policy) rather than bypassing downstream

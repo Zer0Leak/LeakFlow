@@ -17,7 +17,11 @@ Primary later research target: Kyber / ML-KEM.
 
 The repository is post-Phase 27 (DAG executor, per-pad outputs, and vector-clock
 buffer provenance; `Buffer::epoch()` removed; `LinearPipeline` renamed to
-`Pipeline`) with early AES plotting annotation support:
+`Pipeline`) **with the live-streaming phase implemented** (threaded segments, the
+real `Queue`/`BufferQueue`, the `Sync` element, `FakeLiveSrc`, the liveness model,
+cooperative stop, and the `Stopped/Running/Paused/Idle` player state machine — see
+`docs/design/dataflow_sync_model.md` §12–14), plus early AES plotting annotation
+support:
 
 - Modular `include/leakflow/...` public include tree is in place.
 - Core, render, base, extras, apps, core plugins, base plugins, and extras
@@ -80,9 +84,17 @@ buffer provenance; `Buffer::epoch()` removed; `LinearPipeline` renamed to
 - `Element::can_replay()` (default true, mirrored into `ElementDescriptor`)
   signals replay safety; `Queue` returns false and clears its buffers in
   `start()`.
-- `QueueEpochPolicy` remains a contract-only enum (reserved for the live-phase
-  Queue generation boundary); `StreamingDrive`, cooperative cancel,
-  `Paused`/pause/resume, and preroll are reserved seams.
+- The live-streaming machinery is **implemented**: `Pipeline::run()` is a unified
+  pump loop (no `run_live()`; live auto-detected via a live source), threaded
+  segments are cut at every `Queue` (`pipeline_segments`, `run_threaded`), `Queue`
+  is a thread-safe `BufferQueue` with Block/DropOldest/DropNewest policy, the
+  aggregator fold-matches queue heads (Barrier/Held/Latest), `Sync` (`N→N`) injects
+  a common ancestor for independent streams, cooperative stop flows through a
+  `std::stop_token` (CLI SIGINT + `--graph` window close), and the session owns a
+  `Stopped/Running/Paused/Idle` player state machine with a safe-point control
+  plane. `QueueEpochPolicy` remains a documented enum; the generation-boundary
+  drain/flush knob is intentionally optional because the vector clock matches by
+  ancestor identity (config-independent). Preroll remains the only unbuilt seam.
 - `AesLeakage.channels` is declared as `payload-output` with downstream
   invalidation on the `leakage` output pad.
 - Metadata descriptors can target all pads, exact pads, or `%u` pad templates;
@@ -145,27 +157,29 @@ clock (fold-match at joins), which made bundles/`Mux`/`Demux` (the old 27.4/27.5
 unnecessary offline — they moved to the live phase. See
 `docs/design/dataflow_sync_model.md`.
 
-The next recommended task is the **live-streaming phase**, with a **finalized
-synchronization & liveness design** (`docs/design/dataflow_sync_model.md`
-Sections 10–11). Four locked decisions:
+The **live-streaming phase is implemented** (offline behavior unchanged), built
+on the **finalized synchronization & liveness design**
+(`docs/design/dataflow_sync_model.md` Sections 10–14). Four locked decisions, all
+now wired:
 
 - **A. Default sync = per-slot Barrier** (the existing vector-clock fold-match) —
   common-origin auto-synced, independent fires free; 99.99% of pipelines need no
-  tuning.
+  tuning. The threaded aggregator runs this fold-match across queue heads.
 - **B. One counter per slot** (generation); **no global (position, version)
   split** — liveness (C) dissolves the need.
 - **C. Liveness-aware property changes** — sources declare live/one-run (default
   one-run), propagated downstream by OR; `SetProperty` on a live-driven element
-  applies *forward* (next buffer), on a one-run-driven element re-emits from cache
-  (today's behavior).
-- **D. The Sync element** (generic `N→N`) is the **sole front door** for custom
+  applies *forward* (next buffer), on a one-run-driven element re-emits from cache.
+- **D. The `Sync` element** (generic `N→N`) is the **sole front door** for custom
   cross-source pairing: it injects a common ancestor so downstream uses the
   default barrier. Bundles/`Mux`/`Demux` are **dropped** (superseded).
 
-The phase implements: a **fake live-capture source** (reads a Torch `.pt`, emits
-one `Buffer` per axis-0 row), the liveness model, threaded segments + the real
-`Queue`, and the Sync element. See `docs/context/ACTIVE_PHASE.md` and `ROADMAP.md`
-Phase 27.next.
+Delivered: `FakeLiveSrc` (reads a Torch `.pt`, emits one `Buffer` per axis-0 row,
+`sample_rate_hz` pacing, then EOS), the liveness model, threaded segments + the
+real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative stop,
+and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
+`docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
+state machine), and §14 (CLI cookbook). No next default phase is set.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -226,7 +240,16 @@ Core:
   safe-point application, cached buffers, downstream-only rerun, monotonic
   `generation` counter, state machine, and copied command events
 - `Element::can_replay()` replay-safety signal
-- `QueueEpochPolicy` enum (contract only; reserved for the live-phase Queue)
+- `Element::is_live()` / `at_end_of_stream()` / `set_stop_token()`; 3-state stream
+  result (Data / NoData / EndOfStream)
+- `BufferQueue` (thread-safe bounded FIFO; Block/DropOldest/DropNewest) and
+  `pipeline_segments` decomposition (`run_threaded`, one `std::jthread` per segment)
+- threaded aggregator (Barrier fold-match across queue heads, realign-on-drop,
+  Held, Latest); live `Pipeline::run()` pump loop; cooperative stop
+- `PipelineSession` `Stopped/Running/Paused/Idle` state machine, pause/resume, and
+  safe-point forward-apply control plane
+- `QueueEpochPolicy` enum (documented; drain/flush generation-boundary knob is an
+  optional policy, not a correctness requirement)
 - `MetadataGroup` / `ForwardingProfile` / `metadata_group` / `profile_for_klass`
   / `forward_metadata` metadata forwarding policy
 - Limited linked caps propagation through generic forwarding elements.
@@ -261,12 +284,16 @@ Core plugin elements:
 - `Summary`
 - `Tee`
 - `Queue`
+- `Sync` (generic `N→N` cross-source pairing; barrier/zip/all-required-once/held/
+  latest policies)
 
 Base plugin elements:
 
 - `TorchFileSrc`
 - `TorchConvert`
 - `TorchFileSink`
+- `FakeLiveSrc` (live `.pt` source: one buffer per axis-0 row, `sample_rate_hz`
+  pacing, then EOS)
 
 Extras plugin elements:
 
@@ -308,10 +335,10 @@ Logging:
 - Dynamic plot sink pads.
 - A standalone `leakflow-plot` executable.
 - YAML/config runner.
-- Multi-input execution model.
-- Live `StreamingDrive`, threaded `Queue` epoch-policy enforcement, cooperative
-  source cancel, and the `Paused`/pause/resume/preroll states (reserved seams in
-  the Phase 25 session, not wired).
+- CPA / key-ranking / attack-report elements (Phase 28).
+- Overlay / correlation plot elements (Phase 29).
+- `QueueEpochPolicy` drain/flush enforcement (optional policy; not required for
+  correctness) and the `preroll` player refinement.
 
 ## Dependencies
 

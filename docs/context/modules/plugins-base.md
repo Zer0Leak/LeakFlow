@@ -33,6 +33,10 @@ CLI/inspect files if affected:
 - `TorchConvert`: explicitly converts one `TorchTensorPayload` to a requested
   Torch dtype and/or device.
 - `TorchFileSink`: saves one `TorchTensorPayload` as a Torch tensor `.pt` file.
+- `FakeLiveSrc`: live source that reads a Torch `.pt` and streams one `Buffer` per
+  axis-0 row (`[1, M]`), then EOS. Declares itself live; `sample_rate_hz` paces it
+  (one trace per `1/rate` s) and stamps `capture.sample_rate_hz`; honors the
+  cooperative stop token. Drives the live phase in tests/CLI without hardware.
 
 Element-specific descriptor data, including pads, properties, stamped metadata,
 and suggested user metadata, lives in each element source file through
