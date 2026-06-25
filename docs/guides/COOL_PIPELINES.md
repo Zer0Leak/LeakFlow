@@ -124,7 +124,7 @@ leakflow --log-level info run --graph \
       @trace_tee.src_1{routing.branch=analysis-poi}; \
       @trace_tee.src_2{routing.branch=analysis-leakage}; \
   AesLeakage@leakage \
-      (channels=[HW(m)],byte_indexes=[0]); \
+      (channels=[HW(y)],byte_indexes=[0]); \
   PearsonPoiFinder@poi \
       (top_k=[50],rank_by=[abs]); \
   CorrelationPoiToPlotAnnotations@ann \
