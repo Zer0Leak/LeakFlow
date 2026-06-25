@@ -50,7 +50,11 @@ enum class ForwardingProfile {
 //
 // Routing is never forwarded by any profile; producers stamp element/branch
 // separately. Capture conflicts are reported with their (non-secret) values.
-void forward_metadata(const ElementInputs& inputs, ForwardingProfile profile, Buffer& output);
+void forward_metadata(
+    const ElementInputs& inputs,
+    ForwardingProfile profile,
+    Buffer& output,
+    std::string_view element_name = {});
 
 // Convenience overload for single-input elements that hold one buffer (the common
 // Reframe case). pad_name is only used by the Analyze profile for origin relabeling.
@@ -58,6 +62,7 @@ void forward_metadata(
     const Buffer& input,
     ForwardingProfile profile,
     Buffer& output,
-    std::string_view pad_name = "in");
+    std::string_view pad_name = "in",
+    std::string_view element_name = {});
 
 } // namespace leakflow

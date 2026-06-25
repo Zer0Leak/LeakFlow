@@ -172,7 +172,7 @@ std::optional<Buffer> TorchConvert::process(std::optional<Buffer> input)
 
     auto converted_payload = leakflow::base::TorchTensorPayload(std::move(tensor));
     Buffer output{converted_payload.caps()};
-    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink");
+    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink", name());
     output.set_metadata("payload.conversion.id", torch_convert_conversion_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(converted_payload)));

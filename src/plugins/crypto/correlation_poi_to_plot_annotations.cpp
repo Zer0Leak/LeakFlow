@@ -311,7 +311,7 @@ std::optional<Buffer> CorrelationPoiToPlotAnnotations::process(std::optional<Buf
         annotations_from(*input, *payload, kind, value_format, precision));
 
     Buffer output{annotation_payload.caps()};
-    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink");
+    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink", name());
     output.set_metadata("payload.conversion.id", correlation_poi_to_plot_annotations_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_metadata("payload.annotation.kind", kind);

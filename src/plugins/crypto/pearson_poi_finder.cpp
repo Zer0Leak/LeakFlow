@@ -630,7 +630,7 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
     const auto score_name = std::string("correlation");
 
     Buffer output{Caps(correlation_poi_caps_type)};
-    forward_metadata(inputs, profile_for_klass(element_kclass()), output);
+    forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     copy_target_semantic_metadata(targets_buffer, output);
     output.set_metadata("routing.element", name());
     output.set_metadata("payload.poi.method", pearson_poi_method_id);

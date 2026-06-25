@@ -107,6 +107,32 @@ public:
     std::vector<std::uint32_t> slot1;
 };
 
+class ThrowingSink final : public leakflow::Element {
+public:
+    explicit ThrowingSink(std::string name)
+        : Element(std::move(name))
+    {
+        add_input_pad(leakflow::Pad("in", leakflow::PadDirection::Input, generic()));
+    }
+
+    std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer>) override
+    {
+        throw std::invalid_argument("detailed threaded failure");
+    }
+};
+
+class ErrorObserver final : public leakflow::PipelineObserver {
+public:
+    void observe(const leakflow::PipelineEvent& event) override
+    {
+        if (event.kind == leakflow::PipelineEventKind::Error) {
+            message = event.message;
+        }
+    }
+
+    std::string message;
+};
+
 // A live source with two outputs carrying the SAME generation (a built-in tee):
 // one firing stamps both src0 and src1 with the same own-slot count.
 class TwoOutLiveSource final : public leakflow::Element {
@@ -281,6 +307,37 @@ int main()
         std::stop_source source;
         (void)pipeline.run_threaded(source.get_token());
         if (!expect(sink_element->count.load() == 10, "single-segment threaded run must stream all 10")) {
+            return 1;
+        }
+    }
+
+    // Threaded failures preserve the originating exception text in the observer
+    // event used by --graph instead of collapsing it to a generic message.
+    {
+        leakflow::Pipeline pipeline;
+        auto observer = std::make_shared<ErrorObserver>();
+        pipeline.set_observer(observer);
+        auto src = pipeline.add(std::make_shared<LiveSource>("src", 1));
+        auto queue = pipeline.add(std::make_shared<BlockingQueue>("q"));
+        auto sink = pipeline.add(std::make_shared<ThrowingSink>("throwing"));
+        pipeline.link(src, "src", queue, "sink");
+        pipeline.link(queue, "src", sink, "in");
+
+        bool threw = false;
+        std::string message;
+        try {
+            std::stop_source source;
+            (void)pipeline.run_threaded(source.get_token());
+        } catch (const std::invalid_argument& error) {
+            threw = true;
+            message = error.what();
+        }
+        if (!expect(threw && message == "detailed threaded failure",
+                "threaded runner did not rethrow the originating exception")) {
+            return 1;
+        }
+        if (!expect(observer->message == "detailed threaded failure",
+                "threaded runner did not expose the originating error to observers")) {
             return 1;
         }
     }

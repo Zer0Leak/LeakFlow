@@ -161,7 +161,7 @@ std::optional<Buffer> NumpyToTorch::process(std::optional<Buffer> input)
     auto torch_payload = leakflow::extras::convert_numpy_to_torch(*numpy_payload, conversion_options_for(*this));
 
     Buffer output{torch_payload.caps()};
-    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink");
+    forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink", name());
     output.set_metadata("payload.conversion.id", numpy_to_torch_conversion_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(torch_payload)));

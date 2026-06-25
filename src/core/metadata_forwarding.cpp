@@ -64,6 +64,11 @@ ForwardingProfile profile_for_klass(std::string_view klass)
 
 namespace {
 
+struct CaptureValue {
+    std::string pad_name;
+    std::string value;
+};
+
 // Apply the per-buffer forwarding rules of profile into output for one input pad,
 // using capture_values to detect conflicting capture facts across inputs.
 void forward_one(
@@ -71,7 +76,8 @@ void forward_one(
     const Buffer& input,
     ForwardingProfile profile,
     Buffer& output,
-    std::map<std::string, std::string>& capture_values)
+    std::map<std::string, CaptureValue>& capture_values,
+    std::string_view element_name)
 {
     const bool copy_payload = profile == ForwardingProfile::PassThrough;
     const bool prefix_origin = profile == ForwardingProfile::Analyze;
@@ -81,12 +87,17 @@ void forward_one(
         case MetadataGroup::Capture: {
             const auto seen = capture_values.find(key);
             if (seen == capture_values.end()) {
-                capture_values.emplace(key, value);
+                capture_values.emplace(key, CaptureValue{std::string(pad_name), value});
                 output.set_metadata(key, value);
-            } else if (seen->second != value) {
-                throw std::invalid_argument(
-                    "conflicting capture metadata '" + key + "': '" + seen->second
-                    + "' vs '" + value + "'");
+            } else if (seen->second.value != value) {
+                auto message = std::string("metadata forwarding");
+                if (!element_name.empty()) {
+                    message += " in element '" + std::string(element_name) + "'";
+                }
+                message += ": conflicting capture metadata '" + key + "': input pad '"
+                    + seen->second.pad_name + "' has '" + seen->second.value
+                    + "', input pad '" + std::string(pad_name) + "' has '" + value + "'";
+                throw std::invalid_argument(std::move(message));
             }
             break;
         }
@@ -118,16 +129,20 @@ void forward_one(
 
 } // namespace
 
-void forward_metadata(const ElementInputs& inputs, ForwardingProfile profile, Buffer& output)
+void forward_metadata(
+    const ElementInputs& inputs,
+    ForwardingProfile profile,
+    Buffer& output,
+    std::string_view element_name)
 {
     if (profile == ForwardingProfile::Source || profile == ForwardingProfile::Sink) {
         return;
     }
 
-    std::map<std::string, std::string> capture_values;
+    std::map<std::string, CaptureValue> capture_values;
     for (const auto& [pad_name, maybe_buffer] : inputs) {
         if (maybe_buffer) {
-            forward_one(pad_name, *maybe_buffer, profile, output, capture_values);
+            forward_one(pad_name, *maybe_buffer, profile, output, capture_values, element_name);
         }
     }
 }
@@ -136,14 +151,15 @@ void forward_metadata(
     const Buffer& input,
     ForwardingProfile profile,
     Buffer& output,
-    std::string_view pad_name)
+    std::string_view pad_name,
+    std::string_view element_name)
 {
     if (profile == ForwardingProfile::Source || profile == ForwardingProfile::Sink) {
         return;
     }
 
-    std::map<std::string, std::string> capture_values;
-    forward_one(pad_name, input, profile, output, capture_values);
+    std::map<std::string, CaptureValue> capture_values;
+    forward_one(pad_name, input, profile, output, capture_values, element_name);
 }
 
 } // namespace leakflow

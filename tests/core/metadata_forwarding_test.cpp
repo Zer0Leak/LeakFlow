@@ -124,12 +124,19 @@ int main()
 
         auto output = make_buffer();
         bool threw = false;
+        std::string message;
         try {
-            forward_metadata(inputs, ForwardingProfile::Analyze, output);
-        } catch (const std::invalid_argument&) {
+            forward_metadata(inputs, ForwardingProfile::Analyze, output, "poi");
+        } catch (const std::invalid_argument& error) {
             threw = true;
+            message = error.what();
         }
         expect(threw, "Analyze did not error on conflicting capture metadata");
+        expect(message.find("element 'poi'") != std::string::npos,
+            "Analyze conflict did not identify the forwarding element");
+        expect(message.find("input pad 'a'") != std::string::npos
+                && message.find("input pad 'b'") != std::string::npos,
+            "Analyze conflict did not identify both conflicting input pads");
     }
 
     // Analyze: an already-forwarded origin key is flattened, not re-nested.

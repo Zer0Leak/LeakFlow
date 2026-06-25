@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -177,6 +178,19 @@ std::string compact_value(std::string_view value) {
     }
 
     return compact;
+}
+
+std::string exception_message(const std::exception_ptr &failure) {
+    if (!failure) {
+        return "unknown threaded segment failure";
+    }
+    try {
+        std::rethrow_exception(failure);
+    } catch (const std::exception &error) {
+        return error.what();
+    } catch (...) {
+        return "unknown threaded segment failure";
+    }
 }
 
 void append_payload_field(std::vector<std::string> &lines, const SummaryField &field, std::size_t depth) {
@@ -1508,7 +1522,7 @@ std::optional<Buffer> Pipeline::run_threaded(std::stop_token stop, SegmentSafePo
     stop_all();
 
     if (failure) {
-        emit(PipelineEvent{.kind = PipelineEventKind::Error, .message = "threaded segment failed"});
+        emit(PipelineEvent{.kind = PipelineEventKind::Error, .message = exception_message(failure)});
         std::rethrow_exception(failure);
     }
 

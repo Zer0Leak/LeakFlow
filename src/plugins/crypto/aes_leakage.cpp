@@ -459,7 +459,7 @@ std::optional<Buffer> AesLeakage::process_inputs(ElementInputs inputs) {
 
   auto payload = leakflow::base::TorchTensorPayload(std::move(leakage));
   Buffer output{payload.caps()};
-  forward_metadata(inputs, profile_for_klass(element_kclass()), output);
+  forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
   output.set_metadata("routing.element", name());
   output.set_metadata("payload.leakage.model", aes_leakage_model_id);
   output.set_metadata("payload.leakage.byte_indexes",
