@@ -6,8 +6,10 @@ threads, the join behavior, and the vector-clock indexes. The **rules** live in
 `dataflow_sync_model.md` (the design of record); this document proves they work.
 
 If a reviewer can follow these ten walkthroughs and agree each one behaves
-correctly, the whole model is validated. It is also the implementation reference
-for the live phase.
+correctly, the whole model is validated. It was the implementation reference for the
+live phase, which is **now implemented** — see `dataflow_sync_model.md` §12
+(implementation status + tests), §13 (the runtime player/control model), and §14 (a
+CLI cookbook to run these scenarios yourself).
 
 ---
 

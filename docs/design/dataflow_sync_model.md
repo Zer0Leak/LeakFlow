@@ -1,24 +1,31 @@
 # Dataflow, Buffer Provenance, and Synchronization Model
 
-Status: design of record for Phase 27 (offline) and the following live phase.
+Status: design of record for the dataflow execution model — **offline (Phase 27)
+and the live phase, both now implemented**.
 
 This document captures the dataflow execution model, the per-pad buffer routing
-contract, the bundle/Mux/Demux structural elements, and the **vector-clock buffer
-provenance** mechanism that replaces `Buffer::epoch()` for all synchronization.
+contract, and the **vector-clock buffer provenance** mechanism that replaces
+`Buffer::epoch()` for all synchronization.
 
 It is the authoritative design for:
 
-- Phase 27 (implemented now): DAG executor, per-pad outputs, Tee/Demux/Mux,
-  bundle transport, the vector clock, and epoch removal — **offline / one-shot
-  only**.
-- The live phase (next, not implemented here): threaded segments, the real
-  `Queue`, backpressure, drops, retention, and the live independent-source policy.
+- **Offline / one-shot (Phase 27, implemented):** DAG executor, per-pad outputs,
+  Tee, the vector clock, and epoch removal.
+- **The live phase (implemented):** threaded segments (one thread per segment, cut
+  at every `Queue`), the real `Queue` as a thread-safe `BufferQueue`, backpressure /
+  drop policies, the aggregator (Barrier fold-match + realign + Held + Latest), the
+  `Sync` element, cooperative stop, the safe-point control plane, and the
+  `Stopped/Running/Paused/Idle` player state machine.
+
+> **Implementation map.** Sections 10–11 are the design; **§12 is the
+> implementation status** (what was built, where, and the tests); **§13 is the
+> runtime control / player model**; **§14 is a CLI cookbook** to drive every
+> feature from the command line. If you only want to *use* the system, read §13–§14.
 
 Companion docs: **`dataflow_sync_walkthroughs.md`** (ten worked pipeline
 examples that exercise this model end-to-end — threads, join behavior, and the
-vector-clock indexes step by step; the validation basis and implementation
-reference), `architecture.md`, `pipeline_controller.md` (Phase 25 control layer),
-`metadata_klass_taxonomy.md`.
+vector-clock indexes step by step), `architecture.md`, `pipeline_controller.md`
+(Phase 25 control layer), `metadata_klass_taxonomy.md`.
 
 > Note: this doc mentions bundle/`Mux`/`Demux` in Sections 4–9; those are
 > **dropped** (superseded by the vector clock and the Sync element) — see the
@@ -312,7 +319,7 @@ Superseded / dropped:
 
 ---
 
-## 10. Live and Queue model (documented, NOT implemented in Phase 27)
+## 10. Live and Queue model (IMPLEMENTED — see §12 for the build status)
 
 ### Segment-threaded execution
 
@@ -595,51 +602,279 @@ are exactly where the stop token is checked.
 
 ---
 
-## 12. Live phase brief (the next phase — implement Section 11 + Section 10)
+## 12. Live phase — implementation status (what was built, where, and the tests)
 
-Goal: implement the live-streaming machinery so the model in Sections 10–11 runs,
-driven and tested by a fake live source. Offline behavior must be unchanged.
+The live-streaming machinery in Sections 10–11 is **implemented and tested**.
+Offline behavior is unchanged (every offline test stayed green throughout). The
+table below maps each design piece to its code and its test; file paths are
+relative to the repo root.
 
-Expected work:
+| Design piece | Where it lives | Test |
+|---|---|---|
+| **Unified `run()` pump loop (11.8)** — no `run_live()`; live auto-detected via `has_live_source()` | `Pipeline::run`, `src/core/pipeline.cpp` | `tests/plugins/base/fake_live_src_test.cpp` |
+| **3-state stream result** (`Data` / `NoData` / `EndOfStream`); `nullopt` reserved for NoData | `Element::at_end_of_stream`, `Pipeline::all_live_sources_at_eos` | as above |
+| **Cooperative stop** — `std::stop_token` through element → pipeline → session; interruptible source wait; CLI **SIGINT** bridge; `--graph` window-close | `Element::set_stop_token`, `Pipeline::set_stop_token`, `InterruptScope` in `src/apps/leakflow/leakflow_cli.cpp` | `fake_live_src_test.cpp` (pre-stop + mid-stream interrupt) |
+| **Fake live source** — Torch `.pt`, one `Buffer` per axis-0 row `[1, M]`; `sample_rate_hz` paces (one trace per `1/rate` s) + stamps `capture.sample_rate_hz`; honors the stop token | `FakeLiveSrc`, `src/plugins/base/fake_live_src.cpp` | `fake_live_src_test.cpp` |
+| **Liveness model (11.5)** — `live`/`one-run` declaration (default one-run); downstream OR-propagation; forward-apply on live-driven, cache-rerun on one-run | `Element::is_live`, `Pipeline::is_live_driven`, `PipelineSession::apply_command` | `tests/core/pipeline_session_test.cpp` |
+| **Segment decomposition** — cut at every `Queue`; one segment per connected component | `decompose_into_segments`, `src/core/pipeline_segments.cpp` | `tests/core/pipeline_segments_test.cpp` |
+| **Threaded runner** — one `std::jthread` per segment; `BufferQueue` handoff; EOS propagation; per-segment safe point | `Pipeline::run_threaded` / `run_source_segment` / `run_consumer_segment` / `execute_segment` | `tests/core/threaded_runner_test.cpp` |
+| **`Queue` = `BufferQueue`** (3 roles) — bounded FIFO; **Block** (backpressure) vs **DropOldest/DropNewest**; thread boundary; generation boundary | `BufferQueue`, `src/core/buffer_queue.cpp`; `Queue` (`thread_boundary = true`) | `tests/core/buffer_queue_test.cpp` |
+| **Aggregator (11.1)** — peek/hold queue heads; **Barrier** fold-match by vector clock; **realign-on-drop** (discard orphans); **Held** reuse (auto from liveness); **Latest** sample-newest; **Zip/AllRequiredOnce** map to the default | `Pipeline::run_consumer_segment` (the `Head` modes) | `threaded_runner_test.cpp` (realign + Held), `tests/core/aggregator_latest_test.cpp` (Latest) |
+| **`Sync` element (11.4)** — generic `N→N`; `policy` property; claims a slot; stamps all N outputs alike (common-ancestor injection) | `Sync`, `src/plugins/core/sync.cpp` | `tests/plugins/core/sync_threaded_test.cpp` (two independent live streams → Sync → downstream Barrier) |
+| **`Sync.policy` dispatch (11.1)** — aggregator reads the join's `policy`; `latest` uses `BufferQueue::try_pull` | `run_consumer_segment` policy block | `aggregator_latest_test.cpp` |
+| **Safe-point control plane** — segment threads apply pending edits at a between-buffer safe point (forward-apply); UI-read serialization via the element mutex | `Pipeline::SegmentSafePoint`, `PipelineSession::apply_commands_for` | `tests/core/threaded_safe_point_test.cpp` |
+| **Pause / resume** — segments park at the safe point; the source stops, the pipeline freezes | `PipelineSession::request_pause/resume/wait_while_paused` | `tests/core/threaded_pause_test.cpp` |
 
-- **Unified `run()` as a pump loop (11.8).** Generalize `run()` from one sweep to
-  `start_all → pump-until-EOS → stop_all`. **No `run_live()`.** A one-run source
-  ends after one buffer (offline unchanged); a live source streams. Keep all
-  offline tests green.
-- **3-state stream result (11.8):** `Data` / `NoData` (transient/timeout — retry) /
-  `EndOfStream` (terminal — drains downstream, ends `run()`). `nullopt`/empty is
-  reserved for `NoData`. A one-run source returns `Data` then `EOS`.
-- **Cooperative stop (11.8):** a `std::stop_source` on `run()`; `stop()` / SIGINT /
-  window-close call `request_stop()`; blocking source/`Queue` waits observe the
-  `std::stop_token` (poll-with-timeout → `NoData` ticks) and unwind promptly;
-  graceful drain → reverse `stop_all` → return.
-- **Fake live-capture source element.** Reads a Torch `.pt` file and emits **one
-  `Buffer` per entry along axis 0** (e.g. a `[50, 5000]` file → 50 buffers of shape
-  `[5000]` or `[1, 5000]`), as a live stream, then **EOS**. It declares itself
-  **live**. Deterministic, from checked-in fixtures, no hardware. Honors the stop
-  token between rows.
-- **Liveness model (11.5).** Source `live`/`one-run` declaration (default
-  one-run); link-/start-time downstream propagation by OR; `live-driven` flag per
-  element. Migrate the session so `SetProperty` on a live-driven element applies
-  **forward** (no `rerun_from`), and on a one-run-driven element keeps the current
-  cache rerun.
-- **Threaded segments + real `Queue` (Section 10).** Segment-threaded execution
-  (threads only at sources and Queues); the `Queue` as rate-decouple +
-  generation-boundary (`QueueEpochPolicy`) + thread boundary; aggregators pull and
-  fold-match across queue heads; no-drop / monotonicity rules on rejoining
-  branches.
-- **The Sync element (11.4).** Generic `N→N`; tuned policy (`Zip` / `Barrier` /
-  `Latest` / `Held` / `AllRequiredOnce`); claims its own slot; stamps all N outputs
-  of a fire alike (common-ancestor injection). Lives in a generic plugin
-  (`leakflow_plugins_core` or a dedicated sync plugin). Downstream uses the default
-  barrier.
-- **Join modes (11.1)** as the Sync element's policy vocabulary (a contract-only
-  `PadInputPolicy`/`SyncMode` enum may be promoted to runtime here).
-- Tests: live source emits per-row buffers; liveness propagation; forward
-  property-change vs cache rerun; threaded Queue handoff; a Sync element pairing two
-  fake live streams and a downstream default-barrier join consuming them.
+**Where `run_threaded` engages.** `Pipeline::should_run_threaded()` is true iff
+there is a **live source AND ≥1 `Queue`** (so the graph decomposes into >1 segment).
+Offline pipelines and Queue-free live pipelines stay on the single-threaded sweep.
+The CLI headless `run` and the session both honor this gate.
 
-Out of scope: bundles / `Mux` / `Demux` (dropped — superseded by the Sync element);
-CPA/report (Phase 28); overlay plots (Phase 29); Kyber (Phase 30+).
+**Generation boundary (drain/flush) — intentionally not separately implemented.**
+The vector clock subsumes it: a join matches by **ancestor identity**, which is
+config-independent, so a mid-run property change forward-applies without mixing
+generations. The `QueueEpochPolicy` *drain/flush-old-config* knob is therefore an
+optional policy (the safe default — let in-flight buffers through — is correct live
+behavior), not a correctness requirement. See §11 and the runtime notes in §13.
 
-Design of record: Sections 10 and 11 of this document.
+Out of scope (unchanged): bundles / `Mux` / `Demux` (dropped — superseded by the
+`Sync` element); CPA/report (Phase 28); overlay plots (Phase 29); Kyber (Phase 30+).
+
+Design of record: Sections 10, 11, 13 of this document.
+
+---
+
+## 13. Runtime control — the player state machine and the safe-point control plane
+
+This section describes how a live pipeline is **driven and edited at runtime** (the
+`--graph` GUI and, partially, the headless CLI). It is GStreamer-inspired but
+simplified to what LeakFlow needs.
+
+### 13.1 The four states
+
+A session is in exactly one **streaming-lifecycle** state. `Paused` and `Idle`
+differ *only* by whether there is more to stream.
+
+| State | Producing? | Resumable? | Cache held? | An edit… |
+|---|---|---|---|---|
+| **Stopped** | no | — | no (torn down) | only stages for the next Start; nothing fires |
+| **Running** | yes (streaming) | — | yes | forward-applies on the next buffer |
+| **Paused** | no (frozen) | **yes** — a live source still has more | yes | is set on the element immediately (Auto) or staged (Manual); the *stream* is frozen, so the rendered result updates on Resume |
+| **Idle** | no | **no** — single run done, or the live source hit EOS | yes | recomputes downstream from cache (offline) or stages forward (live) |
+
+`Stopped` is "dead." `Paused` and `Idle` are both "alive" (resources up, cache
+held); the only difference is whether **Resume** is available.
+
+### 13.2 Transitions and buttons
+
+```
+Stopped --Start--> Running --Pause--> Paused --Resume--> Running
+                      |                                     |
+                      └----------- EOS / sweep done --------┴--> Idle
+   Running/Paused/Idle --Stop--> Stopped       Idle --Start--> Running (re-run from sources)
+```
+
+| Button | Enabled in | Effect |
+|---|---|---|
+| **Start** | Stopped, Idle | run, or (in Idle) re-run from sources — replaces the old "Re-run from sources" |
+| **Stop** | Running, Paused, Idle | full teardown → Stopped |
+| **Pause** | Running | freeze (park the segments) → Paused |
+| **Resume** | Paused | continue streaming → Running |
+
+The graph opens in **Stopped** (the topology is drawn immediately so it isn't
+blank); pass **`--auto-start`** to begin Running on open. A finite live stream
+reaching EOS lands in **Idle** (held, inspectable), not Stopped.
+
+Mapping to GStreamer: `Stopped ≈ NULL`, `Running ≈ PLAYING`, `Paused ≈ PAUSED`
+(clock stopped — here the source's pacing), `Idle ≈ a held PAUSED with no preroll`.
+"Start after EOS = re-run" is GStreamer's seek-to-0 (we already replay via the
+source resetting its cursor).
+
+### 13.3 The safe-point control plane (how edits apply during a threaded run)
+
+Segments stream continuously, so there is no "between sweeps" boundary. Instead each
+segment thread reaches a **between-buffer safe point** (`Pipeline::SegmentSafePoint`,
+called by `run_source_segment` / `run_consumer_segment`) where it:
+
+1. **parks while paused** (`wait_while_paused` / `wait_paused_tick`), and
+2. **applies pending property edits for its own elements** on its own thread
+   (`PipelineSession::apply_commands_for`).
+
+Because the write happens on the *same thread* that reads the property in
+`process()`, there is **no data race and no per-element lock**. A session-level
+`control_mutex_` serializes the session counters across segment threads; the graph
+also passes its `element_mutex` so control-window *reads* serialize against these
+*writes*.
+
+Property changes are **forward-only** during a threaded run (`forward_only_apply_`):
+the change lands on the next buffer; there is no rerun. While **Paused**, the safe
+point keeps applying edits (so in Auto mode the value is set immediately even though
+the stream is frozen).
+
+### 13.4 Auto-apply vs. Manual — orthogonal to the state
+
+A single toggle (UI checkbox **"Auto-apply edits"**) controls *when* an edit is
+applied, in **every** state — it is orthogonal to Stopped/Running/Paused/Idle:
+
+- **Auto** (default): a submitted edit goes straight to the live queue and applies
+  immediately (the next buffer in Running; the held frame in Idle; the element value
+  in Paused).
+- **Manual**: a submitted edit is **staged** (`PipelineSession::set_manual_apply` →
+  `submit` routes to `staged_`); the **Apply** button flushes staging into the live
+  queue (`apply_staged`). This lets you batch several edits and apply them together,
+  in any state.
+
+The toggle therefore lives at *submit time*, not at draining time — draining is
+uniform everywhere.
+
+### 13.5 Property effect by state (summary)
+
+| Element kind / state | Running | Paused | Idle | Stopped |
+|---|---|---|---|---|
+| live-driven element (e.g. source `sample_rate_hz`) | forward → next buffer | set now (Auto) / staged (Manual); effect on Resume | stage forward (effect on next Start) | stage for next Start |
+| one-run / offline element | n/a (forward) | n/a | **recompute from cache** (`rerun_from`) | stage for next Start |
+| `Queue.max_size` (the `BufferQueue` capacity) | applied at the **next Start** only — capacity is fixed per run; you cannot resize a live queue | — | takes effect at next Start | takes effect at next Start |
+
+`Queue.max_size` is intentionally **restart-scoped**: the `BufferQueue` is created
+when the run starts, and resizing a live queue would drop/reorder in-flight buffers.
+
+### 13.6 Implementation pointers
+
+- State + pause primitive: `PipelineSession` (`state()`, `set_state`,
+  `request_pause/resume`, `wait_while_paused`, `wait_paused_tick`).
+- Request-driven worker + buttons: the session worker and toolbar in
+  `src/plot/pipeline_graph.cpp` / `src/plot/imgui_plot_loop.cpp`;
+  `PipelineControlRuntime` (`request_start/stop/pause/resume/apply`,
+  `set_run_stopper`, `auto_recompute`).
+- Numeric editors commit on Enter/focus-out (never per keystroke); int properties
+  have explicit `-`/`+` step buttons.
+
+---
+
+## 14. CLI cookbook — drive every feature from the command line
+
+Recipes to *experiment* with sync, queues, threads, states, drops, and provenance.
+All use the checked-in fixtures (no hardware):
+
+- `tests/fixtures/aes/sync/key_01/traces_first_50.pt` — a `[50, 5000]` trace file.
+- `tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt` — a `[50, 16]` file.
+
+Build first: `cmake --build build -j`. Add `--log-level info` to watch buffers flow
+(`--log-level warn` is quieter). Add `--graph` for the interactive window.
+
+### 14.1 Offline (no live source) — one sweep
+
+```bash
+./build/leakflow run 'FakeSrc ! Summary ! FakeSink'
+```
+
+### 14.2 A live source — pacing and EOS
+
+`FakeLiveSrc` streams one buffer per axis-0 row, then EOS. `sample_rate_hz` paces it
+(one trace per `1/rate` seconds) and stamps `capture.sample_rate_hz`:
+
+```bash
+# 50 rows, ~2 traces/sec -> ~25 s, visible in the log
+./build/leakflow --log-level info run \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=2.0) ! Summary ! FakeSink'
+
+# no rate -> as fast as possible
+./build/leakflow run \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+```
+
+### 14.3 Live + Queue = threaded segments (the core live path)
+
+A `Queue` cuts the pipeline into segments; each runs on its own thread, handing off
+through a thread-safe `BufferQueue`. This is the only difference between §14.2 (one
+thread) and below (two threads):
+
+```bash
+# Block queue (drop_oldest=false) = lossless backpressure: all 50 rows arrive
+./build/leakflow --log-level info run \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue(max_size=8, drop_oldest=false) ! Summary ! FakeSink'
+```
+
+**Lossy capture** (drop oldest under backpressure) — for hardware you cannot slow:
+
+```bash
+# small, fast, dropping -> far fewer than 50 survive (capture-style)
+./build/leakflow --log-level warn run \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=200.0) ! Queue(max_size=1, drop_oldest=true) ! Summary ! FakeSink'
+```
+
+### 14.4 Cooperative stop (Ctrl+C)
+
+Start a paced live+Queue run and press **Ctrl+C**: it drains and exits in a fraction
+of a second (it does not wait out the remaining traces, nor hard-kill):
+
+```bash
+./build/leakflow --log-level info run \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+# ...press Ctrl+C mid-stream
+```
+
+### 14.5 The graph — player controls and live editing
+
+```bash
+# opens in Stopped; click Start. Try Pause/Resume, edit sample_rate_hz live, toggle Auto-apply.
+./build/leakflow run --graph \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+
+# begin running immediately on open
+./build/leakflow run --graph --auto-start \
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+```
+
+In the graph: change `sample_rate_hz` while **Running** → re-paces on the next
+buffer; **Pause** → the stream freezes; in **Idle** (after EOS) edits to downstream
+elements recompute from cache. The **Vector Clock** and **Buffer Clocks** panels show
+provenance per slot and per link.
+
+### 14.6 Sync — pairing two independent live streams (fan-in / fan-out)
+
+Two unrelated sources have no shared clock slot; `Sync` injects a **common ancestor**
+so a downstream Barrier join pairs them for free. CLI fan-in needs the inputs
+declared **before** the join (source-before-sink), then `element.pad` addressing:
+
+```bash
+./build/leakflow --log-level info run \
+  'FakeLiveSrc@a(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue@qa(drop_oldest=false) ;
+   FakeLiveSrc@b(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt) ! Queue@qb(drop_oldest=false) ;
+   @qa.src ! Sync@s.in_0 ;
+   @qb.src ! @s.in_1 ;
+   @s.out_0 ! Summary ! FakeSink ;
+   @s.out_1 ! Summary ! FakeSink'
+```
+
+`Sync@s.in_0` *creates and addresses* a pad inline; `@s.in_1` / `@s.out_0` reference
+the same instance. Note the idiom: **declare each input chain first, then the join.**
+
+### 14.7 Sync policy — Latest (sample-newest)
+
+Set `Sync(policy=...)` to choose how it pairs (`barrier` default | `zip` |
+`all-required-once` | `held` | `latest`). `latest` makes the primary input drive and
+the rest sample the **newest** buffer, dropping intermediates:
+
+```bash
+./build/leakflow run \
+  'FakeLiveSrc@a(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue@qa(drop_oldest=false) ;
+   FakeLiveSrc@b(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt) ! Queue@qb(drop_oldest=false) ;
+   @qa.src ! Sync@s(policy=latest).in_0 ;
+   @qb.src ! @s.in_1 ;
+   @s.out_0 ! Summary ! FakeSink ;
+   @s.out_1 ! Summary ! FakeSink'
+```
+
+### 14.8 Inspecting threads and provenance
+
+Run any of the above with `--graph` and open the **Buffer Clocks (per link)** panel:
+each buffer's vector clock is decoded as `element=count` for every non-zero slot, so
+you can watch the clock ride through the `Queue` untouched and see the `Sync` slot
+appear on `out_0`/`out_1`. The **Vector Clock (provenance counts)** panel lists the
+running production count per slot. The graph's element tooltips show each element's
+claimed clock slot(s).
+
+> Tip: the number of segment threads = connected components after cutting at every
+> `Queue`. One `Queue` → two threads; two queues into one join → three threads (two
+> producers + the shared consumer). See §10.
