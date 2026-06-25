@@ -40,6 +40,18 @@ bool throws_invalid_argument(Function function)
     return false;
 }
 
+template <typename Function>
+bool throws_logic_error(Function function)
+{
+    try {
+        function();
+    } catch (const std::logic_error&) {
+        return true;
+    }
+
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -150,6 +162,96 @@ int main()
             (void)leakflow::base::pearson_correlation(columns, torch::ones({2, 2}));
         }),
             "Pearson accepted mismatched row counts")) {
+        return 1;
+    }
+
+    leakflow::base::InteractivePearsonCorrelation interactive;
+    if (!expect(interactive.empty(), "Interactive Pearson did not start empty")) {
+        return 1;
+    }
+    if (!expect(throws_logic_error([&interactive] { (void)interactive.correlation(); }),
+                "Interactive Pearson returned a result without observations")) {
+        return 1;
+    }
+
+    for (std::int64_t row = 0; row < columns.size(0); ++row) {
+        const auto current = interactive.update(columns.slice(0, row, row + 1), targets.slice(0, row, row + 1));
+        if (!expect(interactive.observation_count() == row + 1, "Interactive Pearson observation count was wrong")) {
+            return 1;
+        }
+        if (row == 0 &&
+            !expect_close(current, torch::zeros({2, 3}), "Interactive Pearson single-row result was not zero")) {
+            return 1;
+        }
+    }
+    if (!expect_close(interactive.correlation(),
+                      correlation,
+                      "Interactive Pearson single-row updates differed from "
+                      "batch Pearson")) {
+        return 1;
+    }
+
+    const auto longer_columns = torch::tensor(
+        {
+            {1.0, 2.0, 4.0},
+            {2.0, 1.0, 3.0},
+            {4.0, 3.0, 2.0},
+            {7.0, 5.0, 1.0},
+            {8.0, 9.0, 0.0},
+        },
+        torch::TensorOptions().dtype(torch::kFloat32));
+    const auto target_set_zero = torch::tensor(
+        {
+            {1.0, 5.0},
+            {3.0, 4.0},
+            {2.0, 3.0},
+            {8.0, 2.0},
+            {9.0, 1.0},
+        },
+        torch::TensorOptions().dtype(torch::kFloat32));
+    const auto target_set_one = torch::tensor(
+        {
+            {5.0, 1.0},
+            {4.0, 2.0},
+            {4.0, 4.0},
+            {2.0, 7.0},
+            {0.0, 8.0},
+        },
+        torch::TensorOptions().dtype(torch::kFloat32));
+    const auto independent_targets = torch::stack({target_set_zero, target_set_one});
+
+    leakflow::base::PearsonCorrelationOptions interactive_float64_options;
+    interactive_float64_options.compute_dtype = leakflow::base::PearsonComputeDtype::Float64;
+    leakflow::base::InteractivePearsonCorrelation batched_interactive(interactive_float64_options);
+    (void)batched_interactive.update(longer_columns.slice(0, 0, 2), independent_targets.slice(1, 0, 2));
+    const auto batched_interactive_result =
+        batched_interactive.update(longer_columns.slice(0, 2, 5), independent_targets.slice(1, 2, 5));
+    const auto full_result =
+        leakflow::base::pearson_correlation(longer_columns, independent_targets, interactive_float64_options);
+    if (!expect(batched_interactive_result.sizes() == full_result.sizes(),
+                "Interactive Pearson independent-set output shape was wrong")) {
+        return 1;
+    }
+    if (!expect_close(batched_interactive_result,
+                      full_result,
+                      "Interactive Pearson uneven batches differed from batch Pearson")) {
+        return 1;
+    }
+
+    if (!expect(throws_invalid_argument([&batched_interactive, &longer_columns] {
+                    (void)batched_interactive.update(longer_columns.slice(0, 0, 1), torch::ones({3, 1, 2}));
+                }),
+                "Interactive Pearson accepted a changed independent target shape")) {
+        return 1;
+    }
+
+    batched_interactive.reset();
+    if (!expect(batched_interactive.empty() && batched_interactive.observation_count() == 0,
+                "Interactive Pearson reset did not clear state")) {
+        return 1;
+    }
+    const auto reset_result = batched_interactive.update(longer_columns, independent_targets);
+    if (!expect_close(reset_result, full_result, "Interactive Pearson reset could not start a new accumulation")) {
         return 1;
     }
 
