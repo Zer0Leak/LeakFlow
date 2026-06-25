@@ -481,6 +481,20 @@ int main()
         return 1;
     }
 
+    const auto reversed_declaration_message = invalid_argument_message([] {
+        (void)leakflow::cli::build_builtin_pipeline_from_expression(
+            "Queue@sink; Queue@source; @source.src ! @sink.sink");
+    });
+    if (!expect(
+            reversed_declaration_message
+                && *reversed_declaration_message
+                    == "cannot link source endpoint '@source.src' to sink endpoint '@sink.sink': "
+                       "source element '@source' was declared after sink element '@sink'; declare the "
+                       "source before the sink",
+            "CLI declaration-order error did not identify both link endpoints")) {
+        return 1;
+    }
+
     leakflow::ElementFactoryRegistry core_factories;
     leakflow::plugins::core::register_element_factories(core_factories);
     auto custom_pipeline = leakflow::cli::build_pipeline_from_expression(

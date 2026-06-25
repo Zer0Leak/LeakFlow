@@ -484,7 +484,16 @@ void Pipeline::link(std::shared_ptr<Element> source_element, std::string source_
     }
 
     if (*source_index >= *sink_index) {
-        throw std::invalid_argument("source element must appear before sink element");
+        std::ostringstream message;
+        message << "cannot link source endpoint '@" << source_element->name() << '.' << source_pad_name
+                << "' to sink endpoint '@" << sink_element->name() << '.' << sink_pad_name << "': ";
+        if (*source_index == *sink_index) {
+            message << "source and sink are the same element; links must connect distinct elements";
+        } else {
+            message << "source element '@" << source_element->name() << "' was declared after sink element '@"
+                    << sink_element->name() << "'; declare the source before the sink";
+        }
+        throw std::invalid_argument(message.str());
     }
 
     auto *source_pad = find_pad_named(source_element->output_pads(), source_pad_name);

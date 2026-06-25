@@ -258,12 +258,26 @@ int main()
             "missing sink pad was not rejected")) {
         return 1;
     }
-    if (!expect(throws_invalid_argument_for_link(valid_pipeline, normalize, "normalized", source, "unused-in"),
-            "linking to an earlier element was not rejected")) {
+    const auto reversed_link_message =
+        invalid_argument_message_for_link(valid_pipeline, normalize, "normalized", source, "unused-in");
+    if (!expect(
+            reversed_link_message
+                && *reversed_link_message
+                    == "cannot link source endpoint '@normalize.normalized' to sink endpoint "
+                       "'@source.unused-in': source element '@normalize' was declared after sink element "
+                       "'@source'; declare the source before the sink",
+            "linking to an earlier element did not identify both endpoints and their declaration order")) {
         return 1;
     }
-    if (!expect(throws_invalid_argument_for_link(valid_pipeline, normalize, "normalized", normalize, "traces"),
-            "linking an element to itself was not rejected")) {
+    const auto self_link_message =
+        invalid_argument_message_for_link(valid_pipeline, normalize, "normalized", normalize, "traces");
+    if (!expect(
+            self_link_message
+                && *self_link_message
+                    == "cannot link source endpoint '@normalize.normalized' to sink endpoint "
+                       "'@normalize.traces': source and sink are the same element; links must connect "
+                       "distinct elements",
+            "self-link rejection did not identify both endpoints")) {
         return 1;
     }
 
