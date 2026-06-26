@@ -250,6 +250,14 @@ int main()
             "AttackStats score_gap metadata was wrong")) {
         return 1;
     }
+    if (!expect(stats_output->metadata("attack.method") == crypto_plugin::cpa_attack_method_id,
+            "AttackStats did not preserve attack method metadata")) {
+        return 1;
+    }
+    if (!expect(stats_output->metadata("attack.score.method") == "max_abs",
+            "AttackStats did not preserve attack score metadata")) {
+        return 1;
+    }
 
     crypto_plugin::AttackStats custom_stats;
     custom_stats.set_property("top_k", std::int64_t{1});
@@ -307,6 +315,18 @@ int main()
     }
     if (!expect(annotation_output->metadata("payload.annotation.success_source") == "stats",
             "AttackStatsToPlotAnnotations success source metadata was wrong")) {
+        return 1;
+    }
+    if (!expect(annotation_output->metadata("attack.method") == crypto_plugin::cpa_attack_method_id,
+            "AttackStatsToPlotAnnotations did not preserve attack method metadata")) {
+        return 1;
+    }
+    if (!expect(annotation_output->metadata("attack.score.method") == "max_abs",
+            "AttackStatsToPlotAnnotations did not preserve attack score metadata")) {
+        return 1;
+    }
+    if (!expect(annotation_output->metadata("attack.stats.score_gap") == "relative_margin",
+            "AttackStatsToPlotAnnotations did not preserve attack stats metadata")) {
         return 1;
     }
 

@@ -82,6 +82,15 @@ namespace {
     return payload;
 }
 
+void copy_attack_metadata(const Buffer& input, Buffer& output)
+{
+    for (const auto& [key, value] : input.metadata()) {
+        if (key.starts_with("attack.")) {
+            output.set_metadata(key, value);
+        }
+    }
+}
+
 [[nodiscard]] std::vector<leakflow::base::PlotAnnotation> annotations_from(
     const AttackStatsPayload& payload,
     std::string_view kind,
@@ -281,6 +290,7 @@ std::optional<Buffer> AttackStatsToPlotAnnotations::process(std::optional<Buffer
 
     Buffer output{annotation_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink", name());
+    copy_attack_metadata(*input, output);
     output.set_metadata("payload.conversion.id", attack_stats_to_plot_annotations_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_metadata("payload.annotation.kind", kind);
