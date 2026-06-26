@@ -11,12 +11,12 @@
 
 namespace leakflow::plugins::crypto {
 
-inline constexpr auto cpa_attack_caps_type = "leakflow/cpa-attack";
-inline constexpr auto cpa_attack_stats_caps_type = "leakflow/cpa-attack-stats";
+inline constexpr auto attack_scores_caps_type = "leakflow/attack-scores";
+inline constexpr auto attack_stats_caps_type = "leakflow/attack-stats";
 
-class CpaAttackPayload final : public Payload {
+class AttackScoresPayload final : public Payload {
 public:
-    CpaAttackPayload(
+    AttackScoresPayload(
         torch::Tensor scores,
         torch::Tensor ranking,
         torch::Tensor best_guess,
@@ -72,9 +72,9 @@ private:
     std::int64_t top_k_ = 5;
 };
 
-class CpaAttackStatsPayload final : public Payload {
+class AttackStatsPayload final : public Payload {
 public:
-    CpaAttackStatsPayload(
+    AttackStatsPayload(
         torch::Tensor true_rank,
         torch::Tensor true_guess,
         torch::Tensor true_score,

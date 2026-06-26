@@ -44,9 +44,9 @@ The missing pieces are:
 Implemented CPA pieces:
 
 - `CpaAttack`, a generic Pearson CPA ranking element,
-- `CpaAttackPayload`, an attack-result payload with scores/ranking/best tensors,
-- `CpaAttackStats`, known-key true-rank/success diagnostics,
-- `CpaAttackStatsToPlotAnnotations`, a first plot bridge for marking stats-backed
+- `AttackScoresPayload`, an attack-result payload with scores/ranking/best tensors,
+- `AttackStats`, known-key true-rank/success diagnostics,
+- `AttackStatsToPlotAnnotations`, a first plot bridge for marking stats-backed
   best samples on `TracePlot`,
 - `correlation_mode=auto|recompute|incremental` with read-only
   `active_correlation_mode`.
@@ -82,7 +82,7 @@ The implemented AES CPA path is:
 ```text
 traces ─────────────────────────────────┐
                                         ▼
-plaintexts -> AesLeakageHypothesis -> CpaAttack -> CpaAttackStats -> plots
+plaintexts -> AesLeakageHypothesis -> CpaAttack -> AttackStats -> plots
 ```
 
 Later, Kyber should replace only the hypothesis element:
@@ -90,7 +90,7 @@ Later, Kyber should replace only the hypothesis element:
 ```text
 traces ──────────────────────────────────┐
                                          ▼
-public data -> KyberLeakageHypothesis -> CpaAttack -> CpaAttackStats -> plots
+public data -> KyberLeakageHypothesis -> CpaAttack -> AttackStats -> plots
 ```
 
 `CpaAttack` must not know AES, S-boxes, plaintext byte positions, Kyber
@@ -320,7 +320,7 @@ attack.ranking.order = descending_score
 attack.ranking.values = guess_index
 ```
 
-## `CpaAttackPayload`
+## `AttackScoresPayload`
 
 `CpaAttack` should emit a dedicated payload instead of forcing downstream
 elements to infer meaning from one raw tensor.
@@ -347,15 +347,15 @@ unit 1: best=0x7e score=0.76 sample=1901 channel=HW(y)
 The output tensor values stay numeric. Interpretation, score method, channel
 selection, and ranking meaning are metadata.
 
-## `CpaAttackStats`
+## `AttackStats`
 
-`CpaAttackStats` computes known-key diagnostics when the true key/secret is
+`AttackStats` computes known-key diagnostics when the true key/secret is
 available.
 
 Inputs:
 
 ```text
-attack_result
+scores
 truth [U] or AES key [16]
 ```
 
@@ -413,7 +413,7 @@ Plotting should stay downstream from the attack computation.
 Useful plot/converter elements:
 
 ```text
-CpaAttackStatsToPlotAnnotations    // implemented
+AttackStatsToPlotAnnotations    // implemented
 CpaScorePlot                  // future
 CpaRankPlot                   // future
 CpaCorrelationPlot            // future
@@ -428,7 +428,7 @@ Useful visualizations:
 - correlation curve for a selected guess/channel,
 - correlation heatmap `[G,S]` for one unit/channel.
 
-The first implemented plot bridge is `CpaAttackStatsToPlotAnnotations`, which
+The first implemented plot bridge is `AttackStatsToPlotAnnotations`, which
 marks each attack unit's best sample on `TracePlot` using known-key stats as the
 source of truth for PASS/FAIL. A dedicated score/rank view should come next
 because it makes it obvious whether the correct key byte is separating from the
@@ -515,7 +515,7 @@ The hypothesis element must not own:
 - known-key statistics,
 - CPA state accumulation.
 
-Those remain in `CpaAttack`, `CpaAttackStats`, and plot elements.
+Those remain in `CpaAttack`, `AttackStats`, and plot elements.
 
 ## Implementation Plan
 
@@ -586,7 +586,7 @@ TorchFileSrc@plaintexts -> AesLeakageHypothesis -> CpaAttack.hypotheses
 CpaAttack -> Summary
 ```
 
-### Phase 4: `CpaAttackPayload` and summaries
+### Phase 4: `AttackScoresPayload` and summaries
 
 Status: implemented.
 
@@ -598,7 +598,7 @@ Validation:
 - payload shape/type validation,
 - summary output includes best guess, score, channel, and sample.
 
-### Phase 5: `CpaAttackStats`
+### Phase 5: `AttackStats`
 
 Status: implemented.
 
@@ -609,17 +609,17 @@ Validation:
 - true-key rank is correct for synthetic fixtures,
 - AES key fixture produces expected true-key extraction/ranking behavior.
 
-### Phase 6: CPA plots
+### Phase 6: Attack stats plots
 
-Status: implemented for the first plot bridge (`CpaAttackStatsToPlotAnnotations`);
+Status: implemented for the first plot bridge (`AttackStatsToPlotAnnotations`);
 dedicated score/rank/correlation/heatmap plot elements remain future work.
 
 Add attack-focused plot converters/elements.
 
-`CpaAttackStatsToPlotAnnotations` accepts CPA known-key stats:
+`AttackStatsToPlotAnnotations` accepts known-key attack stats:
 
 ```text
-@attack ! @stats.attack_result
+@attack ! @stats.scores
 @key    ! @stats.truth
 @stats  ! @ann
 ```
@@ -686,8 +686,8 @@ With known-key stats:
 
 ```text
 TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_attack/key_01/key.pt);
-CpaAttackStats@stats;
+AttackStats@stats;
 
-@attack ! @stats.attack_result;
+@attack ! @stats.scores;
 @key_src ! @stats.truth
 ```

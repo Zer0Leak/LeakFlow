@@ -535,6 +535,38 @@ void skip_spaces(std::string_view text, std::size_t &index) {
     return nullptr;
 }
 
+[[nodiscard]] std::string pad_names_or_none(const std::vector<Pad> &pads) {
+    if (pads.empty()) {
+        return "(none)";
+    }
+
+    std::string output;
+    for (std::size_t index = 0; index < pads.size(); ++index) {
+        if (index != 0) {
+            output += ", ";
+        }
+        output += pads[index].name();
+    }
+    return output;
+}
+
+[[nodiscard]] std::string pad_template_names_or_none(const Element &element, PadDirection direction) {
+    std::string output;
+    for (const auto &pad : element.pad_templates()) {
+        if (pad.direction() != direction) {
+            continue;
+        }
+        if (!output.empty()) {
+            output += ", ";
+        }
+        output += pad.name();
+    }
+    if (output.empty()) {
+        return "(none)";
+    }
+    return output;
+}
+
 [[nodiscard]] bool has_unsigned_pad_placeholder(std::string_view pad_selector) {
     return pad_selector.find("%u") != std::string_view::npos || pad_selector.find("%U") != std::string_view::npos;
 }
@@ -1042,7 +1074,22 @@ private:
 
     void validate_pad_exists(const Element &element, std::string_view pad_name) const {
         if (find_pad(element, pad_name) == nullptr && !element.can_request_pad(pad_name)) {
-            throw std::invalid_argument("unknown pad");
+            std::ostringstream message;
+            message << "unknown pad '@" << element.name() << "." << pad_name << "' on element '"
+                    << element.element_type() << "@" << element.name() << "'; input pads: "
+                    << pad_names_or_none(element.input_pads()) << "; output pads: "
+                    << pad_names_or_none(element.output_pads());
+
+            const auto input_templates = pad_template_names_or_none(element, PadDirection::Input);
+            const auto output_templates = pad_template_names_or_none(element, PadDirection::Output);
+            if (input_templates != "(none)") {
+                message << "; input pad templates: " << input_templates;
+            }
+            if (output_templates != "(none)") {
+                message << "; output pad templates: " << output_templates;
+            }
+
+            throw std::invalid_argument(message.str());
         }
     }
 

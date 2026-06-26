@@ -54,7 +54,7 @@ CLI/inspect files if affected:
   downstream invalidation on `hypotheses`).
 - `CpaAttack` (`Analyze/SCA/Attack/CPA`): generic Pearson CPA ranker. Required
   named inputs: `features` (`[N,S]` or `[U,N,S]` Torch tensor) and `hypotheses`
-  (`[U,G,N,L]` Torch tensor). Emits `CpaAttackPayload` with `scores [U,G]`,
+  (`[U,G,N,L]` Torch tensor). Emits `AttackScoresPayload` with `scores [U,G]`,
   `ranking [U,G]`, `best_guess [U]`, best score/channel/sample tensors, guess
   values, and optional `correlations [U,G,L,S]`. Properties include
   `score_method=max_abs|max_positive|max_negative`,
@@ -62,10 +62,10 @@ CLI/inspect files if affected:
   `correlation_mode=auto|recompute|incremental`, read-only
   `active_correlation_mode`, `compute_dtype=input|float32|float64`, and
   `epsilon`. In incremental active mode, `can_replay()` is false.
-- `CpaAttackStats` (`Analyze/SCA/Attack/Stats`): known-key diagnostics for a CPA
-  result. Inputs: `attack_result` (`leakflow/cpa-attack`) and `truth` Torch
+- `AttackStats` (`Analyze/SCA/Attack/Stats`): known-key diagnostics for an attack
+  score result. Inputs: `scores` (`leakflow/attack-scores`) and `truth` Torch
   tensor (`[U]`, `[1,U]`, `[16]`, or AES key-like `[N,16]`). Emits
-  `CpaAttackStatsPayload` with `true_rank [U]`, `true_score [U]`,
+  `AttackStatsPayload` with `true_rank [U]`, `true_score [U]`,
   `top1_guess [U]`, `top2_guess [U]`, `score_gap [U]` (legacy alias for top-1
   relative margin), `success [U]`, and top-K diagnostic tensors such as
   `topk_guess [U,K]`, `topk_score [U,K]`, `topk_margin [U,K]`,
@@ -74,14 +74,14 @@ CLI/inspect files if affected:
   `top_k` (default 5) and `confidence_metrics` (default
   `[relative_margin,z_score,robust_z_score]`; allowed values are `margin`,
   `relative_margin`, `z_score`, `robust_z_score`, and `top_k_separation`).
-- `CpaAttackStatsToPlotAnnotations` (`Convert/SCA/Plot/Annotations`): converts
-  `CpaAttackStatsPayload` into generic `PlotAnnotationPayload` markers at each
-  unit's best sample. Required input is `sink` (`leakflow/cpa-attack-stats`).
+- `AttackStatsToPlotAnnotations` (`Convert/SCA/Plot/Annotations`): converts
+  `AttackStatsPayload` into generic `PlotAnnotationPayload` markers at each
+  unit's best sample. Required input is `sink` (`leakflow/attack-stats`).
   Annotations include `success`, `true rank`, `true guess`, `true score`, top-1
   score, relative margin, and a `correct key` field for failed units. Annotation
   `norm_value` is positive for success and negative for failure, making recovered
   and failed units visually separate in `TracePlot`. Useful as
-  `@attack ! @stats.attack_result; @key ! @stats.truth; @stats ! @ann ! @plot.annotations`.
+  `@attack ! @stats.scores; @key ! @stats.truth; @stats ! @ann ! @plot.annotations`.
 - `PearsonPoiFinder` (`Analyze/SCA/Statistics/PoI`): joins the trace branch
   (`features`) and the leakage branch (`targets`) and selects per-target PoI sample
   indexes by Pearson correlation. Emits a `CorrelationPoiPayload`. Properties
@@ -95,8 +95,8 @@ CLI/inspect files if affected:
 Payload types:
 
 - `CorrelationPoiPayload` (`include/leakflow/plugins/crypto/correlation_poi_payload.hpp`).
-- `CpaAttackPayload` and `CpaAttackStatsPayload`
-  (`include/leakflow/plugins/crypto/cpa_attack_payload.hpp`).
+- `AttackScoresPayload` and `AttackStatsPayload`
+  (`include/leakflow/plugins/crypto/attack_payload.hpp`).
 
 The descriptor catalog assembles the linked plugin descriptor and registers
 matching element factories with `ElementFactoryRegistry`. Author/license metadata:

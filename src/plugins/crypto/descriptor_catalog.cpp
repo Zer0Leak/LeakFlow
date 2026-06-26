@@ -4,8 +4,8 @@
 #include "leakflow/plugins/crypto/aes_leakage_hypothesis.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_to_plot_annotations.hpp"
 #include "leakflow/plugins/crypto/cpa_attack.hpp"
-#include "leakflow/plugins/crypto/cpa_attack_stats.hpp"
-#include "leakflow/plugins/crypto/cpa_attack_stats_to_plot_annotations.hpp"
+#include "leakflow/plugins/crypto/attack_stats.hpp"
+#include "leakflow/plugins/crypto/attack_stats_to_plot_annotations.hpp"
 #include "leakflow/plugins/crypto/pearson_poi_finder.hpp"
 #include "crypto_plugin_constants.hpp"
 
@@ -28,8 +28,8 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 AesLeakage::descriptor(),
                 AesLeakageHypothesis::descriptor(),
                 CpaAttack::descriptor(),
-                CpaAttackStats::descriptor(),
-                CpaAttackStatsToPlotAnnotations::descriptor(),
+                AttackStats::descriptor(),
+                AttackStatsToPlotAnnotations::descriptor(),
                 PearsonPoiFinder::descriptor(),
                 CorrelationPoiToPlotAnnotations::descriptor(),
             },
@@ -69,11 +69,11 @@ void register_element_factories(ElementFactoryRegistry& registry)
             {"CpaAttack", [](std::string name) {
                  return std::make_shared<CpaAttack>(std::move(name));
              }},
-            {"CpaAttackStats", [](std::string name) {
-                 return std::make_shared<CpaAttackStats>(std::move(name));
+            {"AttackStats", [](std::string name) {
+                 return std::make_shared<AttackStats>(std::move(name));
              }},
-            {"CpaAttackStatsToPlotAnnotations", [](std::string name) {
-                 return std::make_shared<CpaAttackStatsToPlotAnnotations>(std::move(name));
+            {"AttackStatsToPlotAnnotations", [](std::string name) {
+                 return std::make_shared<AttackStatsToPlotAnnotations>(std::move(name));
              }},
             {"PearsonPoiFinder", [](std::string name) {
                  return std::make_shared<PearsonPoiFinder>(std::move(name));

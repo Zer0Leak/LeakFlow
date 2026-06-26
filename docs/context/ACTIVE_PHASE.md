@@ -230,8 +230,8 @@ Phase 24 has added `leakflow_plugins_crypto`:
 The AES CPA/report slice has added:
 
 - `CpaAttack` for generic Pearson CPA scoring/ranking,
-- `CpaAttackStats` for known-key true-rank/success diagnostics,
-- `CpaAttackStatsToPlotAnnotations` for marking stats-backed CPA best samples on
+- `AttackStats` for known-key true-rank/success diagnostics,
+- `AttackStatsToPlotAnnotations` for marking stats-backed attack best samples on
   `TracePlot`.
 
 Early AES plotting support has added:

@@ -473,11 +473,20 @@ int main()
         }
     }
 
-    // A pad selector that matches no template is rejected at parse time.
-    if (!expect(throws_invalid_argument([] {
+    // A pad selector that matches no template is rejected at parse time with the
+    // exact element/pad context.
+    const auto unknown_pad_message = invalid_argument_message([] {
             (void)leakflow::cli::build_builtin_pipeline_from_expression("FakeSrc@a ! Queue@qa ; @qa.src ! Sync@s.nope");
-        }),
+        });
+    if (!expect(unknown_pad_message.has_value(),
             "creation-with-pad accepted an unknown pad")) {
+        return 1;
+    }
+    if (!expect(
+            *unknown_pad_message
+                == "unknown pad '@s.nope' on element 'Sync@s'; input pads: (none); output pads: (none); "
+                   "input pad templates: in_%u; output pad templates: out_%u",
+            "creation-with-pad unknown-pad error did not identify the element and pad")) {
         return 1;
     }
 

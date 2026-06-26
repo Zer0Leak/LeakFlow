@@ -8,15 +8,15 @@
 
 namespace leakflow::plugins::crypto {
 
-inline constexpr auto cpa_attack_stats_to_plot_annotations_id =
-    "cpa-attack-stats-to-plot-annotations";
+inline constexpr auto attack_stats_id = "attack-stats";
 
-class CpaAttackStatsToPlotAnnotations final : public Element {
+class AttackStats final : public Element {
 public:
-    explicit CpaAttackStatsToPlotAnnotations(std::string name = "cpaattackstatsannotations0");
+    explicit AttackStats(std::string name = "attackstats0");
 
     [[nodiscard]] static ElementDescriptor descriptor();
     [[nodiscard]] std::optional<Buffer> process(std::optional<Buffer> input) override;
+    [[nodiscard]] std::optional<Buffer> process_inputs(ElementInputs inputs) override;
 };
 
 } // namespace leakflow::plugins::crypto

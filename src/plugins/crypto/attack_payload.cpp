@@ -1,4 +1,4 @@
-#include "leakflow/plugins/crypto/cpa_attack_payload.hpp"
+#include "leakflow/plugins/crypto/attack_payload.hpp"
 
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/summary_document.hpp"
@@ -79,7 +79,7 @@ void require_floating_tensor(const torch::Tensor& tensor, std::string_view name,
     return "channel_" + std::to_string(channel);
 }
 
-[[nodiscard]] const torch::Tensor& topk_metric_tensor(const CpaAttackStatsPayload& payload, const std::string& metric)
+[[nodiscard]] const torch::Tensor& topk_metric_tensor(const AttackStatsPayload& payload, const std::string& metric)
 {
     if (metric == "margin") {
         return payload.topk_margin();
@@ -96,13 +96,13 @@ void require_floating_tensor(const torch::Tensor& tensor, std::string_view name,
     if (metric == "top_k_separation") {
         return payload.topk_separation();
     }
-    throw std::invalid_argument("unknown CPA confidence metric in payload summary");
+    throw std::invalid_argument("unknown attack confidence metric in payload summary");
 }
 
 void describe_attack_unit(
     SummarySection& section,
     std::int64_t unit,
-    const CpaAttackPayload& payload)
+    const AttackScoresPayload& payload)
 {
     const auto best_guess = payload.best_guess().to(torch::kCPU).to(torch::kInt64).contiguous();
     const auto best_score = payload.best_score().to(torch::kCPU).to(torch::kFloat64).contiguous();
@@ -127,7 +127,7 @@ void describe_attack_unit(
 void describe_stats_unit(
     SummarySection& section,
     std::int64_t unit,
-    const CpaAttackStatsPayload& payload,
+    const AttackStatsPayload& payload,
     std::int64_t summary_level)
 {
     const auto rank_tensor = payload.true_rank().to(torch::kCPU).to(torch::kInt64).contiguous();
@@ -195,7 +195,7 @@ void describe_stats_unit(
 
 } // namespace
 
-CpaAttackPayload::CpaAttackPayload(
+AttackScoresPayload::AttackScoresPayload(
     torch::Tensor scores,
     torch::Tensor ranking,
     torch::Tensor best_guess,
@@ -227,57 +227,57 @@ CpaAttackPayload::CpaAttackPayload(
     , observation_count_(observation_count)
     , top_k_(top_k)
 {
-    require_floating_tensor(scores_, "CpaAttackPayload scores", 2);
-    require_integral_tensor(ranking_, "CpaAttackPayload ranking", 2);
-    require_integral_tensor(best_guess_, "CpaAttackPayload best_guess", 1);
-    require_integral_tensor(best_guess_index_, "CpaAttackPayload best_guess_index", 1);
-    require_floating_tensor(best_score_, "CpaAttackPayload best_score", 1);
-    require_integral_tensor(best_channel_, "CpaAttackPayload best_channel", 1);
-    require_integral_tensor(best_sample_, "CpaAttackPayload best_sample", 1);
-    require_integral_tensor(guess_values_, "CpaAttackPayload guess_values", 1);
+    require_floating_tensor(scores_, "AttackScoresPayload scores", 2);
+    require_integral_tensor(ranking_, "AttackScoresPayload ranking", 2);
+    require_integral_tensor(best_guess_, "AttackScoresPayload best_guess", 1);
+    require_integral_tensor(best_guess_index_, "AttackScoresPayload best_guess_index", 1);
+    require_floating_tensor(best_score_, "AttackScoresPayload best_score", 1);
+    require_integral_tensor(best_channel_, "AttackScoresPayload best_channel", 1);
+    require_integral_tensor(best_sample_, "AttackScoresPayload best_sample", 1);
+    require_integral_tensor(guess_values_, "AttackScoresPayload guess_values", 1);
 
     const auto unit_count = scores_.size(0);
     const auto guess_count = scores_.size(1);
     if (unit_count <= 0 || guess_count <= 0) {
-        throw std::invalid_argument("CpaAttackPayload scores must have shape [U,G] with positive axes");
+        throw std::invalid_argument("AttackScoresPayload scores must have shape [U,G] with positive axes");
     }
     if (ranking_.size(0) != unit_count || ranking_.size(1) != guess_count) {
-        throw std::invalid_argument("CpaAttackPayload ranking shape must match scores");
+        throw std::invalid_argument("AttackScoresPayload ranking shape must match scores");
     }
     if (best_guess_.size(0) != unit_count || best_guess_index_.size(0) != unit_count
         || best_score_.size(0) != unit_count || best_channel_.size(0) != unit_count
         || best_sample_.size(0) != unit_count) {
-        throw std::invalid_argument("CpaAttackPayload best tensors must have shape [U]");
+        throw std::invalid_argument("AttackScoresPayload best tensors must have shape [U]");
     }
     if (guess_values_.size(0) != guess_count) {
-        throw std::invalid_argument("CpaAttackPayload guess_values must have shape [G]");
+        throw std::invalid_argument("AttackScoresPayload guess_values must have shape [G]");
     }
     if (correlations_) {
-        require_floating_tensor(*correlations_, "CpaAttackPayload correlations", 4);
+        require_floating_tensor(*correlations_, "AttackScoresPayload correlations", 4);
         if (correlations_->size(0) != unit_count || correlations_->size(1) != guess_count) {
-            throw std::invalid_argument("CpaAttackPayload correlations must have shape [U,G,L,S]");
+            throw std::invalid_argument("AttackScoresPayload correlations must have shape [U,G,L,S]");
         }
     }
     if (score_method_.empty()) {
-        throw std::invalid_argument("CpaAttackPayload score_method cannot be empty");
+        throw std::invalid_argument("AttackScoresPayload score_method cannot be empty");
     }
     if (score_channels_.empty()) {
-        throw std::invalid_argument("CpaAttackPayload score_channels cannot be empty");
+        throw std::invalid_argument("AttackScoresPayload score_channels cannot be empty");
     }
     if (observation_count_ < 0) {
-        throw std::invalid_argument("CpaAttackPayload observation_count cannot be negative");
+        throw std::invalid_argument("AttackScoresPayload observation_count cannot be negative");
     }
     if (top_k_ <= 0) {
-        throw std::invalid_argument("CpaAttackPayload top_k must be positive");
+        throw std::invalid_argument("AttackScoresPayload top_k must be positive");
     }
 }
 
-std::string CpaAttackPayload::type_name() const
+std::string AttackScoresPayload::type_name() const
 {
-    return cpa_attack_caps_type;
+    return attack_scores_caps_type;
 }
 
-void CpaAttackPayload::describe(SummarySection& section, std::int64_t summary_level) const
+void AttackScoresPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
     section.add_field("scores", shape_to_string(scores_.sizes()), SummaryValueRole::Number);
@@ -296,25 +296,25 @@ void CpaAttackPayload::describe(SummarySection& section, std::int64_t summary_le
     }
 }
 
-const torch::Tensor& CpaAttackPayload::scores() const { return scores_; }
-const torch::Tensor& CpaAttackPayload::ranking() const { return ranking_; }
-const torch::Tensor& CpaAttackPayload::best_guess() const { return best_guess_; }
-const torch::Tensor& CpaAttackPayload::best_guess_index() const { return best_guess_index_; }
-const torch::Tensor& CpaAttackPayload::best_score() const { return best_score_; }
-const torch::Tensor& CpaAttackPayload::best_channel() const { return best_channel_; }
-const torch::Tensor& CpaAttackPayload::best_sample() const { return best_sample_; }
-const torch::Tensor& CpaAttackPayload::guess_values() const { return guess_values_; }
-const std::optional<torch::Tensor>& CpaAttackPayload::correlations() const { return correlations_; }
-const std::vector<std::int64_t>& CpaAttackPayload::unit_indexes() const { return unit_indexes_; }
-const std::vector<std::string>& CpaAttackPayload::channel_names() const { return channel_names_; }
-const std::string& CpaAttackPayload::score_method() const { return score_method_; }
-const std::string& CpaAttackPayload::score_channels() const { return score_channels_; }
-std::int64_t CpaAttackPayload::observation_count() const { return observation_count_; }
-std::int64_t CpaAttackPayload::top_k() const { return top_k_; }
-std::int64_t CpaAttackPayload::unit_count() const { return scores_.size(0); }
-std::int64_t CpaAttackPayload::guess_count() const { return scores_.size(1); }
+const torch::Tensor& AttackScoresPayload::scores() const { return scores_; }
+const torch::Tensor& AttackScoresPayload::ranking() const { return ranking_; }
+const torch::Tensor& AttackScoresPayload::best_guess() const { return best_guess_; }
+const torch::Tensor& AttackScoresPayload::best_guess_index() const { return best_guess_index_; }
+const torch::Tensor& AttackScoresPayload::best_score() const { return best_score_; }
+const torch::Tensor& AttackScoresPayload::best_channel() const { return best_channel_; }
+const torch::Tensor& AttackScoresPayload::best_sample() const { return best_sample_; }
+const torch::Tensor& AttackScoresPayload::guess_values() const { return guess_values_; }
+const std::optional<torch::Tensor>& AttackScoresPayload::correlations() const { return correlations_; }
+const std::vector<std::int64_t>& AttackScoresPayload::unit_indexes() const { return unit_indexes_; }
+const std::vector<std::string>& AttackScoresPayload::channel_names() const { return channel_names_; }
+const std::string& AttackScoresPayload::score_method() const { return score_method_; }
+const std::string& AttackScoresPayload::score_channels() const { return score_channels_; }
+std::int64_t AttackScoresPayload::observation_count() const { return observation_count_; }
+std::int64_t AttackScoresPayload::top_k() const { return top_k_; }
+std::int64_t AttackScoresPayload::unit_count() const { return scores_.size(0); }
+std::int64_t AttackScoresPayload::guess_count() const { return scores_.size(1); }
 
-CpaAttackStatsPayload::CpaAttackStatsPayload(
+AttackStatsPayload::AttackStatsPayload(
     torch::Tensor true_rank,
     torch::Tensor true_guess,
     torch::Tensor true_score,
@@ -354,40 +354,40 @@ CpaAttackStatsPayload::CpaAttackStatsPayload(
     , channel_names_(std::move(channel_names))
     , confidence_metrics_(std::move(confidence_metrics))
 {
-    require_integral_tensor(true_rank_, "CpaAttackStatsPayload true_rank", 1);
-    require_integral_tensor(true_guess_, "CpaAttackStatsPayload true_guess", 1);
-    require_floating_tensor(true_score_, "CpaAttackStatsPayload true_score", 1);
-    require_integral_tensor(top1_guess_, "CpaAttackStatsPayload top1_guess", 1);
-    require_integral_tensor(top2_guess_, "CpaAttackStatsPayload top2_guess", 1);
-    require_floating_tensor(score_gap_, "CpaAttackStatsPayload score_gap", 1);
-    require_tensor(success_, "CpaAttackStatsPayload success", 1);
+    require_integral_tensor(true_rank_, "AttackStatsPayload true_rank", 1);
+    require_integral_tensor(true_guess_, "AttackStatsPayload true_guess", 1);
+    require_floating_tensor(true_score_, "AttackStatsPayload true_score", 1);
+    require_integral_tensor(top1_guess_, "AttackStatsPayload top1_guess", 1);
+    require_integral_tensor(top2_guess_, "AttackStatsPayload top2_guess", 1);
+    require_floating_tensor(score_gap_, "AttackStatsPayload score_gap", 1);
+    require_tensor(success_, "AttackStatsPayload success", 1);
     if (success_.scalar_type() != torch::kBool) {
-        throw std::invalid_argument("CpaAttackStatsPayload success tensor must have dtype bool");
+        throw std::invalid_argument("AttackStatsPayload success tensor must have dtype bool");
     }
-    require_integral_tensor(best_channel_, "CpaAttackStatsPayload best_channel", 1);
-    require_integral_tensor(best_sample_, "CpaAttackStatsPayload best_sample", 1);
-    require_integral_tensor(topk_guess_, "CpaAttackStatsPayload topk_guess", 2);
-    require_floating_tensor(topk_score_, "CpaAttackStatsPayload topk_score", 2);
-    require_floating_tensor(topk_margin_, "CpaAttackStatsPayload topk_margin", 2);
-    require_floating_tensor(topk_relative_margin_, "CpaAttackStatsPayload topk_relative_margin", 2);
-    require_floating_tensor(topk_z_score_, "CpaAttackStatsPayload topk_z_score", 2);
-    require_floating_tensor(topk_robust_z_score_, "CpaAttackStatsPayload topk_robust_z_score", 2);
-    require_floating_tensor(topk_separation_, "CpaAttackStatsPayload topk_separation", 2);
+    require_integral_tensor(best_channel_, "AttackStatsPayload best_channel", 1);
+    require_integral_tensor(best_sample_, "AttackStatsPayload best_sample", 1);
+    require_integral_tensor(topk_guess_, "AttackStatsPayload topk_guess", 2);
+    require_floating_tensor(topk_score_, "AttackStatsPayload topk_score", 2);
+    require_floating_tensor(topk_margin_, "AttackStatsPayload topk_margin", 2);
+    require_floating_tensor(topk_relative_margin_, "AttackStatsPayload topk_relative_margin", 2);
+    require_floating_tensor(topk_z_score_, "AttackStatsPayload topk_z_score", 2);
+    require_floating_tensor(topk_robust_z_score_, "AttackStatsPayload topk_robust_z_score", 2);
+    require_floating_tensor(topk_separation_, "AttackStatsPayload topk_separation", 2);
 
     const auto unit_count = true_rank_.size(0);
     if (unit_count <= 0) {
-        throw std::invalid_argument("CpaAttackStatsPayload tensors must have positive unit count");
+        throw std::invalid_argument("AttackStatsPayload tensors must have positive unit count");
     }
     if (true_guess_.size(0) != unit_count || true_score_.size(0) != unit_count
         || top1_guess_.size(0) != unit_count
         || top2_guess_.size(0) != unit_count || score_gap_.size(0) != unit_count
         || success_.size(0) != unit_count || best_channel_.size(0) != unit_count
         || best_sample_.size(0) != unit_count) {
-        throw std::invalid_argument("CpaAttackStatsPayload tensors must all have shape [U]");
+        throw std::invalid_argument("AttackStatsPayload tensors must all have shape [U]");
     }
     const auto top_k = topk_guess_.size(1);
     if (top_k <= 0) {
-        throw std::invalid_argument("CpaAttackStatsPayload top-K tensors must have positive K");
+        throw std::invalid_argument("AttackStatsPayload top-K tensors must have positive K");
     }
     if (topk_guess_.size(0) != unit_count || topk_score_.size(0) != unit_count
         || topk_margin_.size(0) != unit_count || topk_relative_margin_.size(0) != unit_count
@@ -396,16 +396,16 @@ CpaAttackStatsPayload::CpaAttackStatsPayload(
         || topk_margin_.size(1) != top_k || topk_relative_margin_.size(1) != top_k
         || topk_z_score_.size(1) != top_k || topk_robust_z_score_.size(1) != top_k
         || topk_separation_.size(1) != top_k) {
-        throw std::invalid_argument("CpaAttackStatsPayload top-K tensors must all have shape [U,K]");
+        throw std::invalid_argument("AttackStatsPayload top-K tensors must all have shape [U,K]");
     }
 }
 
-std::string CpaAttackStatsPayload::type_name() const
+std::string AttackStatsPayload::type_name() const
 {
-    return cpa_attack_stats_caps_type;
+    return attack_stats_caps_type;
 }
 
-void CpaAttackStatsPayload::describe(SummarySection& section, std::int64_t summary_level) const
+void AttackStatsPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
     section.add_field("units", summary_integer(unit_count()), SummaryValueRole::Number);
@@ -425,26 +425,26 @@ void CpaAttackStatsPayload::describe(SummarySection& section, std::int64_t summa
     }
 }
 
-const torch::Tensor& CpaAttackStatsPayload::true_rank() const { return true_rank_; }
-const torch::Tensor& CpaAttackStatsPayload::true_guess() const { return true_guess_; }
-const torch::Tensor& CpaAttackStatsPayload::true_score() const { return true_score_; }
-const torch::Tensor& CpaAttackStatsPayload::top1_guess() const { return top1_guess_; }
-const torch::Tensor& CpaAttackStatsPayload::top2_guess() const { return top2_guess_; }
-const torch::Tensor& CpaAttackStatsPayload::score_gap() const { return score_gap_; }
-const torch::Tensor& CpaAttackStatsPayload::success() const { return success_; }
-const torch::Tensor& CpaAttackStatsPayload::best_channel() const { return best_channel_; }
-const torch::Tensor& CpaAttackStatsPayload::best_sample() const { return best_sample_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_guess() const { return topk_guess_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_score() const { return topk_score_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_margin() const { return topk_margin_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_relative_margin() const { return topk_relative_margin_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_z_score() const { return topk_z_score_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_robust_z_score() const { return topk_robust_z_score_; }
-const torch::Tensor& CpaAttackStatsPayload::topk_separation() const { return topk_separation_; }
-const std::vector<std::int64_t>& CpaAttackStatsPayload::unit_indexes() const { return unit_indexes_; }
-const std::vector<std::string>& CpaAttackStatsPayload::channel_names() const { return channel_names_; }
-const std::vector<std::string>& CpaAttackStatsPayload::confidence_metrics() const { return confidence_metrics_; }
-std::int64_t CpaAttackStatsPayload::unit_count() const { return true_rank_.size(0); }
-std::int64_t CpaAttackStatsPayload::top_k() const { return topk_guess_.size(1); }
+const torch::Tensor& AttackStatsPayload::true_rank() const { return true_rank_; }
+const torch::Tensor& AttackStatsPayload::true_guess() const { return true_guess_; }
+const torch::Tensor& AttackStatsPayload::true_score() const { return true_score_; }
+const torch::Tensor& AttackStatsPayload::top1_guess() const { return top1_guess_; }
+const torch::Tensor& AttackStatsPayload::top2_guess() const { return top2_guess_; }
+const torch::Tensor& AttackStatsPayload::score_gap() const { return score_gap_; }
+const torch::Tensor& AttackStatsPayload::success() const { return success_; }
+const torch::Tensor& AttackStatsPayload::best_channel() const { return best_channel_; }
+const torch::Tensor& AttackStatsPayload::best_sample() const { return best_sample_; }
+const torch::Tensor& AttackStatsPayload::topk_guess() const { return topk_guess_; }
+const torch::Tensor& AttackStatsPayload::topk_score() const { return topk_score_; }
+const torch::Tensor& AttackStatsPayload::topk_margin() const { return topk_margin_; }
+const torch::Tensor& AttackStatsPayload::topk_relative_margin() const { return topk_relative_margin_; }
+const torch::Tensor& AttackStatsPayload::topk_z_score() const { return topk_z_score_; }
+const torch::Tensor& AttackStatsPayload::topk_robust_z_score() const { return topk_robust_z_score_; }
+const torch::Tensor& AttackStatsPayload::topk_separation() const { return topk_separation_; }
+const std::vector<std::int64_t>& AttackStatsPayload::unit_indexes() const { return unit_indexes_; }
+const std::vector<std::string>& AttackStatsPayload::channel_names() const { return channel_names_; }
+const std::vector<std::string>& AttackStatsPayload::confidence_metrics() const { return confidence_metrics_; }
+std::int64_t AttackStatsPayload::unit_count() const { return true_rank_.size(0); }
+std::int64_t AttackStatsPayload::top_k() const { return topk_guess_.size(1); }
 
 } // namespace leakflow::plugins::crypto

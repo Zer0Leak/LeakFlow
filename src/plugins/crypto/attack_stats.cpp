@@ -1,9 +1,9 @@
-#include "leakflow/plugins/crypto/cpa_attack_stats.hpp"
+#include "leakflow/plugins/crypto/attack_stats.hpp"
 
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/metadata_forwarding.hpp"
-#include "leakflow/plugins/crypto/cpa_attack_payload.hpp"
+#include "leakflow/plugins/crypto/attack_payload.hpp"
 
 #include <c10/core/ScalarType.h>
 
@@ -137,7 +137,7 @@ void require_truth_tensor(const torch::Tensor& truth)
             return index;
         }
     }
-    throw std::invalid_argument("truth value is not present in CPA attack guess domain");
+    throw std::invalid_argument("truth value is not present in attack guess domain");
 }
 
 [[nodiscard]] std::string canonical_metric_name(std::string_view value)
@@ -174,11 +174,11 @@ void require_truth_tensor(const torch::Tensor& truth)
         auto metric = canonical_metric_name(value);
         if (!is_allowed_metric(metric)) {
             throw std::invalid_argument(
-                "CpaAttackStats confidence_metrics values must be margin, relative_margin, z_score, "
+                "AttackStats confidence_metrics values must be margin, relative_margin, z_score, "
                 "robust_z_score, or top_k_separation");
         }
         if (std::ranges::find(metrics, metric) != metrics.end()) {
-            throw std::invalid_argument("CpaAttackStats confidence_metrics must not contain duplicates");
+            throw std::invalid_argument("AttackStats confidence_metrics must not contain duplicates");
         }
         metrics.push_back(std::move(metric));
     }
@@ -257,18 +257,18 @@ void copy_attack_metadata(const Buffer& attack, Buffer& output)
 
 } // namespace
 
-ElementDescriptor CpaAttackStats::descriptor()
+ElementDescriptor AttackStats::descriptor()
 {
     return {
-        .type_name = "CpaAttackStats",
+        .type_name = "AttackStats",
         .klass = "Analyze/SCA/Attack/Stats",
-        .purpose = "compute known-key rank and score statistics for a CPA attack result",
+        .purpose = "compute known-key rank and score statistics for an attack score result",
         .input_pads = {
-            Pad("attack_result", PadDirection::Input, Caps(cpa_attack_caps_type)),
+            Pad("scores", PadDirection::Input, Caps(attack_scores_caps_type)),
             Pad("truth", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
         },
         .output_pads = {
-            Pad("stats", PadDirection::Output, Caps(cpa_attack_stats_caps_type)),
+            Pad("stats", PadDirection::Output, Caps(attack_stats_caps_type)),
         },
         .property_specs = {
             PropertySpec(
@@ -292,12 +292,12 @@ ElementDescriptor CpaAttackStats::descriptor()
                     .scope = PropertyInvalidationScope::Downstream,
                     .output_pads = {"stats"}}),
         },
-        .keywords = {"cpa", "attack", "stats", "rank", "pge"},
+        .keywords = {"attack", "stats", "rank", "pge"},
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
-                "routing.element", std::string(), "element instance name that produced the CPA stats buffer", {"stats"}),
+                "routing.element", std::string(), "element instance name that produced the attack stats buffer", {"stats"}),
             make_element_metadata_descriptor(
-                "payload.stats.id", std::string(), "stats implementation identifier", {cpa_attack_stats_id}),
+                "payload.stats.id", std::string(), "stats implementation identifier", {attack_stats_id}),
             make_element_metadata_descriptor(
                 "attack.stats.rank_base", std::int64_t{}, "true_rank base; 1 means rank 1 is best", {"1"}),
             make_element_metadata_descriptor(
@@ -315,27 +315,27 @@ ElementDescriptor CpaAttackStats::descriptor()
     };
 }
 
-CpaAttackStats::CpaAttackStats(std::string name)
+AttackStats::AttackStats(std::string name)
     : Element(std::move(name))
 {
     configure_from_descriptor(descriptor());
 }
 
-std::optional<Buffer> CpaAttackStats::process(std::optional<Buffer>)
+std::optional<Buffer> AttackStats::process(std::optional<Buffer>)
 {
-    throw std::invalid_argument("CpaAttackStats requires named attack_result and truth inputs");
+    throw std::invalid_argument("AttackStats requires named scores and truth inputs");
 }
 
-std::optional<Buffer> CpaAttackStats::process_inputs(ElementInputs inputs)
+std::optional<Buffer> AttackStats::process_inputs(ElementInputs inputs)
 {
-    const auto& attack_buffer = required_input(inputs, "attack_result", "CpaAttackStats");
-    const auto& truth_buffer = required_input(inputs, "truth", "CpaAttackStats");
-    if (attack_buffer.caps().type() != cpa_attack_caps_type) {
-        throw std::invalid_argument("attack_result input must have leakflow/cpa-attack caps");
+    const auto& attack_buffer = required_input(inputs, "scores", "AttackStats");
+    const auto& truth_buffer = required_input(inputs, "truth", "AttackStats");
+    if (attack_buffer.caps().type() != attack_scores_caps_type) {
+        throw std::invalid_argument("scores input must have leakflow/attack-scores caps");
     }
-    const auto attack_payload = attack_buffer.payload_as<CpaAttackPayload>();
+    const auto attack_payload = attack_buffer.payload_as<AttackScoresPayload>();
     if (!attack_payload) {
-        throw std::invalid_argument("attack_result input must carry a CpaAttackPayload");
+        throw std::invalid_argument("scores input must carry an AttackScoresPayload");
     }
     const auto truth_payload = torch_payload_for(truth_buffer, "truth");
 
@@ -438,7 +438,7 @@ std::optional<Buffer> CpaAttackStats::process_inputs(ElementInputs inputs)
         }
     }
 
-    auto stats_payload = std::make_shared<CpaAttackStatsPayload>(
+    auto stats_payload = std::make_shared<AttackStatsPayload>(
         torch::tensor(true_rank_values, torch::TensorOptions().dtype(torch::kInt64)),
         torch::tensor(true_guess_values, torch::TensorOptions().dtype(torch::kInt64)),
         torch::tensor(true_score_values, torch::TensorOptions().dtype(torch::kFloat64)),
@@ -459,11 +459,11 @@ std::optional<Buffer> CpaAttackStats::process_inputs(ElementInputs inputs)
         attack_payload->channel_names(),
         confidence_metrics);
 
-    Buffer output{Caps(cpa_attack_stats_caps_type)};
+    Buffer output{Caps(attack_stats_caps_type)};
     forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     copy_attack_metadata(attack_buffer, output);
     output.set_metadata("routing.element", name());
-    output.set_metadata("payload.stats.id", cpa_attack_stats_id);
+    output.set_metadata("payload.stats.id", attack_stats_id);
     output.set_metadata("attack.stats.rank_base", "1");
     output.set_metadata("attack.stats.score_gap", "relative_margin");
     output.set_metadata("attack.stats.top_k", std::to_string(top_k));
@@ -472,8 +472,8 @@ std::optional<Buffer> CpaAttackStats::process_inputs(ElementInputs inputs)
         std::to_string(stats_payload->success().to(torch::kCPU).to(torch::kInt64).sum().item<std::int64_t>()));
     output.set_payload(std::move(stats_payload));
 
-    auto record = make_log_record(log::LogLevel::Debug, "element", "computed CPA attack stats");
-    record.fields.emplace("payload.stats.id", cpa_attack_stats_id);
+    auto record = make_log_record(log::LogLevel::Debug, "element", "computed attack stats");
+    record.fields.emplace("payload.stats.id", attack_stats_id);
     record.fields.emplace("success_count", output.metadata("attack.stats.success_count"));
     leakflow::log::write(std::move(record));
 

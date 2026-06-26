@@ -4,9 +4,9 @@ add_library(leakflow_plugins_crypto SHARED
     correlation_poi_to_plot_annotations.cpp
     correlation_poi_payload.cpp
     cpa_attack.cpp
-    cpa_attack_payload.cpp
-    cpa_attack_stats.cpp
-    cpa_attack_stats_to_plot_annotations.cpp
+    attack_payload.cpp
+    attack_stats.cpp
+    attack_stats_to_plot_annotations.cpp
     descriptor_catalog.cpp
     pearson_poi_finder.cpp
 )

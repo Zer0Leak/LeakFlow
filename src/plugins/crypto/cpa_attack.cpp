@@ -3,7 +3,7 @@
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/metadata_forwarding.hpp"
-#include "leakflow/plugins/crypto/cpa_attack_payload.hpp"
+#include "leakflow/plugins/crypto/attack_payload.hpp"
 
 #include <c10/core/ScalarType.h>
 
@@ -696,7 +696,7 @@ ElementDescriptor CpaAttack::descriptor()
             Pad("hypotheses", PadDirection::Input, torch_tensor_caps({{leakflow::base::caps_param_rank, "4"}})),
         },
         .output_pads = {
-            Pad("attack", PadDirection::Output, Caps(cpa_attack_caps_type)),
+            Pad("scores", PadDirection::Output, Caps(attack_scores_caps_type)),
         },
         .property_specs = {
             PropertySpec(
@@ -708,7 +708,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "score_channels",
                 std::string("guess_dependent"),
@@ -718,7 +718,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "emit_correlations",
                 false,
@@ -728,7 +728,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "top_k",
                 std::int64_t{5},
@@ -738,7 +738,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "correlation_mode",
                 std::string("auto"),
@@ -749,7 +749,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "active_correlation_mode",
                 std::string("recompute"),
@@ -769,7 +769,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
             PropertySpec(
                 "epsilon",
                 1.0e-12,
@@ -779,7 +779,7 @@ ElementDescriptor CpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"attack"}}),
+                    .output_pads = {"scores"}}),
         },
         .keywords = {"cpa", "attack", "pearson", "correlation", "sca"},
         .metadata_set_by_element = {
@@ -867,7 +867,7 @@ std::optional<Buffer> CpaAttack::process_inputs(ElementInputs inputs)
         emitted_correlations = correlation;
     }
 
-    auto payload = std::make_shared<CpaAttackPayload>(
+    auto payload = std::make_shared<AttackScoresPayload>(
         score_result.scores,
         score_result.ranking,
         best_guess,
@@ -884,7 +884,7 @@ std::optional<Buffer> CpaAttack::process_inputs(ElementInputs inputs)
         observation_count,
         top_k);
 
-    Buffer output{Caps(cpa_attack_caps_type)};
+    Buffer output{Caps(attack_scores_caps_type)};
     forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     copy_hypothesis_semantic_metadata(hypotheses_buffer, output);
     output.set_metadata("routing.element", name());

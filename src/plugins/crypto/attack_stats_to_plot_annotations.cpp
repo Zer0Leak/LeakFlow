@@ -1,8 +1,8 @@
-#include "leakflow/plugins/crypto/cpa_attack_stats_to_plot_annotations.hpp"
+#include "leakflow/plugins/crypto/attack_stats_to_plot_annotations.hpp"
 
 #include "leakflow/base/plot_annotation_payload.hpp"
 #include "leakflow/core/metadata_forwarding.hpp"
-#include "leakflow/plugins/crypto/cpa_attack_payload.hpp"
+#include "leakflow/plugins/crypto/attack_payload.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -44,7 +44,7 @@ namespace {
     } else if (value_format == "scientific") {
         output << std::scientific;
     } else {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations value_format must be fixed or scientific");
+        throw std::invalid_argument("AttackStatsToPlotAnnotations value_format must be fixed or scientific");
     }
     output << std::setprecision(static_cast<int>(precision)) << value;
     return output.str();
@@ -70,30 +70,30 @@ namespace {
     return "channel_" + std::to_string(channel_index);
 }
 
-[[nodiscard]] std::shared_ptr<CpaAttackStatsPayload> stats_payload_for(const Buffer& input)
+[[nodiscard]] std::shared_ptr<AttackStatsPayload> stats_payload_for(const Buffer& input)
 {
-    if (input.caps().type() != cpa_attack_stats_caps_type) {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations requires leakflow/cpa-attack-stats input caps");
+    if (input.caps().type() != attack_stats_caps_type) {
+        throw std::invalid_argument("AttackStatsToPlotAnnotations requires leakflow/attack-stats input caps");
     }
-    auto payload = input.payload_as<CpaAttackStatsPayload>();
+    auto payload = input.payload_as<AttackStatsPayload>();
     if (!payload) {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations requires a CpaAttackStatsPayload");
+        throw std::invalid_argument("AttackStatsToPlotAnnotations requires an AttackStatsPayload");
     }
     return payload;
 }
 
 [[nodiscard]] std::vector<leakflow::base::PlotAnnotation> annotations_from(
-    const CpaAttackStatsPayload& payload,
+    const AttackStatsPayload& payload,
     std::string_view kind,
     std::string_view value_format,
     std::int64_t precision,
     std::int64_t max_units)
 {
     if (precision < 0 || precision > 12) {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations precision must be between 0 and 12");
+        throw std::invalid_argument("AttackStatsToPlotAnnotations precision must be between 0 and 12");
     }
     if (max_units <= 0) {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations max_units must be positive");
+        throw std::invalid_argument("AttackStatsToPlotAnnotations max_units must be positive");
     }
 
     const auto unit_count = std::min(payload.unit_count(), max_units);
@@ -174,14 +174,14 @@ namespace {
 
 } // namespace
 
-ElementDescriptor CpaAttackStatsToPlotAnnotations::descriptor()
+ElementDescriptor AttackStatsToPlotAnnotations::descriptor()
 {
     return {
-        .type_name = "CpaAttackStatsToPlotAnnotations",
+        .type_name = "AttackStatsToPlotAnnotations",
         .klass = "Convert/SCA/Plot/Annotations",
-        .purpose = "convert CPA known-key statistics into generic plot annotations",
+        .purpose = "convert attack known-key statistics into generic plot annotations",
         .input_pads = {
-            Pad("sink", PadDirection::Input, Caps(cpa_attack_stats_caps_type)),
+            Pad("sink", PadDirection::Input, Caps(attack_stats_caps_type)),
         },
         .output_pads = {
             Pad("src", PadDirection::Output, Caps(leakflow::base::plot_annotation_caps_type)),
@@ -189,7 +189,7 @@ ElementDescriptor CpaAttackStatsToPlotAnnotations::descriptor()
         .property_specs = {
             PropertySpec(
                 "kind",
-                std::string("cpa"),
+                std::string("attack"),
                 "plot annotation kind",
                 "",
                 std::monostate{},
@@ -228,13 +228,13 @@ ElementDescriptor CpaAttackStatsToPlotAnnotations::descriptor()
                     .scope = PropertyInvalidationScope::Downstream,
                     .output_pads = {"src"}}),
         },
-        .keywords = {"cpa", "attack", "stats", "plot", "annotation", cpa_attack_stats_to_plot_annotations_id},
+        .keywords = {"attack", "stats", "plot", "annotation", attack_stats_to_plot_annotations_id},
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
                 "payload.conversion.id",
                 std::string(),
                 "conversion implementation identifier",
-                {cpa_attack_stats_to_plot_annotations_id}),
+                {attack_stats_to_plot_annotations_id}),
             make_element_metadata_descriptor(
                 "payload.conversion.element",
                 std::string(),
@@ -244,7 +244,7 @@ ElementDescriptor CpaAttackStatsToPlotAnnotations::descriptor()
                 "payload.annotation.kind",
                 std::string(),
                 "annotation kind stamped onto plot annotations",
-                {"cpa"}),
+                {"attack"}),
             make_element_metadata_descriptor(
                 "payload.annotation.count",
                 std::int64_t{},
@@ -259,20 +259,20 @@ ElementDescriptor CpaAttackStatsToPlotAnnotations::descriptor()
     };
 }
 
-CpaAttackStatsToPlotAnnotations::CpaAttackStatsToPlotAnnotations(std::string name)
+AttackStatsToPlotAnnotations::AttackStatsToPlotAnnotations(std::string name)
     : Element(std::move(name))
 {
     configure_from_descriptor(descriptor());
 }
 
-std::optional<Buffer> CpaAttackStatsToPlotAnnotations::process(std::optional<Buffer> input)
+std::optional<Buffer> AttackStatsToPlotAnnotations::process(std::optional<Buffer> input)
 {
     if (!input) {
-        throw std::invalid_argument("CpaAttackStatsToPlotAnnotations requires an input buffer");
+        throw std::invalid_argument("AttackStatsToPlotAnnotations requires an input buffer");
     }
     const auto payload = stats_payload_for(*input);
 
-    const auto kind = string_property_or(*this, "kind", "cpa");
+    const auto kind = string_property_or(*this, "kind", "attack");
     const auto value_format = string_property_or(*this, "value_format", "fixed");
     const auto precision = integer_property_or(*this, "precision", 3);
     const auto max_units = integer_property_or(*this, "max_units", 64);
@@ -281,15 +281,15 @@ std::optional<Buffer> CpaAttackStatsToPlotAnnotations::process(std::optional<Buf
 
     Buffer output{annotation_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "sink", name());
-    output.set_metadata("payload.conversion.id", cpa_attack_stats_to_plot_annotations_id);
+    output.set_metadata("payload.conversion.id", attack_stats_to_plot_annotations_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_metadata("payload.annotation.kind", kind);
     output.set_metadata("payload.annotation.count", std::to_string(annotation_payload.annotation_count()));
     output.set_metadata("payload.annotation.success_source", "stats");
     output.set_payload(std::make_shared<leakflow::base::PlotAnnotationPayload>(std::move(annotation_payload)));
 
-    auto record = make_log_record(log::LogLevel::Debug, "element", "converted CPA attack stats to plot annotations");
-    record.fields.emplace("payload.conversion.id", cpa_attack_stats_to_plot_annotations_id);
+    auto record = make_log_record(log::LogLevel::Debug, "element", "converted attack stats to plot annotations");
+    record.fields.emplace("payload.conversion.id", attack_stats_to_plot_annotations_id);
     record.fields.emplace("annotations", output.metadata("payload.annotation.count"));
     leakflow::log::write(std::move(record));
 

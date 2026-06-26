@@ -93,7 +93,7 @@ int main()
     if (!expect(attack_output.has_value(), "CpaAttack did not produce output")) {
         return 1;
     }
-    if (!expect(attack_output->caps().type() == crypto_plugin::cpa_attack_caps_type,
+    if (!expect(attack_output->caps().type() == crypto_plugin::attack_scores_caps_type,
             "CpaAttack output caps were wrong")) {
         return 1;
     }
@@ -110,7 +110,7 @@ int main()
         return 1;
     }
 
-    const auto payload = attack_output->payload_as<crypto_plugin::CpaAttackPayload>();
+    const auto payload = attack_output->payload_as<crypto_plugin::AttackScoresPayload>();
     if (!expect(payload != nullptr, "CpaAttack payload type was wrong")) {
         return 1;
     }
@@ -162,7 +162,7 @@ int main()
     second_inputs.emplace("features", torch_buffer(second_features));
     second_inputs.emplace("hypotheses", hypothesis_buffer(second_hypotheses));
     const auto incremental_output = incremental_attack.process_inputs(std::move(second_inputs));
-    const auto incremental_payload = incremental_output->payload_as<crypto_plugin::CpaAttackPayload>();
+    const auto incremental_payload = incremental_output->payload_as<crypto_plugin::AttackScoresPayload>();
     if (!expect(incremental_payload != nullptr, "CpaAttack incremental payload was wrong")) {
         return 1;
     }
@@ -179,147 +179,147 @@ int main()
         return 1;
     }
 
-    crypto_plugin::CpaAttackStats stats;
+    crypto_plugin::AttackStats stats;
     auto key = torch::tensor({0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         torch::TensorOptions().dtype(torch::kUInt8));
     leakflow::ElementInputs stats_inputs;
-    stats_inputs.emplace("attack_result", *attack_output);
+    stats_inputs.emplace("scores", *attack_output);
     stats_inputs.emplace("truth", torch_buffer(key));
     const auto stats_output = stats.process_inputs(std::move(stats_inputs));
-    if (!expect(stats_output.has_value(), "CpaAttackStats did not produce output")) {
+    if (!expect(stats_output.has_value(), "AttackStats did not produce output")) {
         return 1;
     }
-    if (!expect(stats_output->caps().type() == crypto_plugin::cpa_attack_stats_caps_type,
-            "CpaAttackStats output caps were wrong")) {
+    if (!expect(stats_output->caps().type() == crypto_plugin::attack_stats_caps_type,
+            "AttackStats output caps were wrong")) {
         return 1;
     }
-    const auto stats_payload = stats_output->payload_as<crypto_plugin::CpaAttackStatsPayload>();
-    if (!expect(stats_payload != nullptr, "CpaAttackStats payload type was wrong")) {
+    const auto stats_payload = stats_output->payload_as<crypto_plugin::AttackStatsPayload>();
+    if (!expect(stats_payload != nullptr, "AttackStats payload type was wrong")) {
         return 1;
     }
     if (!expect(stats_payload->true_rank()[0].item<std::int64_t>() == 1,
-            "CpaAttackStats true rank was wrong")) {
+            "AttackStats true rank was wrong")) {
         return 1;
     }
     if (!expect(stats_payload->true_guess()[0].item<std::int64_t>() == 7,
-            "CpaAttackStats true guess was wrong")) {
+            "AttackStats true guess was wrong")) {
         return 1;
     }
     if (!expect(stats_payload->success()[0].item<bool>(),
-            "CpaAttackStats success flag was wrong")) {
+            "AttackStats success flag was wrong")) {
         return 1;
     }
     if (!expect(stats_payload->best_sample()[0].item<std::int64_t>() == 0,
-            "CpaAttackStats best sample was not copied from attack result")) {
+            "AttackStats best sample was not copied from attack result")) {
         return 1;
     }
     if (!expect(stats_payload->best_channel()[0].item<std::int64_t>() == 0,
-            "CpaAttackStats best channel was not copied from attack result")) {
+            "AttackStats best channel was not copied from attack result")) {
         return 1;
     }
     if (!expect(stats_payload->top_k() == 2,
-            "CpaAttackStats top_k was not clipped to the available guess count")) {
+            "AttackStats top_k was not clipped to the available guess count")) {
         return 1;
     }
     if (!expect(stats_payload->confidence_metrics()
                     == std::vector<std::string>{"relative_margin", "z_score", "robust_z_score"},
-            "CpaAttackStats default confidence metrics were wrong")) {
+            "AttackStats default confidence metrics were wrong")) {
         return 1;
     }
     if (!expect(stats_payload->topk_guess()[0][0].item<std::int64_t>() == 7,
-            "CpaAttackStats topk guess was wrong")) {
+            "AttackStats topk guess was wrong")) {
         return 1;
     }
     if (!expect(stats_payload->topk_guess().sizes() == c10::IntArrayRef({1, 2}),
-            "CpaAttackStats topk_guess shape was wrong")) {
+            "AttackStats topk_guess shape was wrong")) {
         return 1;
     }
     const auto top1_score = stats_payload->topk_score()[0][0].item<double>();
     const auto top2_score = stats_payload->topk_score()[0][1].item<double>();
     const auto expected_relative_margin = (top1_score - top2_score) / std::max(std::abs(top1_score), 1.0e-12);
     if (!expect(std::abs(stats_payload->score_gap()[0].item<double>() - expected_relative_margin) < 1.0e-9,
-            "CpaAttackStats score_gap was not the top-1 relative margin")) {
+            "AttackStats score_gap was not the top-1 relative margin")) {
         return 1;
     }
     if (!expect(std::abs(stats_payload->topk_relative_margin()[0][0].item<double>() - expected_relative_margin)
                 < 1.0e-9,
-            "CpaAttackStats topk relative margin was wrong")) {
+            "AttackStats topk relative margin was wrong")) {
         return 1;
     }
     if (!expect(stats_output->metadata("attack.stats.score_gap") == "relative_margin",
-            "CpaAttackStats score_gap metadata was wrong")) {
+            "AttackStats score_gap metadata was wrong")) {
         return 1;
     }
 
-    crypto_plugin::CpaAttackStats custom_stats;
+    crypto_plugin::AttackStats custom_stats;
     custom_stats.set_property("top_k", std::int64_t{1});
     custom_stats.set_property("confidence_metrics", leakflow::StringList{"margin", "top-k-separation"});
     leakflow::ElementInputs custom_stats_inputs;
-    custom_stats_inputs.emplace("attack_result", *attack_output);
+    custom_stats_inputs.emplace("scores", *attack_output);
     custom_stats_inputs.emplace("truth", torch_buffer(key));
     const auto custom_stats_output = custom_stats.process_inputs(std::move(custom_stats_inputs));
-    const auto custom_stats_payload = custom_stats_output->payload_as<crypto_plugin::CpaAttackStatsPayload>();
-    if (!expect(custom_stats_payload->top_k() == 1, "CpaAttackStats custom top_k was wrong")) {
+    const auto custom_stats_payload = custom_stats_output->payload_as<crypto_plugin::AttackStatsPayload>();
+    if (!expect(custom_stats_payload->top_k() == 1, "AttackStats custom top_k was wrong")) {
         return 1;
     }
     if (!expect(custom_stats_payload->confidence_metrics() == std::vector<std::string>{"margin", "top_k_separation"},
-            "CpaAttackStats custom confidence metrics were wrong")) {
+            "AttackStats custom confidence metrics were wrong")) {
         return 1;
     }
 
-    crypto_plugin::CpaAttackStatsToPlotAnnotations annotations;
+    crypto_plugin::AttackStatsToPlotAnnotations annotations;
     annotations.set_property("precision", std::int64_t{3});
     const auto annotation_output = annotations.process(*stats_output);
-    if (!expect(annotation_output.has_value(), "CpaAttackStatsToPlotAnnotations did not produce output")) {
+    if (!expect(annotation_output.has_value(), "AttackStatsToPlotAnnotations did not produce output")) {
         return 1;
     }
     const auto annotation_payload = annotation_output->payload_as<leakflow::base::PlotAnnotationPayload>();
-    if (!expect(annotation_payload != nullptr, "CpaAttackStatsToPlotAnnotations payload type was wrong")) {
+    if (!expect(annotation_payload != nullptr, "AttackStatsToPlotAnnotations payload type was wrong")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation_count() == 1,
-            "CpaAttackStatsToPlotAnnotations annotation count was wrong")) {
+            "AttackStatsToPlotAnnotations annotation count was wrong")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation(0).sample_index == 0,
-            "CpaAttackStatsToPlotAnnotations sample index was wrong")) {
+            "AttackStatsToPlotAnnotations sample index was wrong")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation(0).fields[1].second == "true",
-            "CpaAttackStatsToPlotAnnotations success field was wrong")) {
+            "AttackStatsToPlotAnnotations success field was wrong")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation(0).label == "unit_3.HW(y)",
-            "CpaAttackStatsToPlotAnnotations success label was wrong")) {
+            "AttackStatsToPlotAnnotations success label was wrong")) {
         return 1;
     }
     if (!expect(!annotation_payload->annotation(0).text.starts_with("PASS."),
-            "CpaAttackStatsToPlotAnnotations success text kept the PASS prefix")) {
+            "AttackStatsToPlotAnnotations success text kept the PASS prefix")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation(0).fields[2].second == "7",
-            "CpaAttackStatsToPlotAnnotations guess field was wrong")) {
+            "AttackStatsToPlotAnnotations guess field was wrong")) {
         return 1;
     }
     if (!expect(annotation_payload->annotation(0).norm_value && *annotation_payload->annotation(0).norm_value > 0.0,
-            "CpaAttackStatsToPlotAnnotations success norm value was not positive")) {
+            "AttackStatsToPlotAnnotations success norm value was not positive")) {
         return 1;
     }
     if (!expect(annotation_output->metadata("payload.annotation.success_source") == "stats",
-            "CpaAttackStatsToPlotAnnotations success source metadata was wrong")) {
+            "AttackStatsToPlotAnnotations success source metadata was wrong")) {
         return 1;
     }
 
-    crypto_plugin::CpaAttackStats failed_stats;
+    crypto_plugin::AttackStats failed_stats;
     auto wrong_key = torch::tensor({0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         torch::TensorOptions().dtype(torch::kUInt8));
     leakflow::ElementInputs failed_stats_inputs;
-    failed_stats_inputs.emplace("attack_result", *attack_output);
+    failed_stats_inputs.emplace("scores", *attack_output);
     failed_stats_inputs.emplace("truth", torch_buffer(wrong_key));
     const auto failed_stats_output = failed_stats.process_inputs(std::move(failed_stats_inputs));
-    const auto failed_stats_payload = failed_stats_output->payload_as<crypto_plugin::CpaAttackStatsPayload>();
+    const auto failed_stats_payload = failed_stats_output->payload_as<crypto_plugin::AttackStatsPayload>();
     if (!expect(!failed_stats_payload->success()[0].item<bool>(),
-            "CpaAttackStats failed case unexpectedly succeeded")) {
+            "AttackStats failed case unexpectedly succeeded")) {
         return 1;
     }
 
@@ -327,35 +327,35 @@ int main()
     const auto rich_annotation_payload = rich_annotation_output->payload_as<leakflow::base::PlotAnnotationPayload>();
     if (!expect(rich_annotation_payload->annotation(0).norm_value
                 && *rich_annotation_payload->annotation(0).norm_value < 0.0,
-            "CpaAttackStatsToPlotAnnotations failed stats did not produce a negative norm value")) {
+            "AttackStatsToPlotAnnotations failed stats did not produce a negative norm value")) {
         return 1;
     }
     if (!expect(rich_annotation_payload->annotation(0).fields[1].second == "false",
-            "CpaAttackStatsToPlotAnnotations failed stats success field was wrong")) {
+            "AttackStatsToPlotAnnotations failed stats success field was wrong")) {
         return 1;
     }
     if (!expect(rich_annotation_payload->annotation(0).fields[5].second == "2",
-            "CpaAttackStatsToPlotAnnotations failed stats true rank field was wrong")) {
+            "AttackStatsToPlotAnnotations failed stats true rank field was wrong")) {
         return 1;
     }
     if (!expect(rich_annotation_payload->annotation(0).fields[6].second == "42",
-            "CpaAttackStatsToPlotAnnotations failed stats true guess field was wrong")) {
+            "AttackStatsToPlotAnnotations failed stats true guess field was wrong")) {
         return 1;
     }
     if (!expect(rich_annotation_payload->annotation(0).label == "unit_3.HW(y)",
-            "CpaAttackStatsToPlotAnnotations failed label was wrong")) {
+            "AttackStatsToPlotAnnotations failed label was wrong")) {
         return 1;
     }
     if (!expect(!rich_annotation_payload->annotation(0).text.starts_with("FAIL."),
-            "CpaAttackStatsToPlotAnnotations failed text kept the FAIL prefix")) {
+            "AttackStatsToPlotAnnotations failed text kept the FAIL prefix")) {
         return 1;
     }
     if (!expect(rich_annotation_output->metadata("payload.annotation.success_source") == "stats",
-            "CpaAttackStatsToPlotAnnotations success source metadata was wrong")) {
+            "AttackStatsToPlotAnnotations success source metadata was wrong")) {
         return 1;
     }
     if (!expect(rich_annotation_payload->annotation(0).fields.back().first == "correct key",
-            "CpaAttackStatsToPlotAnnotations failed stats missed the correct-key field")) {
+            "AttackStatsToPlotAnnotations failed stats missed the correct-key field")) {
         return 1;
     }
 
@@ -383,12 +383,12 @@ int main()
             "CpaAttack descriptor type name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[3].type_name == "CpaAttackStats",
-            "CpaAttackStats descriptor type name was wrong")) {
+    if (!expect(descriptors[0].elements[3].type_name == "AttackStats",
+            "AttackStats descriptor type name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[4].type_name == "CpaAttackStatsToPlotAnnotations",
-            "CpaAttackStatsToPlotAnnotations descriptor type name was wrong")) {
+    if (!expect(descriptors[0].elements[4].type_name == "AttackStatsToPlotAnnotations",
+            "AttackStatsToPlotAnnotations descriptor type name was wrong")) {
         return 1;
     }
 
