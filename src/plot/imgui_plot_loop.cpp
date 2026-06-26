@@ -617,6 +617,35 @@ void plot_annotation_legend_items(std::vector<AnnotationStyle> &styles) {
     return {*minimum, *maximum};
 }
 
+[[nodiscard]] std::optional<std::pair<double, double>>
+centered_y_range_for(PlotRuntime &runtime, const std::vector<const TracePlotSnapshot *> &snapshots) {
+    auto lower = std::numeric_limits<double>::infinity();
+    auto higher = -std::numeric_limits<double>::infinity();
+    auto found = false;
+
+    for (const auto *snapshot : snapshots) {
+        if (!snapshot->center0) {
+            continue;
+        }
+        const auto trace_index = selected_trace_index(runtime, *snapshot);
+        const auto *values = snapshot->trace_data(trace_index);
+        for (std::int64_t index = 0; index < snapshot->sample_count(); ++index) {
+            const auto value = static_cast<double>(values[index]);
+            if (!std::isfinite(value)) {
+                continue;
+            }
+            lower = std::min(lower, value);
+            higher = std::max(higher, value);
+            found = true;
+        }
+    }
+
+    if (!found) {
+        return std::nullopt;
+    }
+    return trace_plot_centered_y_range(lower, higher);
+}
+
 [[nodiscard]] double normalized_annotation_y(const TracePlotAnnotation &annotation, std::pair<double, double> y_range) {
     const auto [minimum, maximum] = y_range;
     if (minimum == maximum) {
@@ -687,6 +716,9 @@ struct AnnotationCandidate {
 }
 
 void draw_annotation_number_label(ImDrawList &draw_list, ImVec2 marker, const std::string &text) {
+    if (text.empty()) {
+        return;
+    }
     const auto text_position = ImVec2(marker.x + 5.0F, marker.y - 8.0F);
     draw_list.AddText(ImVec2(text_position.x + 1.0F, text_position.y + 1.0F),
                       ImGui::GetColorU32(ImVec4(0.0F, 0.0F, 0.0F, 0.85F)), text.c_str());
@@ -920,6 +952,9 @@ void draw_trace_plot_panel(PlotRuntime &runtime, std::string_view group,
 
     if (ImPlot::BeginPlot(title.c_str(), ImVec2(-1.0F, plot_height))) {
         ImPlot::SetupAxes(x_label.c_str(), y_label.c_str());
+        if (const auto y_limits = centered_y_range_for(runtime, snapshots)) {
+            ImPlot::SetupAxisLimits(ImAxis_Y1, y_limits->first, y_limits->second, ImPlotCond_Always);
+        }
 
         // Keep the same visible window when the panel switches between sample and
         // time_us units: convert the stored X-limits by the sample<->time factor

@@ -4,9 +4,10 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-**No active phase.** The live-streaming phase is implemented and there is no next
-default phase set. Pick the next phase explicitly before starting work (candidates:
-Phase 28 AES CPA/report; Phase 29 overlay/correlation plots; Phase 30+ Kyber).
+**No active phase.** The live-streaming phase and the AES CPA/report slice are
+implemented. Pick the next phase explicitly before starting work (candidates:
+dedicated CPA score/rank/heatmap plots, overlay/correlation plot polish, or
+Kyber / ML-KEM hypotheses).
 
 Recently completed, in order:
 
@@ -24,8 +25,8 @@ Recently completed, in order:
 - **Live phase** (the largest) — implemented and green; offline unchanged.
   Authoritative design: `docs/design/dataflow_sync_model.md` §10–14.
 
-Generic `Convert`, the conversion registry, CPA/report (Phase 28), and overlay
-plots (Phase 29) remain deferred.
+Generic `Convert`, the conversion registry, dedicated CPA score/rank/heatmap
+plots, and Kyber hypotheses remain deferred.
 
 ## Phase 26 Brief (DONE)
 
@@ -175,7 +176,7 @@ Work items (design of record: dataflow_sync_model.md S10-S11, esp. S11.8):
   5. Join-mode enum (S11.1) promoted from contract-only to the Sync policy.
 
 Out of scope: bundles / Mux / Demux (DROPPED -- superseded by the Sync element);
-CPA/report (Phase 28); overlay plots (Phase 29); Kyber (Phase 30+).
+dedicated CPA score/rank plots; overlay plots; Kyber (Phase 30+).
 
 Build/Test:
   CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
@@ -210,11 +211,14 @@ Phase 23 has added `leakflow_crypto`:
 - AES S-box helpers,
 - AES first-round S-box leakage helpers returning `m`, `y`, `HW(m)`, and
   `HW(y)`,
+- AES first-round leakage-channel helpers for known-key `[U,N,L]` leakage and
+  guess-domain `[U,G,N,L]` hypotheses,
 - helper-library only; crypto plugin elements arrived in Phase 24.
 
 Phase 24 has added `leakflow_plugins_crypto`:
 
 - `AesLeakage` for AES Hamming-weight leakage targets,
+- `AesLeakageHypothesis` for AES Hamming-weight key-guess leakage hypotheses,
 - `PearsonPoiFinder` with real named `features` and `targets` sink pads,
 - `CorrelationPoiPayload` for correlation PoI results,
 - target-label, AES byte-index, and channel metadata such as
@@ -222,6 +226,13 @@ Phase 24 has added `leakflow_plugins_crypto`:
   `poi.target.0.channel`,
 - `CorrelationPoiToPlotAnnotations` to convert correlation PoIs into generic
   `PlotAnnotationPayload` markers.
+
+The AES CPA/report slice has added:
+
+- `CpaAttack` for generic Pearson CPA scoring/ranking,
+- `CpaAttackStats` for known-key true-rank/success diagnostics,
+- `CpaAttackStatsToPlotAnnotations` for marking stats-backed CPA best samples on
+  `TracePlot`.
 
 Early AES plotting support has added:
 

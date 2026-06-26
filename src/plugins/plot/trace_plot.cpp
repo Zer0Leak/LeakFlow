@@ -163,6 +163,7 @@ constexpr auto default_trace_alpha = 1.0;
     snapshot.initial_trace_index = integer_property_or(element, "trace_index", 0);
     // order < 0 means automatic: keep registration order (resolved at render time).
     snapshot.order = integer_property_or(element, "order", -1);
+    snapshot.center0 = bool_property_or(element, "center0", true);
     snapshot.x_axis = leakflow::plot::parse_trace_plot_x_axis(string_property_or(element, "x_axis", "sample"));
     snapshot.sample_rate_hz = sample_rate_for(element, buffer);
     // Line alpha is part of the color now: opaque (255) unless the color carries
@@ -298,6 +299,9 @@ ElementDescriptor TracePlot::descriptor()
                 PropertySpec("trace_index", std::int64_t{0}, "initial rank-2 trace index", "",
                              IntRangeConstraint{0, std::numeric_limits<std::int64_t>::max()}, "", display),
                 PropertySpec("order", std::int64_t{-1}, "group display order; -1 = automatic"),
+                PropertySpec("center0", true,
+                             "center y-axis at zero with symmetric limits from the maximum absolute leakage",
+                             "", std::monostate{}, "", display),
                 PropertySpec("x_axis", std::string("sample"), "x-axis mode", "",
                              StringEnumConstraint{{"sample", "time_us"}}, "", display),
                 PropertySpec("sample_rate_hz", 0.0,

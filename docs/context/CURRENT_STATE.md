@@ -38,8 +38,10 @@ support:
 - `leakflow_plot` exists and provides the ImGui/ImPlot plot runtime.
 - `leakflow_crypto` exists and provides Hamming weight/distance helpers plus
   AES first-round S-box leakage helpers.
-- `leakflow_plugins_crypto` exists and provides AES S-box leakage, Pearson PoI
-  finding, and correlation-PoI-to-plot-annotation conversion elements.
+- `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
+  guess-domain leakage hypotheses, generic Pearson CPA ranking, CPA known-key
+  stats, CPA plot-annotation conversion, Pearson PoI finding, and
+  correlation-PoI-to-plot-annotation conversion elements.
 - `leakflow_plugins_plot` exists and provides sink-only `TracePlot`.
 - `TracePlot` accepts optional generic plot annotations and renders selected
   sample markers.
@@ -198,7 +200,9 @@ remain deferred as low-priority future infrastructure.
 - `leakflow_plugins_extras`: linked shared plugin with `NumpySrc` and
   `NumpyToTorch`.
 - `leakflow_plugins_crypto`: linked shared plugin with `AesLeakage`,
-  `PearsonPoiFinder`, and `CorrelationPoiToPlotAnnotations`.
+  `AesLeakageHypothesis`, `CpaAttack`, `CpaAttackStats`,
+  `CpaAttackStatsToPlotAnnotations`, `PearsonPoiFinder`, and
+  `CorrelationPoiToPlotAnnotations`.
 - `leakflow_plugins_plot`: linked shared plugin with `TracePlot`.
 - `leakflow_cli`: static CLI helper library.
 - `leakflow`: main CLI executable.
@@ -308,6 +312,10 @@ Plot plugin elements:
 Crypto plugin elements:
 
 - `AesLeakage`
+- `AesLeakageHypothesis`
+- `CpaAttack`
+- `CpaAttackStats`
+- `CpaAttackStatsToPlotAnnotations`
 - `PearsonPoiFinder`
 - `CorrelationPoiToPlotAnnotations`
 
@@ -335,8 +343,10 @@ Logging:
 - Dynamic plot sink pads.
 - A standalone `leakflow-plot` executable.
 - YAML/config runner.
-- CPA / key-ranking / attack-report elements (Phase 28).
-- Overlay / correlation plot elements (Phase 29).
+- Kyber / ML-KEM hypothesis elements for the generic CPA attack path.
+- Dedicated CPA score/rank/correlation/heatmap plot elements (the first CPA
+  plot bridge is `CpaAttackStatsToPlotAnnotations` for `TracePlot.annotations`).
+- Overlay / correlation plot elements beyond the existing annotation overlays.
 - `QueueEpochPolicy` drain/flush enforcement (optional policy; not required for
   correctness) and the `preroll` player refinement.
 

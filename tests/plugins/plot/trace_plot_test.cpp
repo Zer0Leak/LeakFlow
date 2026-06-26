@@ -73,6 +73,20 @@ int main()
             "TracePlot non-positive normalized annotation high endpoint was wrong")) {
         return 1;
     }
+    const auto centered_mixed = leakflow::plot::trace_plot_centered_y_range(-0.5, 2.0);
+    if (!expect_near(centered_mixed.first, -2.0, "TracePlot centered mixed lower limit was wrong")) {
+        return 1;
+    }
+    if (!expect_near(centered_mixed.second, 2.0, "TracePlot centered mixed upper limit was wrong")) {
+        return 1;
+    }
+    const auto centered_zero = leakflow::plot::trace_plot_centered_y_range(0.0, 0.0);
+    if (!expect_near(centered_zero.first, -1.0, "TracePlot centered zero lower fallback was wrong")) {
+        return 1;
+    }
+    if (!expect_near(centered_zero.second, 1.0, "TracePlot centered zero upper fallback was wrong")) {
+        return 1;
+    }
 
     auto runtime = std::make_shared<leakflow::plot::PlotRuntime>();
     plot_plugin::TracePlot trace_plot(runtime, "plot");
@@ -155,8 +169,20 @@ int main()
     if (!expect(snapshot.order == 4, "TracePlot snapshot order was wrong")) {
         return 1;
     }
+    if (!expect(snapshot.center0, "TracePlot center0 should default to true")) {
+        return 1;
+    }
     if (!expect(snapshot.values == std::vector<float>{0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F},
                 "TracePlot snapshot values were wrong")) {
+        return 1;
+    }
+
+    auto uncentered_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
+    plot_plugin::TracePlot uncentered_plot(uncentered_runtime, "uncentered_plot");
+    uncentered_plot.set_property("center0", false);
+    (void)uncentered_plot.process(input);
+    if (!expect(!uncentered_runtime->trace_snapshots().front().center0,
+            "TracePlot center0=false property was not captured")) {
         return 1;
     }
 

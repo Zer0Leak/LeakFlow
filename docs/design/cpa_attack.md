@@ -2,7 +2,7 @@
 
 ## Status
 
-Design note for the future AES CPA attack implementation.
+Design and implementation note for the AES CPA attack path.
 
 This document records the agreed shape contracts, element split, metadata rules,
 and implementation plan for a reusable correlation power analysis attack path.
@@ -10,8 +10,9 @@ The immediate validation target is AES. The design intentionally keeps the
 statistical attack core algorithm-agnostic so a future Kyber / ML-KEM hypothesis
 element can reuse the same `CpaAttack` element.
 
-This is a design and planning document only. It does not imply the elements
-described here already exist.
+The AES path described here is implemented for the current LeakFlow crypto plugin
+slice. Kyber / ML-KEM hypothesis generation and richer dedicated CPA plot views
+remain future work.
 
 ## Current State
 
@@ -23,6 +24,10 @@ LeakFlow already has the building blocks needed to start this work:
 - `AesLeakage` currently emits known-key leakage as a Torch `uint8` tensor with
   shape `[B,N,C]`, where `B` is selected AES byte indexes, `N` is trace count,
   and `C` is selected leakage channels.
+- Shared AES helper logic can compute known-key first-round leakage `[U,N,L]`
+  and guess-domain first-round leakage hypotheses `[U,G,N,L]`.
+- `AesLeakageHypothesis` exposes AES guess-domain leakage hypotheses to
+  pipelines with output shape `[U,G,N,L]`.
 - `PearsonPoiFinder` already computes Pearson correlation between trace samples
   and target leakage and has the recompute/incremental mode vocabulary that
   should be reused by CPA later.
@@ -32,12 +37,19 @@ LeakFlow already has the building blocks needed to start this work:
 
 The missing pieces are:
 
-- an AES key-guess leakage hypothesis element,
-- a generic CPA ranking element,
-- an attack-result payload,
-- known-key attack statistics,
-- attack-focused plots,
-- and later incremental/live CPA state.
+- Kyber / ML-KEM hypothesis generation,
+- dedicated CPA score/rank/correlation/heatmap plot elements,
+- and broader attack-report formatting.
+
+Implemented CPA pieces:
+
+- `CpaAttack`, a generic Pearson CPA ranking element,
+- `CpaAttackPayload`, an attack-result payload with scores/ranking/best tensors,
+- `CpaAttackStats`, known-key true-rank/success diagnostics,
+- `CpaAttackStatsToPlotAnnotations`, a first plot bridge for marking stats-backed
+  best samples on `TracePlot`,
+- `correlation_mode=auto|recompute|incremental` with read-only
+  `active_correlation_mode`.
 
 ## Shape Vocabulary
 
@@ -65,7 +77,7 @@ documentation, but `U` keeps the attack core algorithm-agnostic.
 
 ## Element Split
 
-The planned AES CPA path is:
+The implemented AES CPA path is:
 
 ```text
 traces ─────────────────────────────────┐
@@ -90,12 +102,12 @@ numeric hypothetical leakage.
 `AesLeakageHypothesis` is AES-specific and produces predicted leakage for every
 selected byte and every key guess.
 
-Suggested first properties:
+Properties:
 
 ```text
 byte_indexes=[0..15]
 channels=[HW(y)]
-guess_values=[0..255]     // default domain; may remain implicit at first
+guess_values=[]           // default full AES byte domain 0..255
 ```
 
 The `channels` property should reuse the existing `AesLeakage` channel strings:
@@ -354,9 +366,40 @@ true_rank [U]
 true_score [U]
 top1_guess [U]
 top2_guess [U]
-score_gap [U]
+score_gap [U]              // legacy alias for top-1 relative margin
 success [U]
+topk_guess [U,K]
+topk_score [U,K]
+topk_margin [U,K]
+topk_relative_margin [U,K]
+topk_z_score [U,K]
+topk_robust_z_score [U,K]
+topk_separation [U,K]
 ```
+
+Stats properties:
+
+```text
+top_k=5
+confidence_metrics=[relative_margin,z_score,robust_z_score]
+```
+
+`confidence_metrics` chooses which metric columns are emphasized in `topk[]`
+summary output. The payload stores all top-K tensors so later plot elements can
+choose their own view without recomputing.
+
+Definitions:
+
+```text
+margin[k] = score(rank k) - score(rank k+1)
+relative_margin[k] = margin[k] / max(abs(score(rank k)), epsilon)
+z_score[k] = (score(rank k) - mean(all_scores)) / std(all_scores)
+robust_z_score[k] = 0.67448975 * (score(rank k) - median(all_scores)) / MAD(all_scores)
+top_k_separation[k] = score(rank k) - score(first rank outside displayed top_k)
+```
+
+When the next rank or outside-top-K rank does not exist, the corresponding
+separation value is `0`.
 
 Use precise terminology:
 
@@ -367,13 +410,13 @@ Use precise terminology:
 
 Plotting should stay downstream from the attack computation.
 
-Useful first plot/converter elements:
+Useful plot/converter elements:
 
 ```text
-CpaAttackToPlotAnnotations
-CpaScorePlot
-CpaRankPlot
-CpaCorrelationPlot
+CpaAttackStatsToPlotAnnotations    // implemented
+CpaScorePlot                  // future
+CpaRankPlot                   // future
+CpaCorrelationPlot            // future
 ```
 
 Useful visualizations:
@@ -385,15 +428,15 @@ Useful visualizations:
 - correlation curve for a selected guess/channel,
 - correlation heatmap `[G,S]` for one unit/channel.
 
-The first practical plot win is a score/rank view that makes it obvious whether
-the correct key byte is separating from the alternatives.
+The first implemented plot bridge is `CpaAttackStatsToPlotAnnotations`, which
+marks each attack unit's best sample on `TracePlot` using known-key stats as the
+source of truth for PASS/FAIL. A dedicated score/rank view should come next
+because it makes it obvious whether the correct key byte is separating from the
+alternatives.
 
 ## Recompute And Incremental Modes
 
-The first CPA implementation should be recompute-only.
-
-After the result format is stable, add the same mode vocabulary used by
-`PearsonPoiFinder`:
+`CpaAttack` uses the same mode vocabulary as `PearsonPoiFinder`:
 
 ```text
 correlation_mode=auto|recompute|incremental
@@ -407,7 +450,7 @@ auto + live upstream     -> incremental
 auto + non-live upstream -> recompute
 ```
 
-Incremental CPA can store sufficient statistics instead of all prior traces:
+Incremental CPA stores sufficient statistics instead of all prior traces:
 
 ```text
 count
@@ -478,6 +521,8 @@ Those remain in `CpaAttack`, `CpaAttackStats`, and plot elements.
 
 ### Phase 1: Shared AES hypothesis helpers
 
+Status: implemented.
+
 Refactor or extend the AES helper layer so `AesLeakage` and the future
 `AesLeakageHypothesis` can share channel parsing, byte selection, S-box, and
 Hamming-weight logic.
@@ -491,6 +536,8 @@ Validation:
   domain contains the real key byte.
 
 ### Phase 2: `AesLeakageHypothesis`
+
+Status: implemented.
 
 Add the AES hypothesis plugin element.
 
@@ -514,7 +561,9 @@ Validation:
 
 ### Phase 3: `CpaAttack` recompute mode
 
-Add the generic CPA plugin element with recompute-only Pearson correlation.
+Status: implemented.
+
+Add the generic CPA plugin element with recompute Pearson correlation.
 
 Minimum support:
 
@@ -539,6 +588,8 @@ CpaAttack -> Summary
 
 ### Phase 4: `CpaAttackPayload` and summaries
 
+Status: implemented.
+
 Move attack outputs into a dedicated payload with named tensors and useful
 summary rendering.
 
@@ -549,6 +600,8 @@ Validation:
 
 ### Phase 5: `CpaAttackStats`
 
+Status: implemented.
+
 Add known-key diagnostics.
 
 Validation:
@@ -558,7 +611,33 @@ Validation:
 
 ### Phase 6: CPA plots
 
+Status: implemented for the first plot bridge (`CpaAttackStatsToPlotAnnotations`);
+dedicated score/rank/correlation/heatmap plot elements remain future work.
+
 Add attack-focused plot converters/elements.
+
+`CpaAttackStatsToPlotAnnotations` accepts CPA known-key stats:
+
+```text
+@attack ! @stats.attack_result
+@key    ! @stats.truth
+@stats  ! @ann
+```
+
+When stats are connected, each annotation includes:
+
+```text
+success=true|false
+true rank=<rank>
+true guess=<guess>
+true score=<score>
+relative margin=<margin>
+```
+
+The annotation `norm_value` is positive for successful units and negative for
+failed units, so `TracePlot` can place/mark them on opposite sides of the trace.
+If a unit fails, the annotation also carries a compact `correct key` field with
+the correct guess, its rank position, and its score.
 
 Validation:
 
@@ -566,6 +645,9 @@ Validation:
 - manual graph UI smoke pipeline.
 
 ### Phase 7: Incremental/live CPA
+
+Status: implemented in `CpaAttack` using sufficient statistics and the same mode
+vocabulary as `PearsonPoiFinder`.
 
 Add incremental CPA state and `auto` mode.
 
@@ -576,6 +658,8 @@ Validation:
 - upstream cached-buffer/property-change behavior is rejected or safely resets.
 
 ### Phase 8: Kyber hypothesis element
+
+Status: not implemented.
 
 Add a Kyber / ML-KEM hypothesis element only after the AES CPA path is stable.
 

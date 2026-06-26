@@ -73,6 +73,7 @@ struct TracePlotSnapshot {
     std::int64_t initial_trace_index = 0;
     std::int64_t order = -1;
     bool lock_trace_index = false;
+    bool center0 = true;
     std::optional<double> sample_rate_hz;
     std::optional<TracePlotColor> color;
     std::vector<std::int64_t> shape;
@@ -103,6 +104,7 @@ struct PlotLoopOptions {
 [[nodiscard]] TracePlotLayout parse_trace_plot_layout(std::string_view text);
 [[nodiscard]] TracePlotXAxis parse_trace_plot_x_axis(std::string_view text);
 [[nodiscard]] double trace_plot_annotation_y_from_norm(double norm_value, double lower, double higher);
+[[nodiscard]] std::pair<double, double> trace_plot_centered_y_range(double lower, double higher);
 
 // Persisted per-panel X-axis view (Phase 25). Lets the renderer convert the
 // visible window when a panel switches between sample and time_us units so the

@@ -663,18 +663,18 @@ int main()
     if (!expect(descriptors.size() == 1, "crypto plugin descriptor count changed")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 3, "crypto plugin element count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 7, "crypto plugin element count was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[1].type_name == "PearsonPoiFinder",
+    if (!expect(descriptors[0].elements[5].type_name == "PearsonPoiFinder",
             "PearsonPoiFinder descriptor type name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[1].output_pads[0].caps().type() == crypto_plugin::correlation_poi_caps_type,
+    if (!expect(descriptors[0].elements[5].output_pads[0].caps().type() == crypto_plugin::correlation_poi_caps_type,
             "PearsonPoiFinder descriptor output caps were wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[2].type_name == "CorrelationPoiToPlotAnnotations",
+    if (!expect(descriptors[0].elements[6].type_name == "CorrelationPoiToPlotAnnotations",
             "CorrelationPoiToPlotAnnotations descriptor type name was wrong")) {
         return 1;
     }

@@ -231,6 +231,19 @@ double trace_plot_annotation_y_from_norm(double norm_value, double lower, double
     return lower + normalized * (higher - lower);
 }
 
+std::pair<double, double> trace_plot_centered_y_range(double lower, double higher) {
+    if (!std::isfinite(lower) || !std::isfinite(higher) || lower > higher) {
+        throw std::invalid_argument("TracePlot centered y range must be finite and ordered");
+    }
+
+    const auto max_abs = std::max(std::abs(lower), std::abs(higher));
+    if (max_abs == 0.0) {
+        return {-1.0, 1.0};
+    }
+
+    return {-max_abs, max_abs};
+}
+
 std::uint64_t PlotRuntime::add_trace(TracePlotSnapshot snapshot) {
     const auto lock = std::scoped_lock(mutex_);
     validate_snapshot(snapshot);

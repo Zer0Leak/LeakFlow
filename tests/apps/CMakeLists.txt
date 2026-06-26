@@ -205,6 +205,34 @@ set_tests_properties(leakflow_cli_run_aes_leakage PROPERTIES
     PASS_REGULAR_EXPRESSION "payload.leakage.model=aes-first-round"
 )
 
+add_test(NAME leakflow_cli_run_aes_leakage_hypothesis
+    COMMAND leakflow run "TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); Summary@summary(level=3); @plain_src ! @hyp.plaintexts; @hyp ! @summary"
+)
+set_tests_properties(leakflow_cli_run_aes_leakage_hypothesis PROPERTIES
+    PASS_REGULAR_EXPRESSION "attack.guess.count=2"
+)
+
+add_test(NAME leakflow_cli_run_cpa_attack
+    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); Summary@summary(level=2); @traces_src ! @attack.features; @plain_src ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @summary"
+)
+set_tests_properties(leakflow_cli_run_cpa_attack PROPERTIES
+    PASS_REGULAR_EXPRESSION "payload=leakflow/cpa-attack"
+)
+
+add_test(NAME leakflow_cli_run_cpa_attack_stats
+    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); CpaAttackStats@stats; Summary@summary(level=2); @traces_src ! @attack.features; @plain_src ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.attack_result; @key_src ! @stats.truth; @stats ! @summary"
+)
+set_tests_properties(leakflow_cli_run_cpa_attack_stats PROPERTIES
+    PASS_REGULAR_EXPRESSION "payload.stats.id"
+)
+
+add_test(NAME leakflow_cli_run_cpa_attack_annotations
+    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); CpaAttackStats@stats(top_k=2); CpaAttackStatsToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @traces_src ! @attack.features; @plain_src ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.attack_result; @key_src ! @stats.truth; @stats ! @ann ! @summary"
+)
+set_tests_properties(leakflow_cli_run_cpa_attack_annotations PROPERTIES
+    PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"
+)
+
 add_test(NAME leakflow_cli_run_pearson_poi_finder
     COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[0]); PearsonPoiFinder@poi(top_k=[3],rank_by=[abs]); Summary@summary(level=2); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @summary"
 )
@@ -314,6 +342,26 @@ set_tests_properties(leakflow_ls_trace_plot PROPERTIES
 add_test(NAME leakflow_ls_aes_leakage COMMAND leakflow-ls AesLeakage)
 set_tests_properties(leakflow_ls_aes_leakage PROPERTIES
     PASS_REGULAR_EXPRESSION "HW\\(m_xor_k\\)"
+)
+
+add_test(NAME leakflow_ls_aes_leakage_hypothesis COMMAND leakflow-ls AesLeakageHypothesis)
+set_tests_properties(leakflow_ls_aes_leakage_hypothesis PROPERTIES
+    PASS_REGULAR_EXPRESSION "guess_values"
+)
+
+add_test(NAME leakflow_ls_cpa_attack COMMAND leakflow-ls CpaAttack)
+set_tests_properties(leakflow_ls_cpa_attack PROPERTIES
+    PASS_REGULAR_EXPRESSION "score_method"
+)
+
+add_test(NAME leakflow_ls_cpa_attack_stats COMMAND leakflow-ls CpaAttackStats)
+set_tests_properties(leakflow_ls_cpa_attack_stats PROPERTIES
+    PASS_REGULAR_EXPRESSION "true_rank"
+)
+
+add_test(NAME leakflow_ls_cpa_attack_stats_to_plot_annotations COMMAND leakflow-ls CpaAttackStatsToPlotAnnotations)
+set_tests_properties(leakflow_ls_cpa_attack_stats_to_plot_annotations PROPERTIES
+    PASS_REGULAR_EXPRESSION "plot annotations"
 )
 
 add_test(NAME leakflow_ls_pearson_poi_finder COMMAND leakflow-ls PearsonPoiFinder)

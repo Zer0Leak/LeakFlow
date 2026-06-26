@@ -282,6 +282,10 @@ panels in one window.
 Rank-2 trace selection uses vertical sliders on the right side of each plot
 panel.
 
+`TracePlot(center0=true)` is the default. It sets each plot panel's y-axis to a
+symmetric range around zero using `max(abs(min_leakage), abs(max_leakage))` from
+the displayed trace data. Set `center0=false` to let ImPlot autoscale normally.
+
 Each group window has a controls button that opens a floating controls window
 for per-TracePlot color, alpha, and display order.
 
