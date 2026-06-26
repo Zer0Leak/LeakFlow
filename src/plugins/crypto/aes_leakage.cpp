@@ -23,11 +23,7 @@ namespace {
 
 inline constexpr auto aes_state_bytes = std::int64_t{16};
 
-enum class AesLeakageChannel {
-  HwM,
-  HwMXorK,
-  HwY,
-};
+using AesLeakageChannel = leakflow::crypto::aes::FirstRoundLeakageChannel;
 
 [[nodiscard]] Caps torch_tensor_caps(Caps::Params params = {}) {
   return Caps(leakflow::base::torch_tensor_caps_type, std::move(params));
@@ -93,83 +89,24 @@ byte_indexes_metadata(const std::vector<std::size_t> &byte_indexes) {
   return fallback;
 }
 
-[[nodiscard]] AesLeakageChannel channel_for(std::string_view value) {
-  if (value == aes_leakage_channel_hw_m) {
-    return AesLeakageChannel::HwM;
-  }
-  if (value == aes_leakage_channel_hw_m_xor_k) {
-    return AesLeakageChannel::HwMXorK;
-  }
-  if (value == aes_leakage_channel_hw_y) {
-    return AesLeakageChannel::HwY;
-  }
-
-  throw std::invalid_argument(
-      "AesLeakage channels values must be HW(m), HW(m_xor_k), or HW(y)");
-}
-
-[[nodiscard]] std::string_view channel_name(AesLeakageChannel channel) {
-  switch (channel) {
-  case AesLeakageChannel::HwM:
-    return aes_leakage_channel_hw_m;
-  case AesLeakageChannel::HwMXorK:
-    return aes_leakage_channel_hw_m_xor_k;
-  case AesLeakageChannel::HwY:
-    return aes_leakage_channel_hw_y;
-  }
-
-  throw std::invalid_argument("unsupported AesLeakage leakage channel");
-}
-
 [[nodiscard]] std::vector<AesLeakageChannel>
 leakage_channels_for(const Element &element) {
   auto values = string_list_property_or(element, "channels",
                                         StringList{aes_leakage_channel_hw_y});
-  if (values.empty()) {
-    throw std::invalid_argument("AesLeakage channels cannot be empty");
-  }
-
-  std::set<std::string> seen;
-  std::vector<AesLeakageChannel> channels;
-  channels.reserve(values.size());
-  for (const auto &value : values) {
-    const auto channel = channel_for(value);
-    if (!seen.insert(std::string(channel_name(channel))).second) {
-      throw std::invalid_argument(
-          "AesLeakage channels must not contain duplicates");
-    }
-    channels.push_back(channel);
-  }
-
-  return channels;
-}
-
-[[nodiscard]] bool requires_keys(AesLeakageChannel channel) {
-  return channel == AesLeakageChannel::HwMXorK ||
-         channel == AesLeakageChannel::HwY;
+  return leakflow::crypto::aes::parse_first_round_leakage_channels(
+      std::span<const std::string>(values.data(), values.size()));
 }
 
 [[nodiscard]] bool
 requires_keys(const std::vector<AesLeakageChannel> &channels) {
-  for (const auto channel : channels) {
-    if (requires_keys(channel)) {
-      return true;
-    }
-  }
-
-  return false;
+  return leakflow::crypto::aes::first_round_leakage_channels_depend_on_key(
+      std::span<const AesLeakageChannel>(channels.data(), channels.size()));
 }
 
 [[nodiscard]] std::string
 channels_metadata(const std::vector<AesLeakageChannel> &channels) {
-  std::ostringstream output;
-  for (std::size_t index = 0; index < channels.size(); ++index) {
-    if (index != 0) {
-      output << ',';
-    }
-    output << channel_name(channels[index]);
-  }
-  return output.str();
+  return leakflow::crypto::aes::first_round_leakage_channels_metadata(
+      std::span<const AesLeakageChannel>(channels.data(), channels.size()));
 }
 
 [[nodiscard]] const Buffer &required_input(const ElementInputs &inputs,
@@ -261,73 +198,18 @@ void require_trace_alignment(const torch::Tensor &traces,
 }
 
 [[nodiscard]] torch::Tensor
-byte_index_tensor(std::span<const std::size_t> byte_indexes,
-                  const torch::Device &device) {
-  std::vector<std::int64_t> indexes;
-  indexes.reserve(byte_indexes.size());
-  for (const auto byte_index : byte_indexes) {
-    indexes.push_back(static_cast<std::int64_t>(byte_index));
-  }
-
-  return torch::tensor(
-             indexes,
-             torch::TensorOptions().dtype(torch::kLong).device(torch::kCPU))
-      .to(device);
-}
-
-[[nodiscard]] torch::Tensor
-select_byte_columns(const torch::Tensor &blocks,
-                    std::span<const std::size_t> byte_indexes) {
-  return blocks
-      .index_select(1, byte_index_tensor(byte_indexes, blocks.device()))
-      .transpose(0, 1)
-      .contiguous();
-}
-
-[[nodiscard]] torch::Tensor compute_leakage_channel(
-    AesLeakageChannel channel, const torch::Tensor &plaintexts,
-    const torch::Tensor *keys, std::span<const std::size_t> byte_indexes) {
-  if (channel == AesLeakageChannel::HwM) {
-    return leakflow::crypto::hamming_weight_u8(
-               select_byte_columns(plaintexts, byte_indexes))
-        .contiguous();
-  }
-
-  if (keys == nullptr) {
-    throw std::invalid_argument("AesLeakage requires connected input pad keys "
-                                "for key-dependent channels");
-  }
-
-  if (keys->device() != plaintexts.device()) {
-    throw std::invalid_argument(
-        "keys tensor must be on the same device as plaintexts");
-  }
-
-  if (channel == AesLeakageChannel::HwMXorK) {
-    const auto plaintext_bytes = select_byte_columns(plaintexts, byte_indexes);
-    const auto key_bytes = select_byte_columns(*keys, byte_indexes);
-    return leakflow::crypto::hamming_weight_u8(
-               torch::bitwise_xor(plaintext_bytes, key_bytes))
-        .contiguous();
-  }
-
-  const auto leakage = leakflow::crypto::aes::first_round_sbox_leakage_at(
-      *keys, plaintexts, byte_indexes);
-  return leakage.hamming_weights.select(2, 1).contiguous();
-}
-
-[[nodiscard]] torch::Tensor
 compute_leakage(const std::vector<AesLeakageChannel> &channels,
                 const torch::Tensor &plaintexts, const torch::Tensor *keys,
                 std::span<const std::size_t> byte_indexes) {
-  std::vector<torch::Tensor> channel_tensors;
-  channel_tensors.reserve(channels.size());
-  for (const auto channel : channels) {
-    channel_tensors.push_back(
-        compute_leakage_channel(channel, plaintexts, keys, byte_indexes));
+  const auto channel_span =
+      std::span<const AesLeakageChannel>(channels.data(), channels.size());
+  if (keys == nullptr) {
+    return leakflow::crypto::aes::first_round_leakage_at(
+        plaintexts, byte_indexes, channel_span);
   }
 
-  return torch::stack(channel_tensors, 2).contiguous();
+  return leakflow::crypto::aes::first_round_leakage_at(
+      *keys, plaintexts, byte_indexes, channel_span);
 }
 
 } // namespace

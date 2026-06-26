@@ -6,9 +6,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <string_view>
 #include <torch/torch.h>
+#include <vector>
 
 namespace leakflow::crypto::aes {
+
+inline constexpr auto first_round_leakage_channel_hw_m = "HW(m)";
+inline constexpr auto first_round_leakage_channel_hw_m_xor_k = "HW(m_xor_k)";
+inline constexpr auto first_round_leakage_channel_hw_y = "HW(y)";
+
+enum class FirstRoundLeakageChannel {
+    HwM,
+    HwMXorK,
+    HwY,
+};
 
 inline constexpr std::array<Byte, 256> sbox_table{
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
@@ -56,6 +69,27 @@ struct FirstRoundSboxLeakageTensors {
     torch::Tensor values;
     torch::Tensor hamming_weights;
 };
+
+[[nodiscard]] std::string_view first_round_leakage_channel_name(
+    FirstRoundLeakageChannel channel);
+
+[[nodiscard]] FirstRoundLeakageChannel first_round_leakage_channel_for(
+    std::string_view value);
+
+[[nodiscard]] std::vector<FirstRoundLeakageChannel> parse_first_round_leakage_channels(
+    std::span<const std::string> values);
+
+[[nodiscard]] bool first_round_leakage_channel_depends_on_key(
+    FirstRoundLeakageChannel channel);
+
+[[nodiscard]] bool first_round_leakage_channels_depend_on_key(
+    std::span<const FirstRoundLeakageChannel> channels);
+
+[[nodiscard]] std::string first_round_leakage_channels_metadata(
+    std::span<const FirstRoundLeakageChannel> channels);
+
+[[nodiscard]] std::string first_round_leakage_channel_dependencies_metadata(
+    std::span<const FirstRoundLeakageChannel> channels);
 
 [[nodiscard]] constexpr Byte sbox(Byte value) noexcept
 {
@@ -113,5 +147,22 @@ struct FirstRoundSboxLeakageTensors {
     torch::Tensor key_byte_or_blocks,
     torch::Tensor plaintext_blocks,
     std::span<const std::size_t> byte_indexes);
+
+[[nodiscard]] torch::Tensor first_round_leakage_at(
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels);
+
+[[nodiscard]] torch::Tensor first_round_leakage_at(
+    torch::Tensor key_byte_or_blocks,
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels);
+
+[[nodiscard]] torch::Tensor first_round_leakage_hypotheses_at(
+    torch::Tensor guess_values,
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels);
 
 } // namespace leakflow::crypto::aes

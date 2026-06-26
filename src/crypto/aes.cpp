@@ -1,5 +1,8 @@
 #include "leakflow/crypto/aes.hpp"
 
+#include <optional>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -48,6 +51,22 @@ void require_byte_index(std::size_t byte_index)
 {
     if (byte_index >= 16) {
         throw std::invalid_argument("AES byte_index must be in the range [0,15]");
+    }
+}
+
+void require_channels(std::span<const FirstRoundLeakageChannel> channels)
+{
+    if (channels.empty()) {
+        throw std::invalid_argument("AES first-round leakage channels cannot be empty");
+    }
+}
+
+void require_guess_values(const torch::Tensor& guess_values, const torch::Tensor& plaintext_blocks)
+{
+    require_u8_tensor(guess_values, "guess_values");
+    require_same_device(guess_values, plaintext_blocks, "guess_values");
+    if (guess_values.dim() != 1 || guess_values.size(0) == 0) {
+        throw std::invalid_argument("guess_values must have shape [G] with G > 0");
     }
 }
 
@@ -209,7 +228,183 @@ FirstRoundSboxLeakageTensors build_first_round_sbox_leakage(
     };
 }
 
+torch::Tensor known_key_leakage_channel(
+    FirstRoundLeakageChannel channel,
+    const torch::Tensor& plaintext_bytes,
+    const torch::Tensor* key_bytes)
+{
+    if (channel == FirstRoundLeakageChannel::HwM) {
+        return hamming_weight_u8(plaintext_bytes).contiguous();
+    }
+
+    if (key_bytes == nullptr) {
+        throw std::invalid_argument("key-dependent AES first-round leakage channels require key bytes");
+    }
+
+    auto m_xor_k = torch::bitwise_xor(plaintext_bytes, *key_bytes);
+    if (channel == FirstRoundLeakageChannel::HwMXorK) {
+        return hamming_weight_u8(std::move(m_xor_k)).contiguous();
+    }
+
+    if (channel == FirstRoundLeakageChannel::HwY) {
+        return hamming_weight_u8(sbox_u8(std::move(m_xor_k))).contiguous();
+    }
+
+    throw std::invalid_argument("unsupported AES first-round leakage channel");
+}
+
+torch::Tensor build_known_key_first_round_leakage(
+    torch::Tensor plaintext_bytes,
+    std::optional<torch::Tensor> key_bytes,
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    require_channels(channels);
+
+    std::vector<torch::Tensor> channel_tensors;
+    channel_tensors.reserve(channels.size());
+    for (const auto channel : channels) {
+        channel_tensors.push_back(known_key_leakage_channel(
+            channel,
+            plaintext_bytes,
+            key_bytes ? &*key_bytes : nullptr));
+    }
+
+    return torch::stack(channel_tensors, 2).contiguous();
+}
+
+torch::Tensor guess_domain_leakage_channel(
+    FirstRoundLeakageChannel channel,
+    const torch::Tensor& plaintext_bytes,
+    const torch::Tensor& guess_values,
+    std::optional<torch::Tensor>& m_xor_guess)
+{
+    const auto unit_count = plaintext_bytes.size(0);
+    const auto trace_count = plaintext_bytes.size(1);
+    const auto guess_count = guess_values.size(0);
+
+    if (channel == FirstRoundLeakageChannel::HwM) {
+        return hamming_weight_u8(plaintext_bytes)
+            .unsqueeze(1)
+            .expand({unit_count, guess_count, trace_count})
+            .contiguous();
+    }
+
+    if (!m_xor_guess) {
+        m_xor_guess = torch::bitwise_xor(
+            plaintext_bytes.unsqueeze(1),
+            guess_values.reshape({1, guess_count, 1}));
+    }
+
+    if (channel == FirstRoundLeakageChannel::HwMXorK) {
+        return hamming_weight_u8(*m_xor_guess).contiguous();
+    }
+
+    if (channel == FirstRoundLeakageChannel::HwY) {
+        return hamming_weight_u8(sbox_u8(*m_xor_guess)).contiguous();
+    }
+
+    throw std::invalid_argument("unsupported AES first-round leakage channel");
+}
+
 } // namespace
+
+std::string_view first_round_leakage_channel_name(
+    FirstRoundLeakageChannel channel)
+{
+    switch (channel) {
+    case FirstRoundLeakageChannel::HwM:
+        return first_round_leakage_channel_hw_m;
+    case FirstRoundLeakageChannel::HwMXorK:
+        return first_round_leakage_channel_hw_m_xor_k;
+    case FirstRoundLeakageChannel::HwY:
+        return first_round_leakage_channel_hw_y;
+    }
+
+    throw std::invalid_argument("unsupported AES first-round leakage channel");
+}
+
+FirstRoundLeakageChannel first_round_leakage_channel_for(std::string_view value)
+{
+    if (value == first_round_leakage_channel_hw_m) {
+        return FirstRoundLeakageChannel::HwM;
+    }
+    if (value == first_round_leakage_channel_hw_m_xor_k) {
+        return FirstRoundLeakageChannel::HwMXorK;
+    }
+    if (value == first_round_leakage_channel_hw_y) {
+        return FirstRoundLeakageChannel::HwY;
+    }
+
+    throw std::invalid_argument(
+        "AES first-round leakage channels must be HW(m), HW(m_xor_k), or HW(y)");
+}
+
+std::vector<FirstRoundLeakageChannel> parse_first_round_leakage_channels(
+    std::span<const std::string> values)
+{
+    if (values.empty()) {
+        throw std::invalid_argument("AES first-round leakage channels cannot be empty");
+    }
+
+    std::set<std::string> seen;
+    std::vector<FirstRoundLeakageChannel> channels;
+    channels.reserve(values.size());
+    for (const auto& value : values) {
+        const auto channel = first_round_leakage_channel_for(value);
+        const auto name = std::string(first_round_leakage_channel_name(channel));
+        if (!seen.insert(name).second) {
+            throw std::invalid_argument("AES first-round leakage channels must not contain duplicates");
+        }
+        channels.push_back(channel);
+    }
+
+    return channels;
+}
+
+bool first_round_leakage_channel_depends_on_key(
+    FirstRoundLeakageChannel channel)
+{
+    return channel == FirstRoundLeakageChannel::HwMXorK
+        || channel == FirstRoundLeakageChannel::HwY;
+}
+
+bool first_round_leakage_channels_depend_on_key(
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    for (const auto channel : channels) {
+        if (first_round_leakage_channel_depends_on_key(channel)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::string first_round_leakage_channels_metadata(
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    std::ostringstream output;
+    for (std::size_t index = 0; index < channels.size(); ++index) {
+        if (index != 0) {
+            output << ',';
+        }
+        output << first_round_leakage_channel_name(channels[index]);
+    }
+    return output.str();
+}
+
+std::string first_round_leakage_channel_dependencies_metadata(
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    std::ostringstream output;
+    for (std::size_t index = 0; index < channels.size(); ++index) {
+        if (index != 0) {
+            output << ',';
+        }
+        output << (first_round_leakage_channel_depends_on_key(channels[index]) ? "true" : "false");
+    }
+    return output.str();
+}
 
 FirstRoundSboxLeakageTensors first_round_sbox_leakage(
     Byte key_byte,
@@ -276,6 +471,69 @@ FirstRoundSboxLeakageTensors first_round_sbox_leakage_at(
     auto plaintext_bytes = select_byte_columns(plaintext_blocks, byte_indexes);
     auto key_bytes = normalize_key_bytes_for_block_indexes(std::move(key_byte_or_blocks), plaintext_blocks, byte_indexes);
     return build_first_round_sbox_leakage(std::move(key_bytes), std::move(plaintext_bytes));
+}
+
+torch::Tensor first_round_leakage_at(
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    require_plaintext_blocks(plaintext_blocks);
+    if (first_round_leakage_channels_depend_on_key(channels)) {
+        throw std::invalid_argument("key-dependent AES first-round leakage channels require key bytes");
+    }
+    return build_known_key_first_round_leakage(
+        select_byte_columns(plaintext_blocks, byte_indexes),
+        std::nullopt,
+        channels);
+}
+
+torch::Tensor first_round_leakage_at(
+    torch::Tensor key_byte_or_blocks,
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    require_plaintext_blocks(plaintext_blocks);
+    auto plaintext_bytes = select_byte_columns(plaintext_blocks, byte_indexes);
+
+    std::optional<torch::Tensor> key_bytes;
+    if (first_round_leakage_channels_depend_on_key(channels)) {
+        key_bytes = normalize_key_bytes_for_block_indexes(
+            std::move(key_byte_or_blocks),
+            plaintext_blocks,
+            byte_indexes);
+    }
+
+    return build_known_key_first_round_leakage(
+        std::move(plaintext_bytes),
+        std::move(key_bytes),
+        channels);
+}
+
+torch::Tensor first_round_leakage_hypotheses_at(
+    torch::Tensor guess_values,
+    torch::Tensor plaintext_blocks,
+    std::span<const std::size_t> byte_indexes,
+    std::span<const FirstRoundLeakageChannel> channels)
+{
+    require_plaintext_blocks(plaintext_blocks);
+    require_guess_values(guess_values, plaintext_blocks);
+    require_channels(channels);
+
+    auto plaintext_bytes = select_byte_columns(plaintext_blocks, byte_indexes);
+    std::optional<torch::Tensor> m_xor_guess;
+    std::vector<torch::Tensor> channel_tensors;
+    channel_tensors.reserve(channels.size());
+    for (const auto channel : channels) {
+        channel_tensors.push_back(guess_domain_leakage_channel(
+            channel,
+            plaintext_bytes,
+            guess_values,
+            m_xor_guess));
+    }
+
+    return torch::stack(channel_tensors, 3).contiguous();
 }
 
 } // namespace leakflow::crypto::aes

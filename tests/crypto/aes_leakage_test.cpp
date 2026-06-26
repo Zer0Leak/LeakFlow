@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <torch/torch.h>
+#include <vector>
 
 namespace {
 
@@ -67,6 +69,39 @@ bool expect_tensor_plane_row(
         && expect(value_data[offset + 1] == expected.y, "multi-index leakage tensor y mismatch")
         && expect(hamming_data[offset] == expected.hw_m, "multi-index leakage tensor HW(m) mismatch")
         && expect(hamming_data[offset + 1] == expected.hw_y, "multi-index leakage tensor HW(y) mismatch");
+}
+
+bool expect_leakage_channel(
+    const torch::Tensor& leakage,
+    std::int64_t unit,
+    std::int64_t trace,
+    std::int64_t channel,
+    leakflow::crypto::Byte expected,
+    const char* message)
+{
+    const auto trace_count = leakage.size(1);
+    const auto channel_count = leakage.size(2);
+    const auto* data = leakage.data_ptr<leakflow::crypto::Byte>();
+    const auto offset = static_cast<std::size_t>(((unit * trace_count) + trace) * channel_count + channel);
+    return expect(data[offset] == expected, message);
+}
+
+bool expect_hypothesis_channel(
+    const torch::Tensor& hypotheses,
+    std::int64_t unit,
+    std::int64_t guess,
+    std::int64_t trace,
+    std::int64_t channel,
+    leakflow::crypto::Byte expected,
+    const char* message)
+{
+    const auto guess_count = hypotheses.size(1);
+    const auto trace_count = hypotheses.size(2);
+    const auto channel_count = hypotheses.size(3);
+    const auto* data = hypotheses.data_ptr<leakflow::crypto::Byte>();
+    const auto offset = static_cast<std::size_t>(
+        (((unit * guess_count) + guess) * trace_count + trace) * channel_count + channel);
+    return expect(data[offset] == expected, message);
 }
 
 } // namespace
@@ -216,6 +251,177 @@ int main()
             1,
             Byte{0x2b},
             Byte{0x10})) {
+        return 1;
+    }
+
+    const std::vector<std::string> channel_names{
+        leakflow::crypto::aes::first_round_leakage_channel_hw_m,
+        leakflow::crypto::aes::first_round_leakage_channel_hw_m_xor_k,
+        leakflow::crypto::aes::first_round_leakage_channel_hw_y,
+    };
+    const auto parsed_channels = leakflow::crypto::aes::parse_first_round_leakage_channels(channel_names);
+    const auto parsed_channel_span =
+        std::span<const leakflow::crypto::aes::FirstRoundLeakageChannel>(
+            parsed_channels.data(),
+            parsed_channels.size());
+    if (!expect(parsed_channels.size() == 3, "AES leakage channel parsing changed")) {
+        return 1;
+    }
+    if (!expect(
+            leakflow::crypto::aes::first_round_leakage_channels_metadata(parsed_channel_span)
+                == "HW(m),HW(m_xor_k),HW(y)",
+            "AES leakage channel metadata changed")) {
+        return 1;
+    }
+    if (!expect(
+            leakflow::crypto::aes::first_round_leakage_channel_dependencies_metadata(parsed_channel_span)
+                == "false,true,true",
+            "AES leakage channel dependency metadata changed")) {
+        return 1;
+    }
+    if (!expect(
+            leakflow::crypto::aes::first_round_leakage_channels_depend_on_key(parsed_channel_span),
+            "AES leakage channel dependency detection changed")) {
+        return 1;
+    }
+
+    auto shared_known_leakage = leakflow::crypto::aes::first_round_leakage_at(
+        key_blocks,
+        plaintext_blocks,
+        byte_indexes,
+        parsed_channel_span);
+    if (!expect(shared_known_leakage.dim() == 3 && shared_known_leakage.size(0) == 2
+            && shared_known_leakage.size(1) == 2 && shared_known_leakage.size(2) == 3,
+            "shared known-key leakage shape mismatch")) {
+        return 1;
+    }
+    const auto known_0 = leakflow::crypto::aes::first_round_sbox_leakage(Byte{0x2b}, Byte{0x32});
+    if (!expect_leakage_channel(
+            shared_known_leakage,
+            0,
+            0,
+            0,
+            leakflow::crypto::hamming_weight(Byte{0x32}),
+            "shared known-key HW(m) mismatch")) {
+        return 1;
+    }
+    if (!expect_leakage_channel(
+            shared_known_leakage,
+            0,
+            0,
+            1,
+            leakflow::crypto::hamming_weight(Byte{0x32 ^ 0x2b}),
+            "shared known-key HW(m_xor_k) mismatch")) {
+        return 1;
+    }
+    if (!expect_leakage_channel(
+            shared_known_leakage,
+            0,
+            0,
+            2,
+            known_0.hw_y,
+            "shared known-key HW(y) mismatch")) {
+        return 1;
+    }
+
+    const std::vector<leakflow::crypto::aes::FirstRoundLeakageChannel> hw_m_channels{
+        leakflow::crypto::aes::FirstRoundLeakageChannel::HwM,
+    };
+    const auto hw_m_channel_span =
+        std::span<const leakflow::crypto::aes::FirstRoundLeakageChannel>(
+            hw_m_channels.data(),
+            hw_m_channels.size());
+    auto plaintext_only_leakage = leakflow::crypto::aes::first_round_leakage_at(
+        plaintext_blocks,
+        byte_indexes,
+        hw_m_channel_span);
+    if (!expect(plaintext_only_leakage.dim() == 3 && plaintext_only_leakage.size(0) == 2
+            && plaintext_only_leakage.size(1) == 2 && plaintext_only_leakage.size(2) == 1,
+            "shared plaintext-only leakage shape mismatch")) {
+        return 1;
+    }
+    if (!expect_leakage_channel(
+            plaintext_only_leakage,
+            1,
+            1,
+            0,
+            leakflow::crypto::hamming_weight(Byte{0x10}),
+            "shared plaintext-only HW(m) mismatch")) {
+        return 1;
+    }
+
+    auto guess_values = torch::tensor({0x00, 0x2b}, options);
+    auto hypotheses = leakflow::crypto::aes::first_round_leakage_hypotheses_at(
+        guess_values,
+        plaintext_blocks,
+        byte_indexes,
+        parsed_channel_span);
+    if (!expect(hypotheses.dim() == 4 && hypotheses.size(0) == 2
+            && hypotheses.size(1) == 2 && hypotheses.size(2) == 2
+            && hypotheses.size(3) == 3,
+            "shared guess-domain hypothesis shape mismatch")) {
+        return 1;
+    }
+    const auto scalar_key = torch::tensor(0x2b, options);
+    auto scalar_known_leakage = leakflow::crypto::aes::first_round_leakage_at(
+        scalar_key,
+        plaintext_blocks,
+        byte_indexes,
+        parsed_channel_span);
+    if (!expect(
+            torch::equal(hypotheses.select(1, 1).contiguous(), scalar_known_leakage),
+            "guess-domain hypothesis did not agree with known-key leakage for contained guess")) {
+        return 1;
+    }
+    if (!expect_hypothesis_channel(
+            hypotheses,
+            0,
+            0,
+            0,
+            1,
+            leakflow::crypto::hamming_weight(Byte{0x32}),
+            "guess-domain HW(m_xor_k) mismatch for zero guess")) {
+        return 1;
+    }
+    if (!expect_hypothesis_channel(
+            hypotheses,
+            0,
+            1,
+            0,
+            2,
+            known_0.hw_y,
+            "guess-domain HW(y) mismatch for contained guess")) {
+        return 1;
+    }
+
+    if (!expect(throws_exception<std::invalid_argument>([] {
+            const std::vector<std::string> duplicate_channels{
+                leakflow::crypto::aes::first_round_leakage_channel_hw_m,
+                leakflow::crypto::aes::first_round_leakage_channel_hw_m,
+            };
+            (void)leakflow::crypto::aes::parse_first_round_leakage_channels(duplicate_channels);
+        }),
+            "AES leakage channel parsing should reject duplicates")) {
+        return 1;
+    }
+    if (!expect(throws_exception<std::invalid_argument>([&plaintext_blocks, &byte_indexes, &parsed_channel_span] {
+            (void)leakflow::crypto::aes::first_round_leakage_at(
+                plaintext_blocks,
+                byte_indexes,
+                parsed_channel_span);
+        }),
+            "shared known-key leakage should reject key-dependent channels without keys")) {
+        return 1;
+    }
+    if (!expect(throws_exception<std::invalid_argument>([&plaintext_blocks, &byte_indexes, &parsed_channel_span, &options] {
+            const auto empty_guesses = torch::empty({0}, options);
+            (void)leakflow::crypto::aes::first_round_leakage_hypotheses_at(
+                empty_guesses,
+                plaintext_blocks,
+                byte_indexes,
+                parsed_channel_span);
+        }),
+            "guess-domain leakage should reject empty guess domains")) {
         return 1;
     }
 
