@@ -3,6 +3,7 @@
 #include "leakflow/core/element.hpp"
 #include "leakflow/core/pipeline.hpp"
 #include "leakflow/core/pipeline_session.hpp"
+#include "leakflow/log/logger.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -31,6 +32,50 @@ namespace leakflow::plot {
 namespace {
 
 constexpr auto max_recent_events = std::size_t{80};
+
+[[nodiscard]] std::string exception_message(const std::exception_ptr &failure, std::string_view fallback) {
+    if (!failure) {
+        return std::string(fallback);
+    }
+
+    try {
+        std::rethrow_exception(failure);
+    } catch (const std::exception &error) {
+        return error.what();
+    } catch (...) {
+        return std::string(fallback);
+    }
+}
+
+void observe_worker_event(PipelineSession &session, PipelineEventKind kind, std::string message) {
+    const auto observer = session.observer();
+    if (!observer) {
+        return;
+    }
+
+    try {
+        observer->observe(PipelineEvent{
+            .kind = kind,
+            .message = std::move(message),
+        });
+    } catch (...) {
+    }
+}
+
+void report_graph_run_failure(PipelineSession &session, std::string_view message) {
+    observe_worker_event(session, PipelineEventKind::Error, std::string(message));
+
+    log::LogRecord record{
+        .level = log::LogLevel::Error,
+        .component = "pipeline",
+        .message = "pipeline graph run failed",
+        .fields =
+            {
+                {"error", std::string(message)},
+            },
+    };
+    log::write(std::move(record));
+}
 
 [[nodiscard]] std::string_view pad_direction_name(PadDirection direction) {
     switch (direction) {
@@ -2227,32 +2272,54 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
                 control_runtime.set_run_stopper(stop_the_run);
                 session.request_resume(); // never start a run paused
                 session.set_stop_token(run_stop.get_token());
-                session.set_state(PipelineSessionState::Running);
 
-                if (session.pipeline().should_run_threaded()) {
-                    session.set_safe_point_mutex(&element_mutex);
-                    (void)session.run_once(); // blocks; pause/stop handled inside the segments
-                    session.set_safe_point_mutex(nullptr);
-                } else {
-                    {
-                        const std::lock_guard<std::mutex> lock(element_mutex);
-                        session.start();
-                        (void)session.run_sweep(); // first sweep (populates the rerun cache offline)
-                    }
-                    // A live-no-queue source streams single-threaded here, with pause
-                    // and edits applied between buffers.
-                    while (!run_stop.stop_requested() && session.pipeline().has_live_source()
-                           && !session.pipeline().all_live_sources_at_eos()) {
-                        session.wait_while_paused(run_stop.get_token());
-                        if (run_stop.stop_requested()) {
-                            break;
-                        }
+                try {
+                    if (session.pipeline().should_run_threaded()) {
+                        session.set_safe_point_mutex(&element_mutex);
+                        (void)session.run_once(); // blocks; pause/stop handled inside the segments
+                        session.set_safe_point_mutex(nullptr);
+                    } else {
                         {
                             const std::lock_guard<std::mutex> lock(element_mutex);
-                            (void)session.drain_commands();
+                            session.start();
+                            (void)session.run_sweep(); // first sweep (populates the rerun cache offline)
                         }
-                        (void)session.run_sweep();
+                        // A live-no-queue source streams single-threaded here, with pause
+                        // and edits applied between buffers.
+                        while (!run_stop.stop_requested() && session.pipeline().has_live_source()
+                               && !session.pipeline().all_live_sources_at_eos()) {
+                            session.wait_while_paused(run_stop.get_token());
+                            if (run_stop.stop_requested()) {
+                                break;
+                            }
+                            {
+                                const std::lock_guard<std::mutex> lock(element_mutex);
+                                (void)session.drain_commands();
+                            }
+                            (void)session.run_sweep();
+                        }
                     }
+                } catch (...) {
+                    const auto run_failure = std::current_exception();
+                    const auto message = exception_message(run_failure, "unknown pipeline graph run failure");
+
+                    session.set_safe_point_mutex(nullptr);
+                    control_runtime.set_run_stopper(nullptr);
+                    session.request_resume();
+                    (void)control_runtime.take_user_stopped();
+
+                    report_graph_run_failure(session, message);
+                    {
+                        const std::lock_guard<std::mutex> lock(element_mutex);
+                        session.stop();
+                    }
+                    session.set_state(PipelineSessionState::Stopped);
+                    observe_worker_event(session, PipelineEventKind::Stopped, "failed");
+
+                    if (token.stop_requested()) {
+                        break;
+                    }
+                    continue;
                 }
 
                 control_runtime.set_run_stopper(nullptr);
@@ -2296,6 +2363,13 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
             session.stop();
         } catch (...) {
             failure = std::current_exception();
+            const auto message = exception_message(failure, "unknown pipeline graph worker failure");
+            session.set_safe_point_mutex(nullptr);
+            control_runtime.set_run_stopper(nullptr);
+            session.request_resume();
+            report_graph_run_failure(session, message);
+            session.set_state(PipelineSessionState::Stopped);
+            observe_worker_event(session, PipelineEventKind::Stopped, "failed");
         }
     });
 
