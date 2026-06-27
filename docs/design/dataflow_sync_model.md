@@ -614,7 +614,7 @@ relative to the repo root.
 | **Unified `run()` pump loop (11.8)** — no `run_live()`; live auto-detected via `has_live_source()` | `Pipeline::run`, `src/core/pipeline.cpp` | `tests/plugins/base/fake_live_src_test.cpp` |
 | **3-state stream result** (`Data` / `NoData` / `EndOfStream`); `nullopt` reserved for NoData | `Element::at_end_of_stream`, `Pipeline::all_live_sources_at_eos` | as above |
 | **Cooperative stop** — `std::stop_token` through element → pipeline → session; interruptible source wait; CLI **SIGINT** bridge; `--graph` window-close | `Element::set_stop_token`, `Pipeline::set_stop_token`, `InterruptScope` in `src/apps/leakflow/leakflow_cli.cpp` | `fake_live_src_test.cpp` (pre-stop + mid-stream interrupt) |
-| **Fake live source** — Torch `.pt`, one `Buffer` per axis-0 row `[1, M]`; `sample_rate_hz` paces (one trace per `1/rate` s) + stamps `capture.sample_rate_hz`; honors the stop token | `FakeLiveSrc`, `src/plugins/base/fake_live_src.cpp` | `fake_live_src_test.cpp` |
+| **Fake live source** — Torch `.pt`, one `Buffer` per axis-0 row `[1, M]`; `trace_rate` paces fake-live replay (one trace per `1/rate` s); `capture.sample_rate_hz` is explicit user metadata only; honors the stop token | `FakeLiveSrc`, `src/plugins/base/fake_live_src.cpp` | `fake_live_src_test.cpp` |
 | **Liveness model (11.5)** — `live`/`one-run` declaration (default one-run); downstream OR-propagation; forward-apply on live-driven, cache-rerun on one-run | `Element::is_live`, `Pipeline::is_live_driven`, `PipelineSession::apply_command` | `tests/core/pipeline_session_test.cpp` |
 | **Segment decomposition** — cut at every `Queue`; one segment per connected component | `decompose_into_segments`, `src/core/pipeline_segments.cpp` | `tests/core/pipeline_segments_test.cpp` |
 | **Threaded runner** — one `std::jthread` per segment; `BufferQueue` handoff; EOS propagation; per-segment safe point | `Pipeline::run_threaded` / `run_source_segment` / `run_consumer_segment` / `execute_segment` | `tests/core/threaded_runner_test.cpp` |
@@ -731,7 +731,7 @@ uniform everywhere.
 
 | Element kind / state | Running | Paused | Idle | Stopped |
 |---|---|---|---|---|
-| live-driven element (e.g. source `sample_rate_hz`) | forward → next buffer | set now (Auto) / staged (Manual); effect on Resume | stage forward (effect on next Start) | stage for next Start |
+| live-driven element (e.g. source `trace_rate`) | forward → next buffer | set now (Auto) / staged (Manual); effect on Resume | stage forward (effect on next Start) | stage for next Start |
 | one-run / offline element | n/a (forward) | n/a | **recompute from cache** (`rerun_from`) | stage for next Start |
 | **restart-scoped structural** — `Queue.max_size`, `Sync.policy` | value sticks, but effect only at the **next Start** | value sticks; effect at next Start | takes effect at next Start | takes effect at next Start |
 
@@ -778,13 +778,14 @@ Build first: `cmake --build build -j`. Add `--log-level info` to watch buffers f
 
 ### 14.2 A live source — pacing and EOS
 
-`FakeLiveSrc` streams one buffer per axis-0 row, then EOS. `sample_rate_hz` paces it
-(one trace per `1/rate` seconds) and stamps `capture.sample_rate_hz`:
+`FakeLiveSrc` streams one buffer per axis-0 row, then EOS. `trace_rate` paces fake-live
+replay (one trace per `1/rate` seconds). It does not stamp `capture.sample_rate_hz`;
+add that as explicit source metadata when the trace sampling rate matters:
 
 ```bash
 # 50 rows, ~2 traces/sec -> ~25 s, visible in the log
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=2.0) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=2.0) ! Summary ! FakeSink'
 
 # no rate -> as fast as possible
 ./build/leakflow run \
@@ -808,7 +809,7 @@ thread) and below (two threads):
 ```bash
 # small, fast, dropping -> far fewer than 50 survive (capture-style)
 ./build/leakflow --log-level warn run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=200.0) ! Queue(max_size=1, drop_oldest=true) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=200.0) ! Queue(max_size=1, drop_oldest=true) ! Summary ! FakeSink'
 ```
 
 ### 14.4 Cooperative stop (Ctrl+C)
@@ -818,23 +819,23 @@ of a second (it does not wait out the remaining traces, nor hard-kill):
 
 ```bash
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 # ...press Ctrl+C mid-stream
 ```
 
 ### 14.5 The graph — player controls and live editing
 
 ```bash
-# opens in Stopped; click Start. Try Pause/Resume, edit sample_rate_hz live, toggle Auto-apply.
+# opens in Stopped; click Start. Try Pause/Resume, edit trace_rate live, toggle Auto-apply.
 ./build/leakflow run --graph \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 
 # begin running immediately on open
 ./build/leakflow run --graph --auto-start \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, sample_rate_hz=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 ```
 
-In the graph: change `sample_rate_hz` while **Running** → re-paces on the next
+In the graph: change `trace_rate` while **Running** → re-paces on the next
 buffer; **Pause** → the stream freezes; in **Idle** (after EOS) edits to downstream
 elements recompute from cache. The **Vector Clock** and **Buffer Clocks** panels show
 provenance per slot and per link.

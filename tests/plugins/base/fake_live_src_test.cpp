@@ -53,6 +53,9 @@ public:
                 last_rows = payload->tensor().size(0);
                 last_cols = payload->tensor().dim() >= 2 ? payload->tensor().size(1) : 0;
             }
+            if (input->has_metadata("capture.sample_rate_hz")) {
+                saw_capture_sample_rate = true;
+            }
         }
         return std::nullopt;
     }
@@ -61,6 +64,7 @@ public:
     std::vector<std::uint32_t> slot1;
     std::int64_t last_rows = 0;
     std::int64_t last_cols = 0;
+    bool saw_capture_sample_rate = false;
 };
 
 // A one-run (non-live) Torch source, for the liveness-propagation negative case.
@@ -107,6 +111,9 @@ int main()
         return 1;
     }
     if (!expect(sink->last_rows == 1 && sink->last_cols == 5000, "streamed row shape was not [1, 5000]")) {
+        return 1;
+    }
+    if (!expect(!sink->saw_capture_sample_rate, "FakeLiveSrc stamped capture.sample_rate_hz metadata")) {
         return 1;
     }
 
@@ -180,7 +187,7 @@ int main()
         leakflow::Pipeline paced_pipeline;
         auto paced_src = std::make_shared<leakflow::plugins::base::FakeLiveSrc>("live_paced");
         paced_src->set_property("path", std::string(fixture_path("traces_first_50.pt").string()));
-        paced_src->set_property("sample_rate_hz", 4.0);
+        paced_src->set_property("trace_rate", 4.0);
         auto paced_src_handle = paced_pipeline.add(paced_src);
         auto paced_sink = std::make_shared<CaptureSink>();
         auto paced_sink_handle = paced_pipeline.add(paced_sink);

@@ -64,11 +64,10 @@ ElementDescriptor FakeLiveSrc::descriptor()
         .property_specs =
             {
                 PropertySpec("path", std::string(), "path to the Torch .pt tensor streamed row-by-row"),
-                PropertySpec("sample_rate_hz", 0.0,
-                             "if > 0: stamp capture.sample_rate_hz metadata and pace the stream to one "
-                             "trace per 1/rate seconds (rate = traces emitted per second); 0 = no "
-                             "metadata, no delay",
-                             "Hz", DoubleRangeConstraint{0.0, 1.0e15}, ""),
+                PropertySpec("trace_rate", 0.0,
+                             "if > 0: pace the fake live stream to one trace per 1/rate seconds "
+                             "(rate = traces emitted per second); 0 = no delay",
+                             "traces/s", DoubleRangeConstraint{0.0, 1.0e15}, ""),
             },
         .keywords = {"live", "stream", "source", "fake", "capture"},
         .live_source = true,
@@ -115,24 +114,22 @@ std::optional<Buffer> FakeLiveSrc::process(std::optional<Buffer>)
     buffer.set_metadata("origin.file.path", string_property_or(*this, "path", ""));
     buffer.set_metadata("origin.row_index", std::to_string(row_index));
 
-    const auto sample_rate_hz = double_property_or(*this, "sample_rate_hz", 0.0);
-    if (sample_rate_hz > 0.0) {
-        buffer.set_metadata("capture.sample_rate_hz", std::to_string(sample_rate_hz));
-    }
-
     buffer.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "streamed live row");
     record.fields.emplace("origin.row_index", std::to_string(row_index));
     leakflow::log::write(std::move(record));
 
-    // Pace the stream to one buffer (trace) per 1/sample_rate_hz seconds -- i.e.
-    // sample_rate_hz is the rate at which the fake source emits traces. 0 = no
-    // delay. The wait polls the cooperative-stop token (S11.8) so Ctrl+C /
-    // window-close interrupts it mid-trace instead of running it to completion.
-    if (sample_rate_hz > 0.0) {
+    // Pace the stream to one buffer (trace) per 1/trace_rate seconds. This is
+    // intentionally separate from capture.sample_rate_hz metadata: capture sample
+    // rate describes samples inside a trace, while trace_rate describes fake-live
+    // replay speed. 0 = no delay. The wait polls the cooperative-stop token (S11.8)
+    // so Ctrl+C / window-close interrupts it mid-trace instead of running it to
+    // completion.
+    const auto trace_rate = double_property_or(*this, "trace_rate", 0.0);
+    if (trace_rate > 0.0) {
         const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::duration<double>(1.0 / sample_rate_hz);
+            std::chrono::steady_clock::now() + std::chrono::duration<double>(1.0 / trace_rate);
         const auto& token = stop_token();
         constexpr auto poll = std::chrono::milliseconds(10);
         while (!token.stop_requested()) {

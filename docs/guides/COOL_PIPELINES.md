@@ -151,11 +151,11 @@ updates.
 ```bash
 leakflow --log-level info run --graph \
   'FakeLiveSrc@traces_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,sample_rate_hz=29454545.454545453) \
-      {payload.leakage.inverted=false;payload.leakage.range=[-0.5,0.5]}; \
+      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=1.0) \
+      {payload.leakage.inverted=false;payload.leakage.range=[-0.5,0.5];capture.sample_rate_hz=29454545.454545453}; \
    Queue@traces_queue(max_size=8,drop_oldest=false); \
    FakeLiveSrc@plain_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,sample_rate_hz=29454545.454545453); \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=1.0); \
    Queue@plain_queue(max_size=8,drop_oldest=false); \
    TorchFileSrc@key_src \
       (path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
@@ -188,8 +188,8 @@ Notes:
 - `Tee@trace_tee` fans the trace tensor to three branches: `TracePlot.sink`
   (plot), `PearsonPoiFinder.features` (correlation), and `AesLeakage.traces`
   (leakage alignment check).
-- `TorchFileSrc@traces_src{...}` stamps `capture` facts (`capture.source`,
-  `capture.sample_rate_hz`) that are unioned and preserved through
+- `FakeLiveSrc@traces_src{...}` carries explicit user `capture` facts
+  (`capture.sample_rate_hz`) that are unioned and preserved through
   `AesLeakage`, `PearsonPoiFinder`, and `CorrelationPoiToPlotAnnotations` all
   the way to the plot. The trace-describing `payload.leakage.inverted`/
   `payload.leakage.range` are `payload`-group: they ride the pass-through

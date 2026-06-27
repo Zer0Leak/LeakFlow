@@ -177,7 +177,7 @@ now wired:
   default barrier. Bundles/`Mux`/`Demux` are **dropped** (superseded).
 
 Delivered: `FakeLiveSrc` (reads a Torch `.pt`, emits one `Buffer` per axis-0 row,
-`sample_rate_hz` pacing, then EOS), the liveness model, threaded segments + the
+`trace_rate` pacing, then EOS), the liveness model, threaded segments + the
 real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative stop,
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
@@ -296,7 +296,7 @@ Base plugin elements:
 - `TorchFileSrc`
 - `TorchConvert`
 - `TorchFileSink`
-- `FakeLiveSrc` (live `.pt` source: one buffer per axis-0 row, `sample_rate_hz`
+- `FakeLiveSrc` (live `.pt` source: one buffer per axis-0 row, `trace_rate`
   pacing, then EOS)
 
 Extras plugin elements:

@@ -86,7 +86,7 @@ Implemented and green, offline unchanged. Implementation map + tests:
   pumps until every live source is at end-of-stream; offline = one sweep. No
   `run_live()`. `Element::is_live()` (descriptor `live_source`) + `at_end_of_stream()`.
 - **`FakeLiveSrc`** (`leakflow_plugins_base`): reads a Torch `.pt`, streams one
-  `Buffer` per axis-0 row then EOS; `sample_rate_hz` pacing; declares itself live.
+  `Buffer` per axis-0 row then EOS; `trace_rate` pacing; declares itself live.
   Test `tests/plugins/base/fake_live_src_test.cpp`.
 - **Liveness propagation** `Pipeline::is_live_driven()` (OR-reachability from live
   sources); **liveness-aware property change** in `PipelineSession::apply_command`
