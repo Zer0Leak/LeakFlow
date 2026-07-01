@@ -149,6 +149,12 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
         if (series.secondary && !snapshot.show_secondary) {
             continue; // secondary series hidden by the show_second_score property
         }
+        // The second score shares the primary's legend entry, so hiding that entry
+        // must hide the second score too. (The primary line is still submitted below
+        // every frame so its legend entry persists and can be toggled back on.)
+        if (series.secondary && !visible[index]) {
+            continue;
+        }
         std::vector<double> xs;
         std::vector<double> ys;
         xs.reserve(series.points.size());
@@ -188,6 +194,45 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
         ImGui::SetTooltip("%s", marker_hover->second.c_str());
     } else if (vline_tooltip) {
         ImGui::SetTooltip("%s", vline_tooltip->c_str());
+    }
+
+    // Bulk visibility from the legend context menu (right-click a legend entry).
+    // "Isolate" focuses one unit without clicking every other one off. Toggling
+    // item->Show applies from the next frame (like a legend click), and a unit's
+    // second-score line follows via the shared-label visibility gate above.
+    //
+    // ImPlot resolves items by ImGui::GetID(label), which is seeded by the current
+    // ID stack -- inside a legend popup that stack is the popup window's, so GetItem
+    // there returns null. Resolve the item pointers *here* (plot ID context) and set
+    // Show on the cached pointers inside the popup.
+    std::vector<ImPlotItem *> items(panel.series.size(), nullptr);
+    for (std::size_t index = 0; index < panel.series.size(); ++index) {
+        items[index] = ImPlot::GetItem(panel.series[index].label.c_str());
+    }
+    const auto set_show = [&items, &panel](const auto &pred) {
+        for (std::size_t index = 0; index < panel.series.size(); ++index) {
+            if (items[index] != nullptr) {
+                items[index]->Show = pred(panel.series[index]);
+            }
+        }
+    };
+    // One popup per unit: the secondary series shares the primary's legend entry.
+    for (const auto &series : panel.series) {
+        if (series.secondary) {
+            continue;
+        }
+        if (ImPlot::BeginLegendPopup(series.label.c_str())) {
+            if (ImGui::MenuItem("Isolate this unit")) {
+                set_show([&series](const ScoreSeries &other) { return other.label == series.label; });
+            }
+            if (ImGui::MenuItem("Show all units")) {
+                set_show([](const ScoreSeries &) { return true; });
+            }
+            if (ImGui::MenuItem("Hide all units")) {
+                set_show([](const ScoreSeries &) { return false; });
+            }
+            ImPlot::EndLegendPopup();
+        }
     }
     ImPlot::EndPlot();
 }

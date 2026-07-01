@@ -185,7 +185,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
         const auto marker = !has_truth ? leakflow::plot::TracePlotAnnotationMarker::Circle
                                        : (succeeded ? leakflow::plot::TracePlotAnnotationMarker::Square
                                                     : leakflow::plot::TracePlotAnnotationMarker::Cross);
-        const auto label = "byte " + unit_label(unit_indexes, unit);
+        const auto label = "unit " + unit_label(unit_indexes, unit);
         const auto color = unit_color(unit);
 
         // Per-unit metric values, computed once.
@@ -198,7 +198,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
         // Shared hover fields include EVERY metric, so hovering a point in one panel
         // also shows the other metrics (score shows relative_margin and vice versa).
         std::vector<std::pair<std::string, std::string>> fields;
-        fields.emplace_back("byte", unit_label(unit_indexes, unit));
+        fields.emplace_back("unit", unit_label(unit_indexes, unit));
         fields.emplace_back("N", format_double(x));
         fields.emplace_back("guess", std::to_string(top1_guess[unit].item<std::int64_t>()));
         if (has_truth) {

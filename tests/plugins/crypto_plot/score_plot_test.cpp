@@ -113,7 +113,7 @@ int main()
     if (!expect(score_panel.series.size() == 2, "ScorePlot should build one series per unit")) {
         return 1;
     }
-    if (!expect(score_panel.series[0].label == "byte 0" && score_panel.series[1].label == "byte 1",
+    if (!expect(score_panel.series[0].label == "unit 0" && score_panel.series[1].label == "unit 1",
                 "ScorePlot series labels were wrong")) {
         return 1;
     }
@@ -165,7 +165,7 @@ int main()
         for (const auto& s : score_panel.series) {
             if (s.secondary) {
                 ++secondary;
-                if (s.label == "byte 0") {
+                if (s.label == "unit 0") {
                     byte0_secondary = &s;
                 }
             } else {
