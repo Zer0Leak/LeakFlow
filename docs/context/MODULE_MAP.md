@@ -37,6 +37,11 @@ leakflow_plugins_plot
   -> leakflow_cli
   -> leakflow
 
+leakflow_plugins_crypto + leakflow_plot
+  -> leakflow_plugins_crypto_plot   (ScorePlot: AttackStatsPayload -> ScoreView)
+  -> leakflow_cli
+  -> leakflow
+
 leakflow_render + plugin descriptor catalogs
   -> leakflow-ls
 ```

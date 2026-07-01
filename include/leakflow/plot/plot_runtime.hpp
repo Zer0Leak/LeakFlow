@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -14,6 +15,7 @@ namespace leakflow::plot {
 
 class PipelineControlRuntime;
 class PipelineGraphRuntime;
+class PlotView;
 
 inline constexpr auto sample_rate_metadata_key = "capture.sample_rate_hz";
 
@@ -103,55 +105,6 @@ struct TracePlotSnapshot {
     [[nodiscard]] const float *trace_data(std::int64_t trace_index) const;
 };
 
-// Generic score-plot display data (domain-free): a stacked set of metric panels,
-// each with one line series per unit, each series a growing list of (x, y) points
-// with a marker shape. A crypto ScorePlot element fills this from an attack payload;
-// leakflow_plot renders it without knowing about CPA. Reuses the group concept.
-struct ScoreSeriesPoint {
-    double x = 0.0;
-    double y = 0.0;
-    TracePlotAnnotationMarker marker = TracePlotAnnotationMarker::Circle;
-    std::vector<std::pair<std::string, std::string>> fields; // hover details
-};
-
-struct ScoreSeries {
-    std::string label; // e.g. "byte 03"
-    std::optional<TracePlotColor> color;
-    // A secondary series shares its label/color with the primary (so one legend entry
-    // toggles both) and is drawn fainter without markers. Gated by show_secondary.
-    bool secondary = false;
-    std::vector<ScoreSeriesPoint> points;
-};
-
-struct ScorePanel {
-    std::string metric; // panel key, e.g. "score" / "relative_margin"
-    std::string y_label;
-    std::vector<ScoreSeries> series; // one per unit (plus optional secondary series)
-};
-
-struct ScoreSnapshot {
-    std::uint64_t id = 0;
-    std::string group = "default";
-    std::string element_name;
-    std::string title;
-    std::string x_label = "traces (N)";
-    // Whether secondary series (e.g. the second-best score) are drawn. Producers
-    // still accumulate them, so this can be toggled live without losing history.
-    bool show_secondary = false;
-    std::vector<ScorePanel> panels; // always stacked
-};
-
-// One point to append for a (panel, series) pair at an x. The runtime finds-or-
-// creates the panel and series (ordered by first-seen) and appends the point.
-struct ScorePointUpdate {
-    std::string panel;
-    std::string panel_y_label;
-    std::string series;
-    std::optional<TracePlotColor> color;
-    bool secondary = false;
-    ScoreSeriesPoint point;
-};
-
 struct PlotLoopOptions {
     PlotBackend backend = PlotBackend::Auto;
     std::string window_title = "LeakFlow TracePlot";
@@ -205,19 +158,14 @@ public:
     // had no sample rate and fell back to sample (the caller resets the property).
     bool refresh_trace_display(const TracePlotSnapshot &update);
 
-    // Append points to the score snapshot owned by element_name (find-or-create the
-    // snapshot, and each update's panel and series). Used by a ScorePlot element to
-    // accumulate attack metrics over streamed buffers. Presentation fields (group,
-    // title, x label) are refreshed each call.
-    void append_score_points(std::string element_name, std::string group, std::string title, std::string x_label,
-                             bool show_secondary, const std::vector<ScorePointUpdate> &updates);
-    // Toggle secondary-series display on an existing score snapshot (a ui-control
-    // property self-apply), so it flips live without waiting for the next buffer.
-    void set_score_show_secondary(std::string_view element_name, bool show_secondary);
+    // Register a PlotView (a self-contained plot type, e.g. ScoreView). The runtime
+    // draws it each frame without knowing its type; adding a plot type is a new
+    // PlotView, not an edit here. See leakflow/plot/plot_view.hpp.
+    void add_view(std::shared_ptr<PlotView> view);
+    [[nodiscard]] const std::vector<std::shared_ptr<PlotView>> &views() const;
 
     [[nodiscard]] bool has_sessions() const;
     [[nodiscard]] const std::vector<TracePlotSnapshot> &trace_snapshots() const;
-    [[nodiscard]] const std::vector<ScoreSnapshot> &score_snapshots() const;
 
     void clear();
 
@@ -234,9 +182,6 @@ public:
     [[nodiscard]] TracePlotDisplayState &mutable_trace_display_state(const TracePlotSnapshot &snapshot);
     [[nodiscard]] bool &mutable_group_controls_open(std::string_view group);
     [[nodiscard]] PlotAxisView &mutable_axis_view(std::uint64_t panel_id);
-    // User-draggable pixel height for a stacked score panel, keyed by
-    // "<snapshotId>/<metric>". The renderer resizes it via a splitter handle.
-    [[nodiscard]] float &mutable_score_panel_height(const std::string &key, float initial_value);
 
     // Two-way trace-index sync (Phase 25). When a listener is installed, moving a
     // vertical trace slider notifies it so the owning element's trace_index
@@ -256,8 +201,8 @@ public:
     [[nodiscard]] std::recursive_mutex &mutex() const;
 
 private:
+    std::vector<std::shared_ptr<PlotView>> views_;
     std::vector<TracePlotSnapshot> trace_snapshots_;
-    std::vector<ScoreSnapshot> score_snapshots_;
     std::uint64_t next_snapshot_id_ = 1;
     bool streaming_ = false;
     std::map<std::uint64_t, int> trace_indices_;
@@ -266,7 +211,6 @@ private:
     std::map<std::uint64_t, TracePlotDisplayState> trace_display_states_;
     std::map<std::string, bool> group_control_windows_;
     std::map<std::uint64_t, PlotAxisView> axis_views_;
-    std::map<std::string, float> score_panel_heights_;
     std::function<void(std::string_view, int)> trace_index_listener_;
     std::function<void(std::string_view, std::string_view)> x_axis_listener_;
     mutable std::recursive_mutex mutex_;

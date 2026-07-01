@@ -1,4 +1,5 @@
 #include "leakflow/plot/plot_runtime.hpp"
+#include "leakflow/plot/score_view.hpp"
 #include "leakflow/plugins/crypto/attack_payload.hpp"
 #include "leakflow/plugins/crypto_plot/score_plot.hpp"
 
@@ -79,18 +80,22 @@ int main()
     namespace crypto_plot = leakflow::plugins::crypto_plot;
     namespace plot = leakflow::plot;
 
+    // The ScorePlot pushes into a ScoreView; the ScoreView is registered with the
+    // PlotRuntime, which draws/clears it as one of its views (the registry pattern).
     auto runtime = std::make_shared<plot::PlotRuntime>();
-    crypto_plot::ScorePlot score_plot(runtime, "score");
+    auto view = std::make_shared<plot::ScoreView>();
+    runtime->add_view(view);
+    crypto_plot::ScorePlot score_plot(view, "score");
     (void)score_plot.process(make_stats_buffer(10));
     (void)score_plot.process(make_stats_buffer(20));
 
-    if (!expect(runtime->has_sessions(), "ScorePlot registered no plot session")) {
+    if (!expect(runtime->has_sessions(), "ScoreView registered with the runtime should count as a session")) {
         return 1;
     }
-    if (!expect(runtime->score_snapshots().size() == 1, "ScorePlot should own one score snapshot")) {
+    if (!expect(view->snapshots().size() == 1, "ScorePlot should own one score snapshot")) {
         return 1;
     }
-    const auto& snapshot = runtime->score_snapshots().front();
+    const auto& snapshot = view->snapshots().front();
     if (!expect(snapshot.element_name == "score" && snapshot.group == "cpa",
                 "ScorePlot snapshot identity/group was wrong")) {
         return 1;
@@ -138,20 +143,20 @@ int main()
         return 1;
     }
 
-    // Stop clears the runtime (Stop/Start recycle).
+    // Stop clears the runtime (Stop/Start recycle); the clear cascades to each view.
     runtime->clear();
-    if (!expect(runtime->score_snapshots().empty() && !runtime->has_sessions(),
-                "PlotRuntime clear should drop score snapshots")) {
+    if (!expect(view->snapshots().empty() && !runtime->has_sessions(),
+                "PlotRuntime clear should cascade to the ScoreView")) {
         return 1;
     }
 
     {
         // Second-best score (top_k >= 2): always accumulated as a secondary series in
         // the score panel; display gated by show_second_score, which toggles live.
-        auto runtime2 = std::make_shared<plot::PlotRuntime>();
-        crypto_plot::ScorePlot score_plot2(runtime2, "score2");
+        auto view2 = std::make_shared<plot::ScoreView>();
+        crypto_plot::ScorePlot score_plot2(view2, "score2");
         (void)score_plot2.process(make_stats_buffer_k2(10));
-        const auto& snap = runtime2->score_snapshots().front();
+        const auto& snap = view2->snapshots().front();
         const auto& score_panel = snap.panels[0]; // "score"
 
         int primary = 0;
@@ -180,7 +185,7 @@ int main()
         }
         // Toggling the property self-applies to the live snapshot (no new buffer).
         score_plot2.set_property("show_second_score", true);
-        if (!expect(runtime2->score_snapshots().front().show_secondary,
+        if (!expect(view2->snapshots().front().show_secondary,
                     "show_second_score toggle should self-apply to the snapshot")) {
             return 1;
         }

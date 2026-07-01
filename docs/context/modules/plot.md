@@ -24,8 +24,12 @@ Tests:
 
 ## Targets
 
-- `leakflow_plot`: ImGui/ImPlot runtime and backend support.
+- `leakflow_plot`: ImGui/ImPlot runtime and backend support; owns `PlotView` and
+  the registry (`ScoreView` lives here — display data only, domain-free).
 - `leakflow_plugins_plot`: plot plugin family with `TracePlot`.
+- `leakflow_plugins_crypto_plot`: crypto→plot bridge; the `ScorePlot` element
+  reads `AttackStatsPayload` and fills a `ScoreView`. Depends on
+  `leakflow_plugins_crypto` + `leakflow_plot`.
 
 ## Dependency Boundary
 
@@ -81,8 +85,9 @@ processing.
 the input buffer for API-level inspection, but the element descriptor does not
 declare a source pad.
 
-`PlotRuntime` owns plot snapshots and UI state. It is usable from both the CLI
-and application code.
+`PlotRuntime` owns the trace snapshots and their UI state directly, plus a
+registry of `PlotView`s (see **Plot Views** below) for every other plot type. It
+is usable from both the CLI and application code.
 
 `leakflow_plugins_plot` factory registration requires a shared `PlotRuntime`;
 the `TracePlot` factory captures it so the generic `ElementFactoryRegistry`
@@ -93,6 +98,47 @@ window loop.
 
 `leakflow::plot::draw_plot_runtime(runtime)` draws into the current ImGui frame
 for applications that already own the UI loop.
+
+## Plot Views (PlotView registry)
+
+`PlotRuntime` is a registry of plot types, analogous to a `Pipeline` being a
+registry of `Element`s. Besides the built-in trace path, it holds
+`views_`, a list of `PlotView` (`include/leakflow/plot/plot_view.hpp`):
+
+```text
+PlotView: draw()  clear()  empty()   // polymorphic; the runtime never type-switches
+```
+
+- Add a plot type = a new `PlotView` subclass (its own copied data, UI state,
+  and ImGui/ImPlot rendering in its own `.cpp`) + the element that fills it. No
+  edit to `plot_runtime.cpp` or `imgui_plot_loop.cpp`.
+- `PlotRuntime::add_view(shared_ptr<PlotView>)` registers a view.
+  `draw_plot_runtime` draws the trace groups then loops `views()` calling
+  `draw()`. `has_sessions()` is true for trace snapshots **or** any non-empty
+  view. `clear()` (Stop/Start recycle) clears trace state and cascades to each
+  `view->clear()`.
+- A view owns **its own mutex**; it is filled from the worker thread and drawn
+  from the UI thread, and both serialize on that lock. A view therefore has no
+  lifetime dependency on `PlotRuntime` (lock order is always runtime → view).
+- Shared, domain-free drawing primitives (colour, marker shapes, number label,
+  pixel distance) live in `src/plot/plot_render_util.{hpp,cpp}` for reuse across
+  views. They stay generic — colours/markers/pixels, not traces/scores.
+
+`ScoreView` (`include/leakflow/plot/score_view.hpp`, `src/plot/score_view.cpp`)
+is the first non-trace view: stacked metric panels, one line series per attack
+unit, a marker shape per point (square = success, x = failure, circle = truth
+unknown), per-unit "latest wrong key" vertical lines, draggable panel heights.
+Its display data is generic (panels/series/points), so `leakflow_plot` stays
+domain-free of CPA.
+
+`ScorePlot`, the element that fills a `ScoreView`, lives in the separate
+`leakflow_plugins_crypto_plot` target (depends on `leakflow_plugins_crypto` +
+`leakflow_plot`) because it reads the crypto `AttackStatsPayload` directly. Its
+factory (`crypto_plot::register_element_factories(registry, runtime)`) creates
+one `ScoreView`, registers it with the shared `PlotRuntime`, and hands it to
+every `ScorePlot`, so all score elements/units stack together in one `group`
+window (`ScorePlot` always stacks; it never overlays). Design:
+`docs/design/plotting.md` (Plot View Architecture) and `docs/design/cpa_attack.md`.
 
 ## Pipeline Graph Runtime
 

@@ -1,5 +1,7 @@
 #include "leakflow/plugins/crypto_plot/descriptor_catalog.hpp"
 
+#include "leakflow/plot/plot_runtime.hpp"
+#include "leakflow/plot/score_view.hpp"
 #include "leakflow/plugins/crypto_plot/score_plot.hpp"
 #include "crypto_plot_plugin_constants.hpp"
 
@@ -53,11 +55,17 @@ void register_element_factories(
         throw std::invalid_argument("ScorePlot factory registration requires a PlotRuntime");
     }
 
+    // One ScoreView shared by every ScorePlot in this run: it is the score registry
+    // (all units/elements stack in one group window) and is registered with the
+    // PlotRuntime so the UI draws and clears it alongside the trace plots.
+    auto view = std::make_shared<leakflow::plot::ScoreView>();
+    runtime->add_view(view);
+
     registry.register_plugin(
         plugin_descriptors().front(),
         {
-            {"ScorePlot", [runtime = std::move(runtime)](std::string name) {
-                 return std::make_shared<ScorePlot>(runtime, std::move(name));
+            {"ScorePlot", [view = std::move(view)](std::string name) {
+                 return std::make_shared<ScorePlot>(view, std::move(name));
              }},
         });
 }

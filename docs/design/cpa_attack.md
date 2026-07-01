@@ -414,9 +414,9 @@ Useful plot/converter elements:
 
 ```text
 AttackStatsToPlotAnnotations    // implemented
-CpaScorePlot                  // future
-CpaRankPlot                   // future
-CpaCorrelationPlot            // future
+ScorePlot                       // implemented (leakflow_plugins_crypto_plot)
+CpaRankPlot                     // future
+CpaCorrelationPlot              // future
 ```
 
 Useful visualizations:
@@ -430,9 +430,15 @@ Useful visualizations:
 
 The first implemented plot bridge is `AttackStatsToPlotAnnotations`, which
 marks each attack unit's best sample on `TracePlot` using known-key stats as the
-source of truth for PASS/FAIL. A dedicated score/rank view should come next
-because it makes it obvious whether the correct key byte is separating from the
-alternatives.
+source of truth for PASS/FAIL. The dedicated score/rank view is `ScorePlot` (in
+`leakflow_plugins_crypto_plot`): it consumes `AttackStatsPayload` and plots one
+stacked panel per selected metric (`score`, `relative_margin`, …), one line per
+unit versus observation count, with the success/failure marker per point and a
+per-unit "latest wrong key" vertical line — so it is obvious whether the correct
+key byte is separating from the alternatives as more traces arrive. It renders
+through a generic `ScoreView` behind the `PlotView` registry
+(`docs/design/plotting.md`, Plot View Architecture), so it reuses `TracePlot`'s
+`group` windows without pulling CPA types into `leakflow_plot`.
 
 ## Recompute And Incremental Modes
 

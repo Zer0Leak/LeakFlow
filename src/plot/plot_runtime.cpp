@@ -1,6 +1,7 @@
 #include "leakflow/plot/plot_runtime.hpp"
 
 #include "leakflow/log/logger.hpp"
+#include "leakflow/plot/plot_view.hpp"
 
 #include <algorithm>
 #include <array>
@@ -505,74 +506,29 @@ bool PlotRuntime::refresh_trace_display(const TracePlotSnapshot &update) {
     return false;
 }
 
-void PlotRuntime::append_score_points(std::string element_name, std::string group, std::string title,
-                                      std::string x_label, bool show_secondary,
-                                      const std::vector<ScorePointUpdate> &updates) {
+void PlotRuntime::add_view(std::shared_ptr<PlotView> view) {
     const auto lock = std::scoped_lock(mutex_);
-    if (group.empty()) {
-        group = "default";
-    }
-
-    ScoreSnapshot *snapshot = nullptr;
-    for (auto &existing : score_snapshots_) {
-        if (existing.element_name == element_name) {
-            snapshot = &existing;
-            break;
-        }
-    }
-    if (snapshot == nullptr) {
-        ScoreSnapshot fresh;
-        fresh.id = next_snapshot_id_++;
-        fresh.element_name = std::move(element_name);
-        snapshot = &score_snapshots_.emplace_back(std::move(fresh));
-    }
-    // Presentation is refreshed each call (like a ui-control change).
-    snapshot->group = std::move(group);
-    snapshot->title = std::move(title);
-    snapshot->x_label = std::move(x_label);
-    snapshot->show_secondary = show_secondary;
-
-    for (const auto &update : updates) {
-        ScorePanel *panel = nullptr;
-        for (auto &candidate : snapshot->panels) {
-            if (candidate.metric == update.panel) {
-                panel = &candidate;
-                break;
-            }
-        }
-        if (panel == nullptr) {
-            panel = &snapshot->panels.emplace_back(ScorePanel{.metric = update.panel, .y_label = update.panel_y_label});
-        }
-
-        // A primary and a secondary series can share a label; keep them separate.
-        ScoreSeries *series = nullptr;
-        for (auto &candidate : panel->series) {
-            if (candidate.label == update.series && candidate.secondary == update.secondary) {
-                series = &candidate;
-                break;
-            }
-        }
-        if (series == nullptr) {
-            series = &panel->series.emplace_back(
-                ScoreSeries{.label = update.series, .color = update.color, .secondary = update.secondary});
-        }
-        series->points.push_back(update.point);
+    if (view) {
+        views_.push_back(std::move(view));
     }
 }
 
-void PlotRuntime::set_score_show_secondary(std::string_view element_name, bool show_secondary) {
+const std::vector<std::shared_ptr<PlotView>> &PlotRuntime::views() const {
     const auto lock = std::scoped_lock(mutex_);
-    for (auto &snapshot : score_snapshots_) {
-        if (snapshot.element_name == element_name) {
-            snapshot.show_secondary = show_secondary;
-            return;
-        }
-    }
+    return views_;
 }
 
 bool PlotRuntime::has_sessions() const {
     const auto lock = std::scoped_lock(mutex_);
-    return !trace_snapshots_.empty() || !score_snapshots_.empty();
+    if (!trace_snapshots_.empty()) {
+        return true;
+    }
+    for (const auto &view : views_) {
+        if (view && !view->empty()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 const std::vector<TracePlotSnapshot> &PlotRuntime::trace_snapshots() const {
@@ -580,15 +536,9 @@ const std::vector<TracePlotSnapshot> &PlotRuntime::trace_snapshots() const {
     return trace_snapshots_;
 }
 
-const std::vector<ScoreSnapshot> &PlotRuntime::score_snapshots() const {
-    const auto lock = std::scoped_lock(mutex_);
-    return score_snapshots_;
-}
-
 void PlotRuntime::clear() {
     const auto lock = std::scoped_lock(mutex_);
     trace_snapshots_.clear();
-    score_snapshots_.clear();
     // Reset the id counter so a re-registered plot reuses ids after a Stop/Start
     // cycle; otherwise auto palette colors (keyed by id) would shift each cycle.
     // Every id-keyed map below is cleared so reused ids carry no stale state.
@@ -599,7 +549,12 @@ void PlotRuntime::clear() {
     trace_display_states_.clear();
     group_control_windows_.clear();
     axis_views_.clear();
-    score_panel_heights_.clear();
+    // Registered views (e.g. ScoreView) own and clear their own data.
+    for (const auto &view : views_) {
+        if (view) {
+            view->clear();
+        }
+    }
 }
 
 int &PlotRuntime::mutable_trace_index(std::uint64_t snapshot_id, int initial_value) {
@@ -649,10 +604,6 @@ PlotAxisView &PlotRuntime::mutable_axis_view(std::uint64_t panel_id) {
     return axis_views_[panel_id];
 }
 
-float &PlotRuntime::mutable_score_panel_height(const std::string &key, float initial_value) {
-    const auto lock = std::scoped_lock(mutex_);
-    return score_panel_heights_.try_emplace(key, initial_value).first->second;
-}
 
 void PlotRuntime::set_trace_index_listener(std::function<void(std::string_view, int)> listener) {
     const auto lock = std::scoped_lock(mutex_);

@@ -3,6 +3,8 @@
 #include "leakflow/core/pipeline_session.hpp"
 #include "leakflow/log/logger.hpp"
 #include "leakflow/plot/pipeline_graph.hpp"
+#include "leakflow/plot/plot_view.hpp"
+#include "plot_render_util.hpp"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -299,10 +301,6 @@ void move_snapshot_before(PlotRuntime &runtime, std::vector<const TracePlotSnaps
     }
 
     return count;
-}
-
-[[nodiscard]] ImVec4 im_color(const TracePlotColor &color, float alpha) {
-    return ImVec4(color.red, color.green, color.blue, alpha);
 }
 
 bool draw_vertical_slider(std::string_view tooltip_label, const std::string &imgui_id, int &value, int max_value,
@@ -629,12 +627,6 @@ void plot_annotation_legend_items(std::vector<AnnotationStyle> &styles) {
     return style == styles.end() || style->visible;
 }
 
-[[nodiscard]] float squared_distance(ImVec2 left, ImVec2 right) {
-    const auto dx = left.x - right.x;
-    const auto dy = left.y - right.y;
-    return dx * dx + dy * dy;
-}
-
 [[nodiscard]] std::pair<double, double> trace_y_range(const float *values, std::int64_t count) {
     const auto *begin = values;
     const auto *end = values + count;
@@ -740,16 +732,6 @@ struct AnnotationCandidate {
     });
 }
 
-void draw_annotation_number_label(ImDrawList &draw_list, ImVec2 marker, const std::string &text) {
-    if (text.empty()) {
-        return;
-    }
-    const auto text_position = ImVec2(marker.x + 5.0F, marker.y - 8.0F);
-    draw_list.AddText(ImVec2(text_position.x + 1.0F, text_position.y + 1.0F),
-                      ImGui::GetColorU32(ImVec4(0.0F, 0.0F, 0.0F, 0.85F)), text.c_str());
-    draw_list.AddText(text_position, ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 0.95F)), text.c_str());
-}
-
 [[nodiscard]] ImVec2 annotation_group_label_anchor(const std::vector<AnnotationCandidate> &group) {
     auto x = 0.0F;
     auto y = 0.0F;
@@ -760,66 +742,6 @@ void draw_annotation_number_label(ImDrawList &draw_list, ImVec2 marker, const st
 
     const auto count = static_cast<float>(group.size());
     return ImVec2(x / count, y / count);
-}
-
-[[nodiscard]] bool colors_are_close(ImVec4 left, ImVec4 right) {
-    static constexpr auto epsilon = 1.0e-4F;
-    return std::abs(left.x - right.x) <= epsilon && std::abs(left.y - right.y) <= epsilon &&
-           std::abs(left.z - right.z) <= epsilon && std::abs(left.w - right.w) <= epsilon;
-}
-
-[[nodiscard]] bool colors_are_uniform(const std::vector<ImVec4> &colors) {
-    return std::all_of(colors.begin(), colors.end(),
-                       [&colors](auto color) { return colors.empty() || colors_are_close(color, colors.front()); });
-}
-
-void draw_annotation_marker(ImDrawList &draw_list, ImVec2 marker, float marker_radius,
-                            const std::vector<ImVec4> &colors, TracePlotAnnotationMarker shape) {
-    if (colors.empty()) {
-        return;
-    }
-
-    const auto outline = ImGui::GetColorU32(ImVec4(0.0F, 0.0F, 0.0F, 0.75F));
-
-    // A single-color marker draws its shape; a multi-color group (overlapping
-    // annotations) always draws the circular pie so the colors blend cleanly.
-    if (colors.size() == 1 || colors_are_uniform(colors)) {
-        const auto color = ImGui::GetColorU32(colors.front());
-        if (shape == TracePlotAnnotationMarker::Square) {
-            const ImVec2 top_left(marker.x - marker_radius, marker.y - marker_radius);
-            const ImVec2 bottom_right(marker.x + marker_radius, marker.y + marker_radius);
-            draw_list.AddRectFilled(top_left, bottom_right, color);
-            draw_list.AddRect(top_left, bottom_right, outline, 0.0F, 0, 1.0F);
-            return;
-        }
-        if (shape == TracePlotAnnotationMarker::Cross) {
-            const auto thickness = std::max(2.0F, marker_radius * 0.7F);
-            const ImVec2 top_left(marker.x - marker_radius, marker.y - marker_radius);
-            const ImVec2 bottom_right(marker.x + marker_radius, marker.y + marker_radius);
-            const ImVec2 top_right(marker.x + marker_radius, marker.y - marker_radius);
-            const ImVec2 bottom_left(marker.x - marker_radius, marker.y + marker_radius);
-            draw_list.AddLine(top_left, bottom_right, outline, thickness + 1.5F);
-            draw_list.AddLine(bottom_left, top_right, outline, thickness + 1.5F);
-            draw_list.AddLine(top_left, bottom_right, color, thickness);
-            draw_list.AddLine(bottom_left, top_right, color, thickness);
-            return;
-        }
-        draw_list.AddCircleFilled(marker, marker_radius, color, 12);
-        draw_list.AddCircle(marker, marker_radius + 1.0F, outline, 12, 1.0F);
-        return;
-    }
-
-    static constexpr auto pi = 3.14159265358979323846F;
-    const auto slice_angle = 2.0F * pi / static_cast<float>(colors.size());
-    for (std::size_t index = 0; index < colors.size(); ++index) {
-        const auto start = -0.5F * pi + slice_angle * static_cast<float>(index);
-        const auto end = start + slice_angle;
-        draw_list.PathClear();
-        draw_list.PathLineTo(marker);
-        draw_list.PathArcTo(marker, marker_radius, start, end, 8);
-        draw_list.PathFillConvex(ImGui::GetColorU32(colors[index]));
-    }
-    draw_list.AddCircle(marker, marker_radius + 1.0F, outline, 12, 1.0F);
 }
 
 [[nodiscard]] std::string annotation_group_tooltip_for(const TracePlotSnapshot &snapshot,
@@ -1268,247 +1190,6 @@ void save_current_framebuffer_png(const std::filesystem::path &path, int width, 
 
 } // namespace
 
-void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, std::size_t panel_ordinal,
-                      float panel_height) {
-    const auto plot_id = (panel.metric.empty() ? std::string("panel") : panel.metric) + "##scorepanel_" +
-                         std::to_string(snapshot.id) + "_" + std::to_string(panel_ordinal);
-    if (!ImPlot::BeginPlot(plot_id.c_str(), ImVec2(-1.0F, panel_height))) {
-        return;
-    }
-    ImPlot::SetupAxes(snapshot.x_label.c_str(), panel.y_label.c_str(), ImPlotAxisFlags_AutoFit,
-                      ImPlotAxisFlags_AutoFit);
-
-    // The ScorePlot element sets a per-unit color; the palette is only a fallback.
-    static const std::array<ImVec4, 8> fallback_palette{{
-        ImVec4(0.05F, 0.80F, 0.35F, 0.95F), ImVec4(0.25F, 0.55F, 1.00F, 0.95F),
-        ImVec4(1.00F, 0.60F, 0.20F, 0.95F), ImVec4(0.95F, 0.35F, 0.55F, 0.95F),
-        ImVec4(0.65F, 0.45F, 1.00F, 0.95F), ImVec4(0.15F, 0.85F, 0.85F, 0.95F),
-        ImVec4(0.95F, 0.85F, 0.25F, 0.95F), ImVec4(0.80F, 0.80F, 0.85F, 0.95F),
-    }};
-    const auto series_color = [&](std::size_t index, const ScoreSeries &series) {
-        return series.color ? im_color(*series.color, 0.95F) : fallback_palette[index % fallback_palette.size()];
-    };
-
-    auto *draw_list = ImPlot::GetPlotDrawList();
-    const auto mouse = ImGui::GetMousePos();
-    const auto plot_hovered = ImPlot::IsPlotHovered();
-    const auto plot_pos = ImPlot::GetPlotPos();
-    const auto plot_size = ImPlot::GetPlotSize();
-    const auto plot_top = plot_pos.y;
-    const auto plot_bottom = plot_pos.y + plot_size.y;
-    static constexpr auto marker_radius = 4.0F;
-    static constexpr auto hover_radius_squared = 9.0F * 9.0F;
-    static constexpr auto vline_pixel_tolerance = 5.0F;
-
-    // Legend visibility from the previous frame (ImPlot items persist by label). A
-    // hidden series draws neither its markers nor its "latest wrong" line.
-    std::vector<bool> visible(panel.series.size(), true);
-    for (std::size_t index = 0; index < panel.series.size(); ++index) {
-        if (const auto *item = ImPlot::GetItem(panel.series[index].label.c_str())) {
-            visible[index] = item->Show;
-        }
-    }
-
-    // "Latest wrong key" per visible unit: the newest point whose marker is a cross.
-    // Drawn as a vertical line BEHIND the data (added to the plot draw list before
-    // the series lines/markers), in the unit's color.
-    struct VerticalLine {
-        float pixel_x = 0.0F;
-        ImVec4 color;
-        std::string tooltip;
-    };
-    std::vector<VerticalLine> vertical_lines;
-    for (std::size_t index = 0; index < panel.series.size(); ++index) {
-        if (!visible[index]) {
-            continue;
-        }
-        const auto &series = panel.series[index];
-        const ScoreSeriesPoint *wrong = nullptr;
-        for (const auto &point : series.points) {
-            if (point.marker == TracePlotAnnotationMarker::Cross) {
-                wrong = &point; // points are in increasing-x order, so the last cross is the latest
-            }
-        }
-        if (wrong == nullptr) {
-            continue;
-        }
-        std::string tooltip = series.label + " — latest wrong";
-        for (const auto &[key, value] : wrong->fields) {
-            tooltip += "\n" + key + ": " + value;
-        }
-        vertical_lines.push_back(VerticalLine{
-            .pixel_x = ImPlot::PlotToPixels(wrong->x, 0.0).x,
-            .color = series_color(index, series),
-            .tooltip = std::move(tooltip),
-        });
-    }
-
-    for (const auto &line : vertical_lines) {
-        const auto faint = ImGui::GetColorU32(ImVec4(line.color.x, line.color.y, line.color.z, 0.40F));
-        draw_list->AddLine(ImVec2(line.pixel_x, plot_top), ImVec2(line.pixel_x, plot_bottom), faint, 2.0F);
-    }
-
-    // Count badge where several lines pile up on screen (zoom in to separate them).
-    {
-        std::vector<float> pixels;
-        pixels.reserve(vertical_lines.size());
-        for (const auto &line : vertical_lines) {
-            pixels.push_back(line.pixel_x);
-        }
-        std::sort(pixels.begin(), pixels.end());
-        std::size_t start = 0;
-        while (start < pixels.size()) {
-            std::size_t end = start + 1;
-            while (end < pixels.size() && pixels[end] - pixels[end - 1] <= vline_pixel_tolerance) {
-                ++end;
-            }
-            if (end - start > 1) {
-                const auto mid = (pixels[start] + pixels[end - 1]) * 0.5F;
-                draw_annotation_number_label(*draw_list, ImVec2(mid, plot_top + 10.0F), std::to_string(end - start));
-            }
-            start = end;
-        }
-    }
-
-    // Vertical-line hover: every line within tolerance of the cursor (shows "both").
-    std::optional<std::string> vline_tooltip;
-    if (plot_hovered && mouse.y >= plot_top && mouse.y <= plot_bottom) {
-        std::string combined;
-        for (const auto &line : vertical_lines) {
-            if (std::abs(mouse.x - line.pixel_x) <= vline_pixel_tolerance) {
-                if (!combined.empty()) {
-                    combined += "\n\n";
-                }
-                combined += line.tooltip;
-            }
-        }
-        if (!combined.empty()) {
-            vline_tooltip = std::move(combined);
-        }
-    }
-
-    // Series lines (PlotLine self-hides on a legend toggle) + markers, gated on
-    // visibility so a hidden series also drops its manually-drawn markers.
-    std::optional<std::pair<float, std::string>> marker_hover;
-    for (std::size_t index = 0; index < panel.series.size(); ++index) {
-        const auto &series = panel.series[index];
-        if (series.points.empty()) {
-            continue;
-        }
-        if (series.secondary && !snapshot.show_secondary) {
-            continue; // secondary series hidden by the show_second_score property
-        }
-        std::vector<double> xs;
-        std::vector<double> ys;
-        xs.reserve(series.points.size());
-        ys.reserve(series.points.size());
-        for (const auto &point : series.points) {
-            xs.push_back(point.x);
-            ys.push_back(point.y);
-        }
-        const auto color = series_color(index, series);
-        ImPlotSpec spec;
-        // A secondary series (e.g. second-best score) shares the primary's label so a
-        // single legend entry toggles both; it is drawn fainter/thinner, no markers.
-        spec.LineColor = series.secondary ? ImVec4(color.x, color.y, color.z, 0.50F) : color;
-        spec.LineWeight = series.secondary ? 1.0F : 1.6F;
-        ImPlot::PlotLine(series.label.c_str(), xs.data(), ys.data(), static_cast<int>(xs.size()), spec);
-        if (!visible[index] || series.secondary) {
-            continue;
-        }
-        for (const auto &point : series.points) {
-            const auto pixel = ImPlot::PlotToPixels(point.x, point.y);
-            draw_annotation_marker(*draw_list, pixel, marker_radius, {color}, point.marker);
-            if (plot_hovered) {
-                const auto distance = squared_distance(mouse, pixel);
-                if (distance <= hover_radius_squared && (!marker_hover || distance < marker_hover->first)) {
-                    std::string tooltip = series.label;
-                    for (const auto &[key, value] : point.fields) {
-                        tooltip += "\n" + key + ": " + value;
-                    }
-                    marker_hover = std::make_pair(distance, std::move(tooltip));
-                }
-            }
-        }
-    }
-
-    // A marker (specific point) wins over a vertical line (broad) when both hovered.
-    if (marker_hover) {
-        ImGui::SetTooltip("%s", marker_hover->second.c_str());
-    } else if (vline_tooltip) {
-        ImGui::SetTooltip("%s", vline_tooltip->c_str());
-    }
-    ImPlot::EndPlot();
-}
-
-void draw_score_group(PlotRuntime &runtime, std::string_view group,
-                      const std::vector<const ScoreSnapshot *> &snapshots, int group_index) {
-    std::string title;
-    for (const auto *snapshot : snapshots) {
-        if (!snapshot->title.empty()) {
-            title = snapshot->title;
-            break;
-        }
-    }
-    if (title.empty()) {
-        title = group.empty() || group == "default" ? "Scores" : std::string(group);
-    }
-
-    const auto window_id = title + "##scoreplot_group_" + std::string(group);
-    ImGui::SetNextWindowPos(ImVec2(48.0F + 36.0F * static_cast<float>(group_index),
-                                   48.0F + 36.0F * static_cast<float>(group_index)),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(760.0F, 620.0F), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin(window_id.c_str())) {
-        const auto group_text = "group: " + std::string(group);
-        ImGui::TextUnformatted(group_text.c_str());
-        std::size_t panel_ordinal = 0;
-        for (const auto *snapshot : snapshots) {
-            for (const auto &panel : snapshot->panels) {
-                if (panel_ordinal != 0) {
-                    ImGui::Spacing();
-                }
-                const auto panel_key =
-                    std::to_string(snapshot->id) + "/" + std::to_string(panel_ordinal) + "/" + panel.metric;
-                auto &panel_height = runtime.mutable_score_panel_height(panel_key, 200.0F);
-                draw_score_panel(*snapshot, panel, panel_ordinal, panel_height);
-
-                // Draggable splitter to resize this panel taller/shorter.
-                ImGui::InvisibleButton(("##score_splitter_" + panel_key).c_str(), ImVec2(-1.0F, 7.0F));
-                const auto splitter_active = ImGui::IsItemActive();
-                if (splitter_active) {
-                    panel_height = std::clamp(panel_height + ImGui::GetIO().MouseDelta.y, 80.0F, 1600.0F);
-                }
-                if (splitter_active || ImGui::IsItemHovered()) {
-                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-                }
-                const auto grip_min = ImGui::GetItemRectMin();
-                const auto grip_max = ImGui::GetItemRectMax();
-                const auto grip_mid_y = (grip_min.y + grip_max.y) * 0.5F;
-                const auto grip_color = ImGui::GetColorU32(
-                    splitter_active ? ImGuiCol_SeparatorActive
-                                    : (ImGui::IsItemHovered() ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
-                ImGui::GetWindowDrawList()->AddLine(ImVec2(grip_min.x + 24.0F, grip_mid_y),
-                                                    ImVec2(grip_max.x - 24.0F, grip_mid_y), grip_color, 2.0F);
-                ++panel_ordinal;
-            }
-        }
-    }
-    ImGui::End();
-}
-
-void draw_score_groups(PlotRuntime &runtime) {
-    std::map<std::string, std::vector<const ScoreSnapshot *>> groups;
-    for (const auto &snapshot : runtime.score_snapshots()) {
-        groups[snapshot.group].push_back(&snapshot);
-    }
-    auto group_index = 0;
-    for (const auto &[group, snapshots] : groups) {
-        draw_score_group(runtime, group, snapshots, group_index);
-        ++group_index;
-    }
-}
-
 void draw_plot_runtime(PlotRuntime &runtime, PipelineControlRuntime *control_runtime) {
     const auto lock = std::scoped_lock(runtime.mutex());
     // Accumulate sliders auto-follow the newest trace only while the session is
@@ -1533,7 +1214,12 @@ void draw_plot_runtime(PlotRuntime &runtime, PipelineControlRuntime *control_run
         ++group_index;
     }
 
-    draw_score_groups(runtime);
+    // Registered views (e.g. ScoreView) draw themselves; the loop is type-agnostic.
+    for (const auto &view : runtime.views()) {
+        if (view) {
+            view->draw();
+        }
+    }
 }
 
 void run_until_closed_impl(PlotRuntime &runtime, PipelineGraphRuntime *graph_runtime,

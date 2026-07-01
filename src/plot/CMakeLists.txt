@@ -65,7 +65,9 @@ set_target_properties(leakflow_implot PROPERTIES
 add_library(leakflow_plot
     imgui_plot_loop.cpp
     pipeline_graph.cpp
+    plot_render_util.cpp
     plot_runtime.cpp
+    score_view.cpp
 )
 target_compile_features(leakflow_plot PUBLIC cxx_std_23)
 target_include_directories(leakflow_plot

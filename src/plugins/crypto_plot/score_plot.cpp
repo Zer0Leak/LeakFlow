@@ -146,7 +146,7 @@ namespace crypto = leakflow::plugins::crypto;
     return output.str();
 }
 
-std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntime& runtime, const Buffer& input,
+std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView& view, const Buffer& input,
                                     std::int64_t& step)
 {
     const auto payload = stats_payload_for(input);
@@ -239,7 +239,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
         }
     }
 
-    runtime.append_score_points(element.name(), group, title, "traces (N)", show_second_score, updates);
+    view.append_points(element.name(), group, title, "traces (N)", show_second_score, updates);
 
     auto record = element.make_log_record(log::LogLevel::Debug, "element", "appended score-plot points");
     record.fields.emplace("units", std::to_string(unit_count));
@@ -298,15 +298,15 @@ ElementDescriptor ScorePlot::descriptor()
 }
 
 ScorePlot::ScorePlot(std::string name)
-    : ScorePlot(std::make_shared<leakflow::plot::PlotRuntime>(), std::move(name))
+    : ScorePlot(std::make_shared<leakflow::plot::ScoreView>(), std::move(name))
 {
 }
 
-ScorePlot::ScorePlot(std::shared_ptr<leakflow::plot::PlotRuntime> runtime, std::string name)
-    : Element(std::move(name)), runtime_(std::move(runtime))
+ScorePlot::ScorePlot(std::shared_ptr<leakflow::plot::ScoreView> view, std::string name)
+    : Element(std::move(name)), view_(std::move(view))
 {
-    if (!runtime_) {
-        throw std::invalid_argument("ScorePlot requires a PlotRuntime");
+    if (!view_) {
+        throw std::invalid_argument("ScorePlot requires a ScoreView");
     }
     configure_from_descriptor(descriptor());
 }
@@ -322,7 +322,7 @@ void ScorePlot::property_changed(std::string_view name)
     // immediately, so the toggle shows/hides accumulated second scores without a
     // new buffer (works in Idle and mid-run).
     if (name == "show_second_score") {
-        runtime_->set_score_show_secondary(this->name(), bool_property_or(*this, "show_second_score", false));
+        view_->set_show_secondary(this->name(), bool_property_or(*this, "show_second_score", false));
     }
 }
 
@@ -331,25 +331,25 @@ std::optional<Buffer> ScorePlot::process(std::optional<Buffer> input)
     if (!input) {
         throw std::invalid_argument("ScorePlot requires an input buffer");
     }
-    return capture_score(*this, *runtime_, *input, step_);
+    return capture_score(*this, *view_, *input, step_);
 }
 
 std::optional<Buffer> ScorePlot::process_inputs(ElementInputs inputs)
 {
-    return capture_score(*this, *runtime_, required_input(inputs, "sink"), step_);
+    return capture_score(*this, *view_, required_input(inputs, "sink"), step_);
 }
 
-std::shared_ptr<leakflow::plot::PlotRuntime> ScorePlot::plot_runtime() const
+std::shared_ptr<leakflow::plot::ScoreView> ScorePlot::score_view() const
 {
-    return runtime_;
+    return view_;
 }
 
-void ScorePlot::set_plot_runtime(std::shared_ptr<leakflow::plot::PlotRuntime> runtime)
+void ScorePlot::set_score_view(std::shared_ptr<leakflow::plot::ScoreView> view)
 {
-    if (!runtime) {
-        throw std::invalid_argument("ScorePlot requires a PlotRuntime");
+    if (!view) {
+        throw std::invalid_argument("ScorePlot requires a ScoreView");
     }
-    runtime_ = std::move(runtime);
+    view_ = std::move(view);
 }
 
 } // namespace leakflow::plugins::crypto_plot

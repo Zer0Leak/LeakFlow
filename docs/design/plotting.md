@@ -177,6 +177,72 @@ Each rank-2 series has its own trace slider by default.
 When `lock_trace_index=true`, a group uses one shared trace index. If a series
 has fewer traces than the shared index, clamp to the last valid trace.
 
+## Plot View Architecture (registry pattern)
+
+`TracePlot` is not the only kind of plot. To add a new plot type (scores, ranks,
+a table, a heatmap) without growing `plot_runtime.cpp` / `imgui_plot_loop.cpp`
+into a type switch, plotting uses a small registry: `PlotRuntime` is to a
+`PlotView` what a `Pipeline` is to an `Element`. The runtime holds a list of
+polymorphic views and, each frame, asks each one to draw itself — it never asks
+"is this a score plot or a trace plot".
+
+```text
+PlotView   (include/leakflow/plot/plot_view.hpp)
+  virtual void draw()          // render my windows into the current ImGui frame
+  virtual void clear()         // drop my data (Stop/Start recycle)
+  virtual bool empty() const   // do I have anything to show?
+```
+
+- A view owns **its own copied display data, its own UI state, and its own
+  ImGui/ImPlot rendering** (its own `.cpp`). Adding a plot type is a new
+  `PlotView` subclass plus the element that fills it — not an edit to the shared
+  runtime.
+- A view owns **its own mutex**. The pipeline worker fills it (its element pushes
+  copied snapshot data) and the UI thread draws it; both serialize on that lock.
+  Because the lock and the data live inside the view, a view has no lifetime
+  dependency on `PlotRuntime` — the runtime just keeps a `shared_ptr` to it.
+- `PlotRuntime` still owns the trace snapshots directly (the trace path predates
+  the registry and has many call sites), plus `views_`, a
+  `vector<shared_ptr<PlotView>>`. `add_view(view)` registers one;
+  `draw_plot_runtime` draws the trace groups and then loops `views()` calling
+  `draw()`; `has_sessions()` is true if there are trace snapshots **or** any
+  non-empty view; `clear()` clears the trace state **and** cascades to every
+  view's `clear()`. Lock order is always runtime → view (the worker only ever
+  takes a single view lock), so there is no inversion.
+
+Shared, domain-free drawing primitives (colour conversion, marker shapes,
+number-label, pixel distance) live in `src/plot/plot_render_util.{hpp,cpp}` so
+each view's rendering TU reuses them instead of copying. They know colours,
+marker shapes, and pixels — not traces or scores.
+
+### ScoreView / ScorePlot — the second view
+
+`ScoreView` (`include/leakflow/plot/score_view.hpp`, `src/plot/score_view.cpp`)
+is the first non-trace view and the reference for the pattern. It renders a
+stacked set of metric panels (one per selected metric, e.g. `score` and
+`relative_margin`), each with one line series per attack unit, a point per
+streamed buffer at `x = observation count`, a marker shape per point (square =
+success, x = failure, circle = truth unknown), per-unit "latest wrong key"
+vertical lines behind the data, and draggable panel heights. Its display data is
+**generic** (panels/series/points, no CPA types), so `leakflow_plot` stays
+domain-free.
+
+`ScorePlot` is the *element* that fills a `ScoreView`. It lives in a separate
+plugin, `leakflow_plugins_crypto_plot` (depends on both `leakflow_plugins_crypto`
+and `leakflow_plot`), because it reads the crypto `AttackStatsPayload` directly
+and translates it into generic score points. This keeps the CPA knowledge in the
+crypto-plot bridge and out of `leakflow_plot`.
+
+All `ScorePlot` elements in one run share **one** `ScoreView`: the factory
+(`crypto_plot::register_element_factories`) creates the view, registers it with
+the shared `PlotRuntime` via `add_view`, and hands it to each `ScorePlot`. One
+shared view is what lets several units/elements stack together in one `group`
+window (the same `group` concept as `TracePlot`, but `ScorePlot` always stacks,
+never overlays).
+
+See `docs/context/modules/plot.md` for the module-boundary summary and
+`docs/design/cpa_attack.md` for the score/rank semantics.
+
 ## Dynamic Pads Deferred
 
 Do not add dynamic sink pads to `TracePlot` in Phase 22.
@@ -330,10 +396,13 @@ Manual smoke examples:
 
 ## Future Plot Elements
 
-Likely future elements after TracePlot:
+Implemented so far: `TracePlot` (trace view) and `ScorePlot` (score view, in
+`leakflow_plugins_crypto_plot`). Each is one `PlotView` behind the registry
+above, so the next plot types below are new views + elements, not runtime edits:
 
-- `CorrelationPlot`,
-- `PoiOverlayPlot`,
+- `RankPlot` / guessing-entropy convergence,
+- a tabular `AttackTablePlot`,
+- `CorrelationPlot` / `PoiOverlayPlot`,
 - `SpectrumPlot`,
 - report/export helpers for AES validation.
 

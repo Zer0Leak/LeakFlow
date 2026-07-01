@@ -423,7 +423,20 @@ Future algorithm or UI features must stay outside core:
 - Crypto/AES elements: `leakflow_plugins_crypto`.
 - Generic SCA elements: `leakflow_plugins_sca`.
 - Kyber elements: `leakflow_plugins_kyber`.
-- Plotting: `leakflow_plugins_plot`.
+- Plotting runtime + views: `leakflow_plot` (domain-free).
+- Plot elements: `leakflow_plugins_plot` (`TracePlot`).
+- Crypto→plot bridge elements: `leakflow_plugins_crypto_plot` (`ScorePlot`,
+  which reads `AttackStatsPayload` and fills a `ScoreView`). A plot element that
+  needs domain payloads goes in a bridge plugin, never in `leakflow_plot`.
 - GUI: a separate app or plugin layer.
 
 Do not pull future plugin dependencies into core.
+
+A new plot **type** is a new `leakflow::plot::PlotView` (its own copied data, UI
+state, rendering, and lock) registered with `PlotRuntime::add_view`, not a new
+branch inside the runtime. `PlotRuntime` is to `PlotView` what `Pipeline` is to
+`Element`: it draws/clears the registered views without knowing their kind, so
+plot growth stays out of the shared runtime. `leakflow_plot` holds only
+domain-free view **display** data (e.g. `ScoreView` = panels/series/points); the
+crypto→generic translation lives in the bridge element. Design:
+`docs/design/plotting.md` (Plot View Architecture).
