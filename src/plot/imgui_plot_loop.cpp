@@ -1268,10 +1268,11 @@ void save_current_framebuffer_png(const std::filesystem::path &path, int width, 
 
 } // namespace
 
-void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, std::size_t panel_ordinal) {
+void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, std::size_t panel_ordinal,
+                      float panel_height) {
     const auto plot_id = (panel.metric.empty() ? std::string("panel") : panel.metric) + "##scorepanel_" +
                          std::to_string(snapshot.id) + "_" + std::to_string(panel_ordinal);
-    if (!ImPlot::BeginPlot(plot_id.c_str(), ImVec2(-1.0F, 200.0F))) {
+    if (!ImPlot::BeginPlot(plot_id.c_str(), ImVec2(-1.0F, panel_height))) {
         return;
     }
     ImPlot::SetupAxes(snapshot.x_label.c_str(), panel.y_label.c_str(), ImPlotAxisFlags_AutoFit,
@@ -1334,7 +1335,8 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
     ImPlot::EndPlot();
 }
 
-void draw_score_group(std::string_view group, const std::vector<const ScoreSnapshot *> &snapshots, int group_index) {
+void draw_score_group(PlotRuntime &runtime, std::string_view group,
+                      const std::vector<const ScoreSnapshot *> &snapshots, int group_index) {
     std::string title;
     for (const auto *snapshot : snapshots) {
         if (!snapshot->title.empty()) {
@@ -1360,7 +1362,28 @@ void draw_score_group(std::string_view group, const std::vector<const ScoreSnaps
                 if (panel_ordinal != 0) {
                     ImGui::Spacing();
                 }
-                draw_score_panel(*snapshot, panel, panel_ordinal);
+                const auto panel_key =
+                    std::to_string(snapshot->id) + "/" + std::to_string(panel_ordinal) + "/" + panel.metric;
+                auto &panel_height = runtime.mutable_score_panel_height(panel_key, 200.0F);
+                draw_score_panel(*snapshot, panel, panel_ordinal, panel_height);
+
+                // Draggable splitter to resize this panel taller/shorter.
+                ImGui::InvisibleButton(("##score_splitter_" + panel_key).c_str(), ImVec2(-1.0F, 7.0F));
+                const auto splitter_active = ImGui::IsItemActive();
+                if (splitter_active) {
+                    panel_height = std::clamp(panel_height + ImGui::GetIO().MouseDelta.y, 80.0F, 1600.0F);
+                }
+                if (splitter_active || ImGui::IsItemHovered()) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                }
+                const auto grip_min = ImGui::GetItemRectMin();
+                const auto grip_max = ImGui::GetItemRectMax();
+                const auto grip_mid_y = (grip_min.y + grip_max.y) * 0.5F;
+                const auto grip_color = ImGui::GetColorU32(
+                    splitter_active ? ImGuiCol_SeparatorActive
+                                    : (ImGui::IsItemHovered() ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
+                ImGui::GetWindowDrawList()->AddLine(ImVec2(grip_min.x + 24.0F, grip_mid_y),
+                                                    ImVec2(grip_max.x - 24.0F, grip_mid_y), grip_color, 2.0F);
                 ++panel_ordinal;
             }
         }
@@ -1375,7 +1398,7 @@ void draw_score_groups(PlotRuntime &runtime) {
     }
     auto group_index = 0;
     for (const auto &[group, snapshots] : groups) {
-        draw_score_group(group, snapshots, group_index);
+        draw_score_group(runtime, group, snapshots, group_index);
         ++group_index;
     }
 }

@@ -86,7 +86,7 @@ ElementDescriptor Queue::descriptor()
                 "maximum number of buffers to keep before dropping the oldest",
                 "buffers",
                 IntRangeConstraint{1, 1024}),
-            PropertySpec("drop_oldest", true, "drop the oldest buffer when the queue is full"),
+            PropertySpec("drop_oldest", false, "drop the oldest buffer when the queue is full"),
         },
         .telemetry_specs = {
             queue_telemetry_spec(telemetry_size_name, telemetry_size_description),
@@ -133,7 +133,7 @@ std::optional<Buffer> Queue::process(std::optional<Buffer> input)
         const auto max_size = static_cast<std::size_t>(
             std::max<std::int64_t>(1, int_property_or(*this, "max_size", 1)));
         if (buffers_.size() >= max_size) {
-            if (!bool_property_or(*this, "drop_oldest", true)) {
+            if (!bool_property_or(*this, "drop_oldest", false)) {
                 throw std::runtime_error("Queue is full");
             }
             auto record = make_log_record(log::LogLevel::Warning, "element", "queue full; dropped oldest buffer");
@@ -175,7 +175,7 @@ void Queue::prepare_thread_boundary_runtime(std::mutex *)
 {
     const auto max_size = static_cast<std::size_t>(
         std::max<std::int64_t>(1, int_property_or(*this, "max_size", 1)));
-    const bool drop_oldest = bool_property_or(*this, "drop_oldest", true);
+    const bool drop_oldest = bool_property_or(*this, "drop_oldest", false);
     runtime_queue_ = std::make_unique<BufferQueue>(
         max_size, drop_oldest ? QueueDropPolicy::DropOldest : QueueDropPolicy::Block);
     reset_telemetry();

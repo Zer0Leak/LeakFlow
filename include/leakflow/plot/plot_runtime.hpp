@@ -224,6 +224,9 @@ public:
     [[nodiscard]] TracePlotDisplayState &mutable_trace_display_state(const TracePlotSnapshot &snapshot);
     [[nodiscard]] bool &mutable_group_controls_open(std::string_view group);
     [[nodiscard]] PlotAxisView &mutable_axis_view(std::uint64_t panel_id);
+    // User-draggable pixel height for a stacked score panel, keyed by
+    // "<snapshotId>/<metric>". The renderer resizes it via a splitter handle.
+    [[nodiscard]] float &mutable_score_panel_height(const std::string &key, float initial_value);
 
     // Two-way trace-index sync (Phase 25). When a listener is installed, moving a
     // vertical trace slider notifies it so the owning element's trace_index
@@ -253,6 +256,7 @@ private:
     std::map<std::uint64_t, TracePlotDisplayState> trace_display_states_;
     std::map<std::string, bool> group_control_windows_;
     std::map<std::uint64_t, PlotAxisView> axis_views_;
+    std::map<std::string, float> score_panel_heights_;
     std::function<void(std::string_view, int)> trace_index_listener_;
     std::function<void(std::string_view, std::string_view)> x_axis_listener_;
     mutable std::recursive_mutex mutex_;

@@ -585,6 +585,7 @@ void PlotRuntime::clear() {
     trace_display_states_.clear();
     group_control_windows_.clear();
     axis_views_.clear();
+    score_panel_heights_.clear();
 }
 
 int &PlotRuntime::mutable_trace_index(std::uint64_t snapshot_id, int initial_value) {
@@ -632,6 +633,11 @@ bool &PlotRuntime::mutable_group_controls_open(std::string_view group) {
 PlotAxisView &PlotRuntime::mutable_axis_view(std::uint64_t panel_id) {
     const auto lock = std::scoped_lock(mutex_);
     return axis_views_[panel_id];
+}
+
+float &PlotRuntime::mutable_score_panel_height(const std::string &key, float initial_value) {
+    const auto lock = std::scoped_lock(mutex_);
+    return score_panel_heights_.try_emplace(key, initial_value).first->second;
 }
 
 void PlotRuntime::set_trace_index_listener(std::function<void(std::string_view, int)> listener) {

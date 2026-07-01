@@ -173,6 +173,15 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
         const auto label = "byte " + unit_label(unit_indexes, unit);
         const auto color = unit_color(unit);
 
+        // Per-unit metric values, computed once.
+        std::vector<std::pair<std::string, double>> metric_values;
+        metric_values.reserve(panels.size());
+        for (const auto& [metric, tensor] : panels) {
+            metric_values.emplace_back(metric, tensor[unit].item<double>());
+        }
+
+        // Shared hover fields include EVERY metric, so hovering a point in one panel
+        // also shows the other metrics (score shows relative_margin and vice versa).
         std::vector<std::pair<std::string, std::string>> fields;
         fields.emplace_back("byte", unit_label(unit_indexes, unit));
         fields.emplace_back("N", format_double(x));
@@ -181,18 +190,17 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
             fields.emplace_back("success", succeeded ? "true" : "false");
             fields.emplace_back("true rank", std::to_string(true_rank[unit].item<std::int64_t>()));
         }
+        for (const auto& [metric, value] : metric_values) {
+            fields.emplace_back(metric, format_double(value));
+        }
 
-        for (const auto& [metric, tensor] : panels) {
-            const auto value = tensor[unit].item<double>();
-            auto point_fields = fields;
-            point_fields.emplace_back(metric, format_double(value));
+        for (const auto& [metric, value] : metric_values) {
             updates.push_back(leakflow::plot::ScorePointUpdate{
                 .panel = metric,
                 .panel_y_label = metric,
                 .series = label,
                 .color = color,
-                .point = leakflow::plot::ScoreSeriesPoint{
-                    .x = x, .y = value, .marker = marker, .fields = std::move(point_fields)},
+                .point = leakflow::plot::ScoreSeriesPoint{.x = x, .y = value, .marker = marker, .fields = fields},
             });
         }
     }
