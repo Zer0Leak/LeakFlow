@@ -1395,6 +1395,9 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
         if (series.points.empty()) {
             continue;
         }
+        if (series.secondary && !snapshot.show_secondary) {
+            continue; // secondary series hidden by the show_second_score property
+        }
         std::vector<double> xs;
         std::vector<double> ys;
         xs.reserve(series.points.size());
@@ -1405,10 +1408,12 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
         }
         const auto color = series_color(index, series);
         ImPlotSpec spec;
-        spec.LineColor = color;
-        spec.LineWeight = 1.6F;
+        // A secondary series (e.g. second-best score) shares the primary's label so a
+        // single legend entry toggles both; it is drawn fainter/thinner, no markers.
+        spec.LineColor = series.secondary ? ImVec4(color.x, color.y, color.z, 0.50F) : color;
+        spec.LineWeight = series.secondary ? 1.0F : 1.6F;
         ImPlot::PlotLine(series.label.c_str(), xs.data(), ys.data(), static_cast<int>(xs.size()), spec);
-        if (!visible[index]) {
+        if (!visible[index] || series.secondary) {
             continue;
         }
         for (const auto &point : series.points) {

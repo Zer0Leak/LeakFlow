@@ -506,7 +506,8 @@ bool PlotRuntime::refresh_trace_display(const TracePlotSnapshot &update) {
 }
 
 void PlotRuntime::append_score_points(std::string element_name, std::string group, std::string title,
-                                      std::string x_label, const std::vector<ScorePointUpdate> &updates) {
+                                      std::string x_label, bool show_secondary,
+                                      const std::vector<ScorePointUpdate> &updates) {
     const auto lock = std::scoped_lock(mutex_);
     if (group.empty()) {
         group = "default";
@@ -529,6 +530,7 @@ void PlotRuntime::append_score_points(std::string element_name, std::string grou
     snapshot->group = std::move(group);
     snapshot->title = std::move(title);
     snapshot->x_label = std::move(x_label);
+    snapshot->show_secondary = show_secondary;
 
     for (const auto &update : updates) {
         ScorePanel *panel = nullptr;
@@ -542,17 +544,29 @@ void PlotRuntime::append_score_points(std::string element_name, std::string grou
             panel = &snapshot->panels.emplace_back(ScorePanel{.metric = update.panel, .y_label = update.panel_y_label});
         }
 
+        // A primary and a secondary series can share a label; keep them separate.
         ScoreSeries *series = nullptr;
         for (auto &candidate : panel->series) {
-            if (candidate.label == update.series) {
+            if (candidate.label == update.series && candidate.secondary == update.secondary) {
                 series = &candidate;
                 break;
             }
         }
         if (series == nullptr) {
-            series = &panel->series.emplace_back(ScoreSeries{.label = update.series, .color = update.color});
+            series = &panel->series.emplace_back(
+                ScoreSeries{.label = update.series, .color = update.color, .secondary = update.secondary});
         }
         series->points.push_back(update.point);
+    }
+}
+
+void PlotRuntime::set_score_show_secondary(std::string_view element_name, bool show_secondary) {
+    const auto lock = std::scoped_lock(mutex_);
+    for (auto &snapshot : score_snapshots_) {
+        if (snapshot.element_name == element_name) {
+            snapshot.show_secondary = show_secondary;
+            return;
+        }
     }
 }
 

@@ -36,6 +36,14 @@ namespace crypto = leakflow::plugins::crypto;
     return fallback;
 }
 
+[[nodiscard]] bool bool_property_or(const Element& element, std::string_view name, bool fallback)
+{
+    if (const auto value = element.property_as<bool>(name)) {
+        return *value;
+    }
+    return fallback;
+}
+
 [[nodiscard]] std::vector<std::string> string_list_property_or(
     const Element& element, std::string_view name, std::vector<std::string> fallback)
 {
@@ -146,6 +154,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
     const auto title = string_property_or(element, "title", "");
     const auto metrics = string_list_property_or(element, "metrics", {"score", "relative_margin"});
     const auto max_units = std::max<std::int64_t>(integer_property_or(element, "max_units", 64), 1);
+    const auto show_second_score = bool_property_or(element, "show_second_score", false);
 
     const auto x = observation_x(input, step);
     const auto unit_count = std::min(payload->unit_count(), max_units);
@@ -153,11 +162,17 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
 
     // Pre-convert the referenced metric tensors once per buffer.
     std::vector<std::pair<std::string, torch::Tensor>> panels;
+    bool has_score_panel = false;
     for (const auto& metric : metrics) {
         if (auto tensor = metric_tensor(*payload, metric)) {
+            has_score_panel = has_score_panel || metric == "score";
             panels.emplace_back(metric, std::move(*tensor));
         }
     }
+    // Second-best score (topk_score column 1), for the "score" panel only. Always
+    // accumulated when available (top_k >= 2); display is gated by show_second_score.
+    const auto topk_score = payload->topk_score().to(torch::kCPU).to(torch::kFloat64).contiguous();
+    const bool second_available = has_score_panel && topk_score.size(1) >= 2;
     const auto success = has_truth ? payload->success()->to(torch::kCPU).to(torch::kBool).contiguous() : torch::Tensor{};
     const auto true_rank = has_truth ? payload->true_rank()->to(torch::kCPU).to(torch::kInt64).contiguous()
                                      : torch::Tensor{};
@@ -193,6 +208,11 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
         for (const auto& [metric, value] : metric_values) {
             fields.emplace_back(metric, format_double(value));
         }
+        std::optional<double> second_score;
+        if (second_available) {
+            second_score = topk_score[unit][1].item<double>();
+            fields.emplace_back("2nd score", format_double(*second_score));
+        }
 
         for (const auto& [metric, value] : metric_values) {
             updates.push_back(leakflow::plot::ScorePointUpdate{
@@ -203,9 +223,23 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::PlotRuntim
                 .point = leakflow::plot::ScoreSeriesPoint{.x = x, .y = value, .marker = marker, .fields = fields},
             });
         }
+        // Secondary "score" series (second-best guess): same label/color as the
+        // primary, no success marker. Accumulated regardless; shown per show_secondary.
+        if (second_score) {
+            updates.push_back(leakflow::plot::ScorePointUpdate{
+                .panel = "score",
+                .panel_y_label = "score",
+                .series = label,
+                .color = color,
+                .secondary = true,
+                .point = leakflow::plot::ScoreSeriesPoint{
+                    .x = x, .y = *second_score, .marker = leakflow::plot::TracePlotAnnotationMarker::Circle,
+                    .fields = fields},
+            });
+        }
     }
 
-    runtime.append_score_points(element.name(), group, title, "traces (N)", updates);
+    runtime.append_score_points(element.name(), group, title, "traces (N)", show_second_score, updates);
 
     auto record = element.make_log_record(log::LogLevel::Debug, "element", "appended score-plot points");
     record.fields.emplace("units", std::to_string(unit_count));
@@ -254,6 +288,10 @@ ElementDescriptor ScorePlot::descriptor()
                              "", std::monostate{}, "", display),
                 PropertySpec("max_units", std::int64_t{64}, "maximum attack units (lines) to plot", "",
                              IntRangeConstraint{1, 1024}, "", display),
+                PropertySpec("show_second_score", false,
+                             "also plot the second-best score per unit in the score panel (same color as "
+                             "the unit's line; needs AttackStats top_k >= 2). Toggle applies live.",
+                             "", std::monostate{}, "", display),
             },
         .keywords = {"plot", "score", "cpa", "attack", "sca", "imgui", "implot"},
     };
@@ -276,6 +314,16 @@ ScorePlot::ScorePlot(std::shared_ptr<leakflow::plot::PlotRuntime> runtime, std::
 void ScorePlot::start()
 {
     step_ = 0;
+}
+
+void ScorePlot::property_changed(std::string_view name)
+{
+    // ui-control self-apply: flip the secondary-series display on the live snapshot
+    // immediately, so the toggle shows/hides accumulated second scores without a
+    // new buffer (works in Idle and mid-run).
+    if (name == "show_second_score") {
+        runtime_->set_score_show_secondary(this->name(), bool_property_or(*this, "show_second_score", false));
+    }
 }
 
 std::optional<Buffer> ScorePlot::process(std::optional<Buffer> input)

@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace leakflow::plugins::crypto_plot {
 
@@ -31,6 +32,8 @@ class ScorePlot final : public Element {
     void set_plot_runtime(std::shared_ptr<leakflow::plot::PlotRuntime> runtime);
 
   private:
+    void property_changed(std::string_view name) override;
+
     std::shared_ptr<leakflow::plot::PlotRuntime> runtime_;
     // Fallback x when a buffer carries no attack.observation_count metadata.
     std::int64_t step_ = 0;
