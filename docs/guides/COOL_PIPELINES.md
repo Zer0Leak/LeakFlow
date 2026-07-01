@@ -244,6 +244,49 @@ Notes:
   `AesLeakageHypothesis`/`CpaAttack`/`AttackStats` to the plot (e.g.
   `capture.sample_rate_hz` drives `TracePlot(x_axis=time_us)`).
 
+## AES Sync CPA Score Convergence (ScorePlot)
+
+`ScorePlot` (in `leakflow_plugins_crypto_plot`) consumes `AttackStats` results
+directly and accumulates them into a stacked score plot: one panel per metric
+(`score` plus the configured confidence metrics), one line per attack byte, a
+point per streamed buffer at x = observation count. Success is drawn with the
+marker shape (square = success, x = failure, circle = unknown). Under a live
+source, `CpaAttack(correlation_mode=auto)` runs incrementally, so the score and
+relative margin refine as rows arrive — the classic convergence view.
+
+```bash
+leakflow --log-level error run --graph \
+  'FakeLiveSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt,trace_rate=0); \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt,trace_rate=0); \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
+   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
+   AttackStats@stats(top_k=3); \
+   ScorePlot@scores(group=cpa,title="CPA score convergence",metrics=[score,relative_margin]); \
+   @traces_src ! @traces_queue ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @scores'
+```
+
+Notes:
+
+- `ScorePlot` reads the crypto `AttackStatsPayload` directly (no generic converter)
+  but registers a generic score snapshot into the shared plot runtime, so it reuses
+  the `group` windows and the circle/square/x markers while `leakflow_plot` stays
+  domain-free.
+- `metrics=[...]` selects the stacked panels: `score`, `relative_margin`, `margin`,
+  `z_score`, `robust_z_score`, `top_k_separation`, and `true_rank` (truth only).
+- Increase `trace_rate` on the `FakeLiveSrc` sources to watch the convergence pace;
+  drop `@key_src ! @stats.truth` to run without truth (markers become circles).
+
 ## Live Synchronized Version
 
 This version streams traces and plaintexts independently through queues, then

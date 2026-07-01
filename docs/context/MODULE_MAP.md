@@ -67,6 +67,7 @@ plugins for `leakflow run` and tutorial applications.
 | Crypto plugins | `leakflow_plugins_crypto` | `include/leakflow/plugins/crypto` | `src/plugins/crypto` | `tests/plugins/crypto` | `docs/context/modules/plugins-crypto.md` |
 | Plot / graph UI | `leakflow_plot` | `include/leakflow/plot` | `src/plot` | focused non-visual tests only | `docs/context/modules/plot.md` |
 | Plot plugins | `leakflow_plugins_plot` | `include/leakflow/plugins/plot` | `src/plugins/plot` | `tests/plugins/plot` plus manual GUI checks | `docs/context/modules/plot.md` |
+| Crypto plot plugins | `leakflow_plugins_crypto_plot` | `include/leakflow/plugins/crypto_plot` | `src/plugins/crypto_plot` | `tests/plugins/crypto_plot` plus manual GUI checks | `docs/context/modules/plot.md` |
 | Apps / CLI | `leakflow`, `leakflow-ls`, `leakflow_cli` | `src/apps/leakflow/leakflow_cli.hpp` | `src/apps/{common,leakflow,leakflow_ls,cuda_smoke}` | `tests/apps` | relevant plugin/module context |
 | Torch debug | `leakflow_torch_debug` | `include/leakflow/debug` | `src/debug` | none (dev-only) | this row + `.vscode/launch.json`, `torch_lldb.py` |
 | GUI | none yet | none yet | none yet | none yet | `docs/context/modules/gui.md` |

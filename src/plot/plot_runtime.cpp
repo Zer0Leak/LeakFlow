@@ -505,9 +505,60 @@ bool PlotRuntime::refresh_trace_display(const TracePlotSnapshot &update) {
     return false;
 }
 
+void PlotRuntime::append_score_points(std::string element_name, std::string group, std::string title,
+                                      std::string x_label, const std::vector<ScorePointUpdate> &updates) {
+    const auto lock = std::scoped_lock(mutex_);
+    if (group.empty()) {
+        group = "default";
+    }
+
+    ScoreSnapshot *snapshot = nullptr;
+    for (auto &existing : score_snapshots_) {
+        if (existing.element_name == element_name) {
+            snapshot = &existing;
+            break;
+        }
+    }
+    if (snapshot == nullptr) {
+        ScoreSnapshot fresh;
+        fresh.id = next_snapshot_id_++;
+        fresh.element_name = std::move(element_name);
+        snapshot = &score_snapshots_.emplace_back(std::move(fresh));
+    }
+    // Presentation is refreshed each call (like a ui-control change).
+    snapshot->group = std::move(group);
+    snapshot->title = std::move(title);
+    snapshot->x_label = std::move(x_label);
+
+    for (const auto &update : updates) {
+        ScorePanel *panel = nullptr;
+        for (auto &candidate : snapshot->panels) {
+            if (candidate.metric == update.panel) {
+                panel = &candidate;
+                break;
+            }
+        }
+        if (panel == nullptr) {
+            panel = &snapshot->panels.emplace_back(ScorePanel{.metric = update.panel, .y_label = update.panel_y_label});
+        }
+
+        ScoreSeries *series = nullptr;
+        for (auto &candidate : panel->series) {
+            if (candidate.label == update.series) {
+                series = &candidate;
+                break;
+            }
+        }
+        if (series == nullptr) {
+            series = &panel->series.emplace_back(ScoreSeries{.label = update.series, .color = update.color});
+        }
+        series->points.push_back(update.point);
+    }
+}
+
 bool PlotRuntime::has_sessions() const {
     const auto lock = std::scoped_lock(mutex_);
-    return !trace_snapshots_.empty();
+    return !trace_snapshots_.empty() || !score_snapshots_.empty();
 }
 
 const std::vector<TracePlotSnapshot> &PlotRuntime::trace_snapshots() const {
@@ -515,9 +566,15 @@ const std::vector<TracePlotSnapshot> &PlotRuntime::trace_snapshots() const {
     return trace_snapshots_;
 }
 
+const std::vector<ScoreSnapshot> &PlotRuntime::score_snapshots() const {
+    const auto lock = std::scoped_lock(mutex_);
+    return score_snapshots_;
+}
+
 void PlotRuntime::clear() {
     const auto lock = std::scoped_lock(mutex_);
     trace_snapshots_.clear();
+    score_snapshots_.clear();
     // Reset the id counter so a re-registered plot reuses ids after a Stop/Start
     // cycle; otherwise auto palette colors (keyed by id) would shift each cycle.
     // Every id-keyed map below is cleared so reused ids carry no stale state.

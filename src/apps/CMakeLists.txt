@@ -14,6 +14,7 @@ target_link_libraries(leakflow_cli
         leakflow_plugins_extras
         leakflow_plugins_crypto
         leakflow_plugins_plot
+        leakflow_plugins_crypto_plot
 )
 set_target_properties(leakflow_cli PROPERTIES
     CXX_EXTENSIONS OFF
@@ -59,6 +60,7 @@ target_link_libraries(leakflow-ls
         leakflow_plugins_extras
         leakflow_plugins_crypto
         leakflow_plugins_plot
+        leakflow_plugins_crypto_plot
 )
 set_target_properties(leakflow-ls PROPERTIES
     CXX_EXTENSIONS OFF

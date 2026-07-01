@@ -1268,6 +1268,118 @@ void save_current_framebuffer_png(const std::filesystem::path &path, int width, 
 
 } // namespace
 
+void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, std::size_t panel_ordinal) {
+    const auto plot_id = (panel.metric.empty() ? std::string("panel") : panel.metric) + "##scorepanel_" +
+                         std::to_string(snapshot.id) + "_" + std::to_string(panel_ordinal);
+    if (!ImPlot::BeginPlot(plot_id.c_str(), ImVec2(-1.0F, 200.0F))) {
+        return;
+    }
+    ImPlot::SetupAxes(snapshot.x_label.c_str(), panel.y_label.c_str(), ImPlotAxisFlags_AutoFit,
+                      ImPlotAxisFlags_AutoFit);
+
+    auto *draw_list = ImPlot::GetPlotDrawList();
+    const auto mouse = ImGui::GetMousePos();
+    const auto plot_hovered = ImPlot::IsPlotHovered();
+    static constexpr auto marker_radius = 4.0F;
+    static constexpr auto hover_radius_squared = 9.0F * 9.0F;
+    std::optional<std::pair<float, std::string>> hovered; // (distance^2, tooltip)
+
+    for (std::size_t series_index = 0; series_index < panel.series.size(); ++series_index) {
+        const auto &series = panel.series[series_index];
+        if (series.points.empty()) {
+            continue;
+        }
+        std::vector<double> xs;
+        std::vector<double> ys;
+        xs.reserve(series.points.size());
+        ys.reserve(series.points.size());
+        for (const auto &point : series.points) {
+            xs.push_back(point.x);
+            ys.push_back(point.y);
+        }
+        // The ScorePlot element sets a per-unit color; the palette is only a fallback.
+        static const std::array<ImVec4, 8> fallback_palette{{
+            ImVec4(0.05F, 0.80F, 0.35F, 0.95F), ImVec4(0.25F, 0.55F, 1.00F, 0.95F),
+            ImVec4(1.00F, 0.60F, 0.20F, 0.95F), ImVec4(0.95F, 0.35F, 0.55F, 0.95F),
+            ImVec4(0.65F, 0.45F, 1.00F, 0.95F), ImVec4(0.15F, 0.85F, 0.85F, 0.95F),
+            ImVec4(0.95F, 0.85F, 0.25F, 0.95F), ImVec4(0.80F, 0.80F, 0.85F, 0.95F),
+        }};
+        const auto color =
+            series.color ? im_color(*series.color, 0.95F) : fallback_palette[series_index % fallback_palette.size()];
+
+        ImPlotSpec spec;
+        spec.LineColor = color;
+        spec.LineWeight = 1.6F;
+        ImPlot::PlotLine(series.label.c_str(), xs.data(), ys.data(), static_cast<int>(xs.size()), spec);
+
+        for (const auto &point : series.points) {
+            const auto pixel = ImPlot::PlotToPixels(point.x, point.y);
+            draw_annotation_marker(*draw_list, pixel, marker_radius, {color}, point.marker);
+            if (plot_hovered) {
+                const auto distance = squared_distance(mouse, pixel);
+                if (distance <= hover_radius_squared && (!hovered || distance < hovered->first)) {
+                    std::string tooltip = series.label;
+                    for (const auto &[key, value] : point.fields) {
+                        tooltip += "\n" + key + ": " + value;
+                    }
+                    hovered = std::make_pair(distance, std::move(tooltip));
+                }
+            }
+        }
+    }
+
+    if (hovered) {
+        ImGui::SetTooltip("%s", hovered->second.c_str());
+    }
+    ImPlot::EndPlot();
+}
+
+void draw_score_group(std::string_view group, const std::vector<const ScoreSnapshot *> &snapshots, int group_index) {
+    std::string title;
+    for (const auto *snapshot : snapshots) {
+        if (!snapshot->title.empty()) {
+            title = snapshot->title;
+            break;
+        }
+    }
+    if (title.empty()) {
+        title = group.empty() || group == "default" ? "Scores" : std::string(group);
+    }
+
+    const auto window_id = title + "##scoreplot_group_" + std::string(group);
+    ImGui::SetNextWindowPos(ImVec2(48.0F + 36.0F * static_cast<float>(group_index),
+                                   48.0F + 36.0F * static_cast<float>(group_index)),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(760.0F, 620.0F), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(window_id.c_str())) {
+        const auto group_text = "group: " + std::string(group);
+        ImGui::TextUnformatted(group_text.c_str());
+        std::size_t panel_ordinal = 0;
+        for (const auto *snapshot : snapshots) {
+            for (const auto &panel : snapshot->panels) {
+                if (panel_ordinal != 0) {
+                    ImGui::Spacing();
+                }
+                draw_score_panel(*snapshot, panel, panel_ordinal);
+                ++panel_ordinal;
+            }
+        }
+    }
+    ImGui::End();
+}
+
+void draw_score_groups(PlotRuntime &runtime) {
+    std::map<std::string, std::vector<const ScoreSnapshot *>> groups;
+    for (const auto &snapshot : runtime.score_snapshots()) {
+        groups[snapshot.group].push_back(&snapshot);
+    }
+    auto group_index = 0;
+    for (const auto &[group, snapshots] : groups) {
+        draw_score_group(group, snapshots, group_index);
+        ++group_index;
+    }
+}
+
 void draw_plot_runtime(PlotRuntime &runtime, PipelineControlRuntime *control_runtime) {
     const auto lock = std::scoped_lock(runtime.mutex());
     // Accumulate sliders auto-follow the newest trace only while the session is
@@ -1291,6 +1403,8 @@ void draw_plot_runtime(PlotRuntime &runtime, PipelineControlRuntime *control_run
         draw_group(runtime, group, snapshots, group_index, control_runtime);
         ++group_index;
     }
+
+    draw_score_groups(runtime);
 }
 
 void run_until_closed_impl(PlotRuntime &runtime, PipelineGraphRuntime *graph_runtime,

@@ -103,6 +103,48 @@ struct TracePlotSnapshot {
     [[nodiscard]] const float *trace_data(std::int64_t trace_index) const;
 };
 
+// Generic score-plot display data (domain-free): a stacked set of metric panels,
+// each with one line series per unit, each series a growing list of (x, y) points
+// with a marker shape. A crypto ScorePlot element fills this from an attack payload;
+// leakflow_plot renders it without knowing about CPA. Reuses the group concept.
+struct ScoreSeriesPoint {
+    double x = 0.0;
+    double y = 0.0;
+    TracePlotAnnotationMarker marker = TracePlotAnnotationMarker::Circle;
+    std::vector<std::pair<std::string, std::string>> fields; // hover details
+};
+
+struct ScoreSeries {
+    std::string label; // e.g. "byte 03"
+    std::optional<TracePlotColor> color;
+    std::vector<ScoreSeriesPoint> points;
+};
+
+struct ScorePanel {
+    std::string metric; // panel key, e.g. "score" / "relative_margin"
+    std::string y_label;
+    std::vector<ScoreSeries> series; // one per unit
+};
+
+struct ScoreSnapshot {
+    std::uint64_t id = 0;
+    std::string group = "default";
+    std::string element_name;
+    std::string title;
+    std::string x_label = "traces (N)";
+    std::vector<ScorePanel> panels; // always stacked
+};
+
+// One point to append for a (panel, series) pair at an x. The runtime finds-or-
+// creates the panel and series (ordered by first-seen) and appends the point.
+struct ScorePointUpdate {
+    std::string panel;
+    std::string panel_y_label;
+    std::string series;
+    std::optional<TracePlotColor> color;
+    ScoreSeriesPoint point;
+};
+
 struct PlotLoopOptions {
     PlotBackend backend = PlotBackend::Auto;
     std::string window_title = "LeakFlow TracePlot";
@@ -156,8 +198,16 @@ public:
     // had no sample rate and fell back to sample (the caller resets the property).
     bool refresh_trace_display(const TracePlotSnapshot &update);
 
+    // Append points to the score snapshot owned by element_name (find-or-create the
+    // snapshot, and each update's panel and series). Used by a ScorePlot element to
+    // accumulate attack metrics over streamed buffers. Presentation fields (group,
+    // title, x label) are refreshed each call.
+    void append_score_points(std::string element_name, std::string group, std::string title, std::string x_label,
+                             const std::vector<ScorePointUpdate> &updates);
+
     [[nodiscard]] bool has_sessions() const;
     [[nodiscard]] const std::vector<TracePlotSnapshot> &trace_snapshots() const;
+    [[nodiscard]] const std::vector<ScoreSnapshot> &score_snapshots() const;
 
     void clear();
 
@@ -194,6 +244,7 @@ public:
 
 private:
     std::vector<TracePlotSnapshot> trace_snapshots_;
+    std::vector<ScoreSnapshot> score_snapshots_;
     std::uint64_t next_snapshot_id_ = 1;
     bool streaming_ = false;
     std::map<std::uint64_t, int> trace_indices_;
