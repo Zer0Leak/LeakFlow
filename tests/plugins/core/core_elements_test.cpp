@@ -182,6 +182,9 @@ int main()
         return 1;
     }
 
+    // drop_oldest now defaults to false (block when full); this section asserts the
+    // drop-oldest path, so opt in explicitly before the boundary runtime is built.
+    queue.set_property("drop_oldest", true);
     queue.prepare_thread_boundary_runtime(nullptr);
     std::stop_source queue_stop;
     if (!expect(queue.boundary_push(leakflow::Buffer(leakflow::Caps(leakflow::generic_buffer_caps_type)),

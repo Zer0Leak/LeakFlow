@@ -1278,15 +1278,120 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
     ImPlot::SetupAxes(snapshot.x_label.c_str(), panel.y_label.c_str(), ImPlotAxisFlags_AutoFit,
                       ImPlotAxisFlags_AutoFit);
 
+    // The ScorePlot element sets a per-unit color; the palette is only a fallback.
+    static const std::array<ImVec4, 8> fallback_palette{{
+        ImVec4(0.05F, 0.80F, 0.35F, 0.95F), ImVec4(0.25F, 0.55F, 1.00F, 0.95F),
+        ImVec4(1.00F, 0.60F, 0.20F, 0.95F), ImVec4(0.95F, 0.35F, 0.55F, 0.95F),
+        ImVec4(0.65F, 0.45F, 1.00F, 0.95F), ImVec4(0.15F, 0.85F, 0.85F, 0.95F),
+        ImVec4(0.95F, 0.85F, 0.25F, 0.95F), ImVec4(0.80F, 0.80F, 0.85F, 0.95F),
+    }};
+    const auto series_color = [&](std::size_t index, const ScoreSeries &series) {
+        return series.color ? im_color(*series.color, 0.95F) : fallback_palette[index % fallback_palette.size()];
+    };
+
     auto *draw_list = ImPlot::GetPlotDrawList();
     const auto mouse = ImGui::GetMousePos();
     const auto plot_hovered = ImPlot::IsPlotHovered();
+    const auto plot_pos = ImPlot::GetPlotPos();
+    const auto plot_size = ImPlot::GetPlotSize();
+    const auto plot_top = plot_pos.y;
+    const auto plot_bottom = plot_pos.y + plot_size.y;
     static constexpr auto marker_radius = 4.0F;
     static constexpr auto hover_radius_squared = 9.0F * 9.0F;
-    std::optional<std::pair<float, std::string>> hovered; // (distance^2, tooltip)
+    static constexpr auto vline_pixel_tolerance = 5.0F;
 
-    for (std::size_t series_index = 0; series_index < panel.series.size(); ++series_index) {
-        const auto &series = panel.series[series_index];
+    // Legend visibility from the previous frame (ImPlot items persist by label). A
+    // hidden series draws neither its markers nor its "latest wrong" line.
+    std::vector<bool> visible(panel.series.size(), true);
+    for (std::size_t index = 0; index < panel.series.size(); ++index) {
+        if (const auto *item = ImPlot::GetItem(panel.series[index].label.c_str())) {
+            visible[index] = item->Show;
+        }
+    }
+
+    // "Latest wrong key" per visible unit: the newest point whose marker is a cross.
+    // Drawn as a vertical line BEHIND the data (added to the plot draw list before
+    // the series lines/markers), in the unit's color.
+    struct VerticalLine {
+        float pixel_x = 0.0F;
+        ImVec4 color;
+        std::string tooltip;
+    };
+    std::vector<VerticalLine> vertical_lines;
+    for (std::size_t index = 0; index < panel.series.size(); ++index) {
+        if (!visible[index]) {
+            continue;
+        }
+        const auto &series = panel.series[index];
+        const ScoreSeriesPoint *wrong = nullptr;
+        for (const auto &point : series.points) {
+            if (point.marker == TracePlotAnnotationMarker::Cross) {
+                wrong = &point; // points are in increasing-x order, so the last cross is the latest
+            }
+        }
+        if (wrong == nullptr) {
+            continue;
+        }
+        std::string tooltip = series.label + " — latest wrong";
+        for (const auto &[key, value] : wrong->fields) {
+            tooltip += "\n" + key + ": " + value;
+        }
+        vertical_lines.push_back(VerticalLine{
+            .pixel_x = ImPlot::PlotToPixels(wrong->x, 0.0).x,
+            .color = series_color(index, series),
+            .tooltip = std::move(tooltip),
+        });
+    }
+
+    for (const auto &line : vertical_lines) {
+        const auto faint = ImGui::GetColorU32(ImVec4(line.color.x, line.color.y, line.color.z, 0.40F));
+        draw_list->AddLine(ImVec2(line.pixel_x, plot_top), ImVec2(line.pixel_x, plot_bottom), faint, 2.0F);
+    }
+
+    // Count badge where several lines pile up on screen (zoom in to separate them).
+    {
+        std::vector<float> pixels;
+        pixels.reserve(vertical_lines.size());
+        for (const auto &line : vertical_lines) {
+            pixels.push_back(line.pixel_x);
+        }
+        std::sort(pixels.begin(), pixels.end());
+        std::size_t start = 0;
+        while (start < pixels.size()) {
+            std::size_t end = start + 1;
+            while (end < pixels.size() && pixels[end] - pixels[end - 1] <= vline_pixel_tolerance) {
+                ++end;
+            }
+            if (end - start > 1) {
+                const auto mid = (pixels[start] + pixels[end - 1]) * 0.5F;
+                draw_annotation_number_label(*draw_list, ImVec2(mid, plot_top + 10.0F), std::to_string(end - start));
+            }
+            start = end;
+        }
+    }
+
+    // Vertical-line hover: every line within tolerance of the cursor (shows "both").
+    std::optional<std::string> vline_tooltip;
+    if (plot_hovered && mouse.y >= plot_top && mouse.y <= plot_bottom) {
+        std::string combined;
+        for (const auto &line : vertical_lines) {
+            if (std::abs(mouse.x - line.pixel_x) <= vline_pixel_tolerance) {
+                if (!combined.empty()) {
+                    combined += "\n\n";
+                }
+                combined += line.tooltip;
+            }
+        }
+        if (!combined.empty()) {
+            vline_tooltip = std::move(combined);
+        }
+    }
+
+    // Series lines (PlotLine self-hides on a legend toggle) + markers, gated on
+    // visibility so a hidden series also drops its manually-drawn markers.
+    std::optional<std::pair<float, std::string>> marker_hover;
+    for (std::size_t index = 0; index < panel.series.size(); ++index) {
+        const auto &series = panel.series[index];
         if (series.points.empty()) {
             continue;
         }
@@ -1298,39 +1403,35 @@ void draw_score_panel(const ScoreSnapshot &snapshot, const ScorePanel &panel, st
             xs.push_back(point.x);
             ys.push_back(point.y);
         }
-        // The ScorePlot element sets a per-unit color; the palette is only a fallback.
-        static const std::array<ImVec4, 8> fallback_palette{{
-            ImVec4(0.05F, 0.80F, 0.35F, 0.95F), ImVec4(0.25F, 0.55F, 1.00F, 0.95F),
-            ImVec4(1.00F, 0.60F, 0.20F, 0.95F), ImVec4(0.95F, 0.35F, 0.55F, 0.95F),
-            ImVec4(0.65F, 0.45F, 1.00F, 0.95F), ImVec4(0.15F, 0.85F, 0.85F, 0.95F),
-            ImVec4(0.95F, 0.85F, 0.25F, 0.95F), ImVec4(0.80F, 0.80F, 0.85F, 0.95F),
-        }};
-        const auto color =
-            series.color ? im_color(*series.color, 0.95F) : fallback_palette[series_index % fallback_palette.size()];
-
+        const auto color = series_color(index, series);
         ImPlotSpec spec;
         spec.LineColor = color;
         spec.LineWeight = 1.6F;
         ImPlot::PlotLine(series.label.c_str(), xs.data(), ys.data(), static_cast<int>(xs.size()), spec);
-
+        if (!visible[index]) {
+            continue;
+        }
         for (const auto &point : series.points) {
             const auto pixel = ImPlot::PlotToPixels(point.x, point.y);
             draw_annotation_marker(*draw_list, pixel, marker_radius, {color}, point.marker);
             if (plot_hovered) {
                 const auto distance = squared_distance(mouse, pixel);
-                if (distance <= hover_radius_squared && (!hovered || distance < hovered->first)) {
+                if (distance <= hover_radius_squared && (!marker_hover || distance < marker_hover->first)) {
                     std::string tooltip = series.label;
                     for (const auto &[key, value] : point.fields) {
                         tooltip += "\n" + key + ": " + value;
                     }
-                    hovered = std::make_pair(distance, std::move(tooltip));
+                    marker_hover = std::make_pair(distance, std::move(tooltip));
                 }
             }
         }
     }
 
-    if (hovered) {
-        ImGui::SetTooltip("%s", hovered->second.c_str());
+    // A marker (specific point) wins over a vertical line (broad) when both hovered.
+    if (marker_hover) {
+        ImGui::SetTooltip("%s", marker_hover->second.c_str());
+    } else if (vline_tooltip) {
+        ImGui::SetTooltip("%s", vline_tooltip->c_str());
     }
     ImPlot::EndPlot();
 }
