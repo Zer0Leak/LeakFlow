@@ -114,8 +114,8 @@ Rank behavior:
 - rank 2 means `[trace, sample]`,
 - rank 2 uses axis 0 as trace index and axis 1 as sample index.
 
-`TracePlot` reads its input and registers a plot-owned snapshot with
-`PlotRuntime`.
+`TracePlot` reads its input and registers a plot-owned snapshot with its
+`TraceView` (the built-in plot view; see **Plot View Architecture** below).
 
 Because the GUI loop outlives pipeline processing, `TracePlot` must not keep
 mutable access to upstream payload data. The first implementation should copy
@@ -188,9 +188,9 @@ polymorphic views and, each frame, asks each one to draw itself — it never ask
 
 ```text
 PlotView   (include/leakflow/plot/plot_view.hpp)
-  virtual void draw()          // render my windows into the current ImGui frame
-  virtual void clear()         // drop my data (Stop/Start recycle)
-  virtual bool empty() const   // do I have anything to show?
+  virtual void draw(const PlotDrawContext&)  // render my windows into the ImGui frame
+  virtual void clear()                       // drop my data (Stop/Start recycle)
+  virtual bool empty() const                 // do I have anything to show?
 ```
 
 - A view owns **its own copied display data, its own UI state, and its own
@@ -201,19 +201,38 @@ PlotView   (include/leakflow/plot/plot_view.hpp)
   copied snapshot data) and the UI thread draws it; both serialize on that lock.
   Because the lock and the data live inside the view, a view has no lifetime
   dependency on `PlotRuntime` — the runtime just keeps a `shared_ptr` to it.
-- `PlotRuntime` still owns the trace snapshots directly (the trace path predates
-  the registry and has many call sites), plus `views_`, a
-  `vector<shared_ptr<PlotView>>`. `add_view(view)` registers one;
-  `draw_plot_runtime` draws the trace groups and then loops `views()` calling
-  `draw()`; `has_sessions()` is true if there are trace snapshots **or** any
-  non-empty view; `clear()` clears the trace state **and** cascades to every
+- `PlotRuntime` owns **no plot data itself**: just `views_`, a
+  `vector<shared_ptr<PlotView>>`, and a typed handle to the built-in trace view.
+  `add_view(view)` registers one; `draw_plot_runtime` builds a `PlotDrawContext`
+  (streaming flag + control runtime) and loops `views()` calling `draw(ctx)`;
+  `has_sessions()` is true if any view is non-empty; `clear()` cascades to every
   view's `clear()`. Lock order is always runtime → view (the worker only ever
   takes a single view lock), so there is no inversion.
+- `PlotDrawContext` carries the run-level facts a view may need but does not own:
+  `streaming` (is the pipeline Running — accumulate sliders follow the newest
+  trace only while streaming) and `control_runtime` (so a view's gear button can
+  open its element's control panel). Views ignore fields they do not use.
 
 Shared, domain-free drawing primitives (colour conversion, marker shapes,
 number-label, pixel distance) live in `src/plot/plot_render_util.{hpp,cpp}` so
 each view's rendering TU reuses them instead of copying. They know colours,
 marker shapes, and pixels — not traces or scores.
+
+### TraceView — the built-in view
+
+`TraceView` (`include/leakflow/plot/trace_view.hpp`, `src/plot/trace_view.cpp`)
+is the trace plot as a `PlotView`. It owns the trace snapshots, all trace UI
+state (per-snapshot slider index / follow-latest, per-group lock + controls-open,
+per-snapshot display state, per-panel axis view), the two-way trace-index /
+x-axis listeners, its own mutex, and the full trace rendering. `PlotRuntime`
+creates one at construction and registers it (reachable via `trace_view()`), so
+it draws and clears through the same loop as every other view — the trace path
+is the *built-in* view, not a special case in the runtime or the draw loop.
+
+`TracePlot` is the *element* that fills a `TraceView`; several `TracePlot`s
+sharing one `TraceView` stack/overlay in one group window. Its factory hands each
+`TracePlot` the runtime's built-in `trace_view()` (a `TracePlot(PlotRuntime)`
+convenience constructor does this for app/tutorial code that only has a runtime).
 
 ### ScoreView / ScorePlot — the second view
 

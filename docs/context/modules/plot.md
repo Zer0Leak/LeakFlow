@@ -85,13 +85,14 @@ processing.
 the input buffer for API-level inspection, but the element descriptor does not
 declare a source pad.
 
-`PlotRuntime` owns the trace snapshots and their UI state directly, plus a
-registry of `PlotView`s (see **Plot Views** below) for every other plot type. It
-is usable from both the CLI and application code.
+`PlotRuntime` owns no plot data itself: it is a registry of `PlotView`s (see
+**Plot Views** below). The trace snapshots and their UI state live in the
+built-in `TraceView`; every other plot type is another registered view. It is
+usable from both the CLI and application code.
 
 `leakflow_plugins_plot` factory registration requires a shared `PlotRuntime`;
-the `TracePlot` factory captures it so the generic `ElementFactoryRegistry`
-does not depend on plotting.
+the `TracePlot` factory captures it and fills its built-in `trace_view()`, so the
+generic `ElementFactoryRegistry` does not depend on plotting.
 
 `leakflow::plot::run_until_closed(runtime)` owns a standalone GLFW/OpenGL3
 window loop.
@@ -102,20 +103,21 @@ for applications that already own the UI loop.
 ## Plot Views (PlotView registry)
 
 `PlotRuntime` is a registry of plot types, analogous to a `Pipeline` being a
-registry of `Element`s. Besides the built-in trace path, it holds
-`views_`, a list of `PlotView` (`include/leakflow/plot/plot_view.hpp`):
+registry of `Element`s. It holds `views_`, a list of `PlotView`
+(`include/leakflow/plot/plot_view.hpp`), and owns no plot data itself:
 
 ```text
-PlotView: draw()  clear()  empty()   // polymorphic; the runtime never type-switches
+PlotView: draw(ctx)  clear()  empty()   // polymorphic; the runtime never type-switches
 ```
 
 - Add a plot type = a new `PlotView` subclass (its own copied data, UI state,
   and ImGui/ImPlot rendering in its own `.cpp`) + the element that fills it. No
   edit to `plot_runtime.cpp` or `imgui_plot_loop.cpp`.
-- `PlotRuntime::add_view(shared_ptr<PlotView>)` registers a view.
-  `draw_plot_runtime` draws the trace groups then loops `views()` calling
-  `draw()`. `has_sessions()` is true for trace snapshots **or** any non-empty
-  view. `clear()` (Stop/Start recycle) clears trace state and cascades to each
+- `PlotRuntime::add_view(shared_ptr<PlotView>)` registers a view. The built-in
+  `TraceView` is created and registered at construction and reachable via
+  `trace_view()`. `draw_plot_runtime` builds a `PlotDrawContext` (streaming flag +
+  control runtime) and loops `views()` calling `draw(ctx)`. `has_sessions()` is
+  true for any non-empty view. `clear()` (Stop/Start recycle) cascades to each
   `view->clear()`.
 - A view owns **its own mutex**; it is filled from the worker thread and drawn
   from the UI thread, and both serialize on that lock. A view therefore has no
@@ -123,6 +125,12 @@ PlotView: draw()  clear()  empty()   // polymorphic; the runtime never type-swit
 - Shared, domain-free drawing primitives (colour, marker shapes, number label,
   pixel distance) live in `src/plot/plot_render_util.{hpp,cpp}` for reuse across
   views. They stay generic — colours/markers/pixels, not traces/scores.
+
+`TraceView` (`include/leakflow/plot/trace_view.hpp`, `src/plot/trace_view.cpp`)
+is the trace plot as a view: it owns the trace snapshots, all trace UI state, the
+two-way trace-index / x-axis listeners, its own mutex, and the trace rendering.
+`TracePlot` elements share the runtime's built-in `TraceView`; the graph installs
+the slider/x-axis listeners on it (`plot_runtime.trace_view()->set_*_listener`).
 
 `ScoreView` (`include/leakflow/plot/score_view.hpp`, `src/plot/score_view.cpp`)
 is the first non-trace view: stacked metric panels, one line series per attack

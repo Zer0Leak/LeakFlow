@@ -287,6 +287,68 @@ Notes:
 - Increase `trace_rate` on the `FakeLiveSrc` sources to watch the convergence pace;
   drop `@key_src ! @stats.truth` to run without truth (markers become circles).
 
+## AES Sync CPA Live — TracePlot + ScorePlot Together
+
+The full live CPA workflow with **both** plot views open at once: `TracePlot`
+shows the trace with each byte's best-correlation sample annotated (via
+`AttackStatsToPlotAnnotations`), and `ScorePlot` shows the score / relative-margin
+convergence with the second-best score overlaid (`show_second_score=true`). A
+`Tee` after the trace queue fans traces to the plot and the attack; a `Tee` after
+`AttackStats` fans the stats to the annotation converter and the score plot. Uses
+the full checked-out `traces/` dataset (swap in the
+`tests/fixtures/aes/sync/key_01/*_first_50.pt` files for a quick smoke run).
+
+```bash
+leakflow --log-level warning run --graph \
+  'FakeLiveSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0); \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+   Tee@trace_tee; \
+   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
+   AttackStats@stats(top_k=3); \
+   Tee@stats_tee; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@plot(title="AES CPA byte 0 - best correlation sample",group=cpa,label=traces,x_axis=sample); \
+   ScorePlot@scoreplot(show_second_score=true); \
+   @traces_src ! @traces_queue ! @trace_tee; \
+      @trace_tee.src_0 ! @plot.sink; \
+      @trace_tee.src_1 ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @plot.annotations; \
+      @stats_tee.src_1 ! @scoreplot'
+```
+
+Notes:
+
+- Both plots are `PlotView`s sharing one window loop: `TracePlot` fills the
+  built-in `TraceView` (group `cpa`), `ScorePlot` fills a `ScoreView` (always
+  stacked). Neither special-cases the runtime — see
+  `docs/design/plotting.md` (Plot View Architecture).
+- `ScorePlot@scoreplot(show_second_score=true)` also plots the second-best score
+  per byte in the score panel, same colour as the byte's line, toggled by a single
+  legend entry. It needs `AttackStats(top_k>=2)` — here `top_k=3`. The toggle is a
+  ui-control property: it flips live while Running/Idle without a rerun.
+- `AttackStatsToPlotAnnotations` marks each byte's best sample on the trace and
+  encodes known-key PASS/FAIL as the marker shape (square = success, x = failure,
+  circle = truth unknown); the same success drives the `ScorePlot` markers.
+- `FakeLiveSrc@traces_src{...}` carries `capture.source`, `payload.leakage.range`,
+  and `capture.sample_rate_hz`; the sample rate rides to `TracePlot` so you can
+  switch `x_axis=time_us`. `trace_rate=0` streams as fast as possible — raise it
+  (e.g. `trace_rate=1.0`) to watch the correlation sample lock in and the scores
+  separate row by row.
+- Drop `@key_src ! @stats.truth` to run without truth (all markers become circles,
+  and `ScorePlot` shows no "latest wrong key" lines).
+
 ## Live Synchronized Version
 
 This version streams traces and plaintexts independently through queues, then

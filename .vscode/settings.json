@@ -1,5 +1,5 @@
 {
-  "editor.hover.enabled": true,
+  "editor.hover.enabled": "on",
   "lldb.evaluateForHovers": true,
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
   "C_Cpp.default.compilerPath": "clang++",

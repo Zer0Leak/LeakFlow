@@ -115,11 +115,11 @@ int main()
     if (!expect(runtime->has_sessions(), "TracePlot did not register a plot session")) {
         return 1;
     }
-    if (!expect(runtime->trace_snapshots().size() == 1, "TracePlot registered wrong session count")) {
+    if (!expect(runtime->trace_view()->trace_snapshots().size() == 1, "TracePlot registered wrong session count")) {
         return 1;
     }
 
-    const auto& snapshot = runtime->trace_snapshots().front();
+    const auto& snapshot = runtime->trace_view()->trace_snapshots().front();
     if (!expect(snapshot.group == "aes", "TracePlot snapshot group was wrong")) {
         return 1;
     }
@@ -181,12 +181,12 @@ int main()
     plot_plugin::TracePlot uncentered_plot(uncentered_runtime, "uncentered_plot");
     uncentered_plot.set_property("center0", false);
     (void)uncentered_plot.process(input);
-    if (!expect(!uncentered_runtime->trace_snapshots().front().center0,
+    if (!expect(!uncentered_runtime->trace_view()->trace_snapshots().front().center0,
             "TracePlot center0=false property was not captured")) {
         return 1;
     }
 
-    auto& display_state = runtime->mutable_trace_display_state(snapshot);
+    auto& display_state = runtime->trace_view()->mutable_trace_display_state(snapshot);
     if (!expect(display_state.order == 4, "TracePlot display order was wrong")) {
         return 1;
     }
@@ -205,28 +205,28 @@ int main()
     }
     display_state.order = 0;
     display_state.alpha = 0.5F;
-    if (!expect(runtime->mutable_trace_display_state(snapshot).order == 0,
+    if (!expect(runtime->trace_view()->mutable_trace_display_state(snapshot).order == 0,
                 "TracePlot display order was not mutable")) {
         return 1;
     }
-    if (!expect(runtime->mutable_trace_display_state(snapshot).alpha == 0.5F,
+    if (!expect(runtime->trace_view()->mutable_trace_display_state(snapshot).alpha == 0.5F,
                 "TracePlot display alpha was not mutable")) {
         return 1;
     }
-    auto& controls_open = runtime->mutable_group_controls_open("aes");
+    auto& controls_open = runtime->trace_view()->mutable_group_controls_open("aes");
     controls_open = true;
-    if (!expect(runtime->mutable_group_controls_open("aes"), "TracePlot group controls state was not mutable")) {
+    if (!expect(runtime->trace_view()->mutable_group_controls_open("aes"), "TracePlot group controls state was not mutable")) {
         return 1;
     }
     // The grouped trace-slider lock is a group-level UI toggle (no element
     // property); it starts unlocked and is mutable.
-    if (!expect(!runtime->mutable_group_trace_lock("aes", false),
+    if (!expect(!runtime->trace_view()->mutable_group_trace_lock("aes", false),
             "TracePlot group trace lock should start unlocked")) {
         return 1;
     }
-    auto& trace_lock = runtime->mutable_group_trace_lock("aes", false);
+    auto& trace_lock = runtime->trace_view()->mutable_group_trace_lock("aes", false);
     trace_lock = true;
-    if (!expect(runtime->mutable_group_trace_lock("aes", false),
+    if (!expect(runtime->trace_view()->mutable_group_trace_lock("aes", false),
             "TracePlot group trace lock state was not mutable")) {
         return 1;
     }
@@ -269,11 +269,11 @@ int main()
     if (!expect(annotated_output.has_value(), "TracePlot with annotations did not pass the buffer through")) {
         return 1;
     }
-    if (!expect(annotated_runtime->trace_snapshots().size() == 1,
+    if (!expect(annotated_runtime->trace_view()->trace_snapshots().size() == 1,
             "TracePlot with annotations did not register one snapshot")) {
         return 1;
     }
-    const auto& annotated_snapshot = annotated_runtime->trace_snapshots().front();
+    const auto& annotated_snapshot = annotated_runtime->trace_view()->trace_snapshots().front();
     if (!expect(annotated_snapshot.annotations.size() == 3,
             "TracePlot snapshot annotation count was wrong")) {
         return 1;
@@ -343,8 +343,8 @@ int main()
         color_input.set_payload(payload);
         (void)color_plot.process(color_input);
 
-        const auto& color_snapshot = color_runtime->trace_snapshots().front();
-        const auto& color_state = color_runtime->mutable_trace_display_state(color_snapshot);
+        const auto& color_snapshot = color_runtime->trace_view()->trace_snapshots().front();
+        const auto& color_state = color_runtime->trace_view()->mutable_trace_display_state(color_snapshot);
         return expect(color_snapshot.color.has_value(), "TracePlot color property did not set snapshot color") &&
                expect_near(color_state.color.red, expected_red, "TracePlot color property red component was wrong") &&
                expect_near(color_state.color.green, expected_green,
@@ -429,7 +429,7 @@ int main()
         plot_plugin::TracePlot replace_plot(replace_runtime, "replace_plot");
         (void)replace_plot.process(make_trace_buffer(4));
         (void)replace_plot.process(make_trace_buffer(4));
-        if (!expect(replace_runtime->trace_snapshots().size() == 1,
+        if (!expect(replace_runtime->trace_view()->trace_snapshots().size() == 1,
                     "TracePlot auto/offline update_mode should replace in place")) {
             return 1;
         }
@@ -446,11 +446,11 @@ int main()
         (void)accumulate_plot.process(make_trace_buffer(4));
         (void)accumulate_plot.process(make_trace_buffer(4));
         (void)accumulate_plot.process(make_trace_buffer(4));
-        if (!expect(accumulate_runtime->trace_snapshots().size() == 1,
+        if (!expect(accumulate_runtime->trace_view()->trace_snapshots().size() == 1,
                     "TracePlot accumulate should grow one snapshot, not add snapshots")) {
             return 1;
         }
-        const auto& accumulated = accumulate_runtime->trace_snapshots().front();
+        const auto& accumulated = accumulate_runtime->trace_view()->trace_snapshots().front();
         if (!expect(accumulated.trace_count() == 3, "TracePlot accumulate should append one trace per buffer")) {
             return 1;
         }
@@ -481,7 +481,7 @@ int main()
                     "TracePlot accumulate must ignore a scrubbed trace_index for incoming buffers")) {
             return 1;
         }
-        if (!expect(scrub_runtime->trace_snapshots().front().trace_count() == 2,
+        if (!expect(scrub_runtime->trace_view()->trace_snapshots().front().trace_count() == 2,
                     "TracePlot accumulate should keep appending after a scrubbed trace_index")) {
             return 1;
         }
@@ -504,11 +504,11 @@ int main()
         };
         feed_annotated(0.1);
         feed_annotated(0.2);
-        if (!expect(history_runtime->trace_snapshots().size() == 1,
+        if (!expect(history_runtime->trace_view()->trace_snapshots().size() == 1,
                     "TracePlot accumulate annotations should stay in one snapshot")) {
             return 1;
         }
-        const auto& history = history_runtime->trace_snapshots().front();
+        const auto& history = history_runtime->trace_view()->trace_snapshots().front();
         if (!expect(history.annotations.size() == 2, "TracePlot accumulate should keep one annotation per trace")) {
             return 1;
         }
@@ -546,12 +546,12 @@ int main()
         auto cycle_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
         plot_plugin::TracePlot cycle_plot(cycle_runtime, "cycle_plot");
         (void)cycle_plot.process(make_trace_buffer(4));
-        const auto first_id = cycle_runtime->trace_snapshots().front().id;
-        const auto first_color = cycle_runtime->trace_snapshots().front().color;
+        const auto first_id = cycle_runtime->trace_view()->trace_snapshots().front().id;
+        const auto first_color = cycle_runtime->trace_view()->trace_snapshots().front().color;
         cycle_runtime->clear();
         (void)cycle_plot.process(make_trace_buffer(4));
-        const auto second_id = cycle_runtime->trace_snapshots().front().id;
-        const auto second_color = cycle_runtime->trace_snapshots().front().color;
+        const auto second_id = cycle_runtime->trace_view()->trace_snapshots().front().id;
+        const auto second_color = cycle_runtime->trace_view()->trace_snapshots().front().color;
         if (!expect(first_id == second_id, "PlotRuntime clear should reset snapshot ids")) {
             return 1;
         }
@@ -569,21 +569,21 @@ int main()
         ui_plot.set_property("center0", false); // before any buffer: no snapshot, must not crash
         (void)ui_plot.process(make_trace_buffer(4));
         ui_plot.set_property("center0", true);
-        if (!expect(ui_runtime->trace_snapshots().front().center0,
+        if (!expect(ui_runtime->trace_view()->trace_snapshots().front().center0,
                     "TracePlot center0 change should self-apply to the snapshot without a rerun")) {
             return 1;
         }
         ui_plot.set_property("center0", false);
-        if (!expect(!ui_runtime->trace_snapshots().front().center0,
+        if (!expect(!ui_runtime->trace_view()->trace_snapshots().front().center0,
                     "TracePlot center0=false should self-apply to the snapshot")) {
             return 1;
         }
         ui_plot.set_property("title", std::string("updated"));
-        if (!expect(ui_runtime->trace_snapshots().front().title == "updated",
+        if (!expect(ui_runtime->trace_view()->trace_snapshots().front().title == "updated",
                     "TracePlot title change should self-apply to the snapshot")) {
             return 1;
         }
-        if (!expect(ui_runtime->trace_snapshots().size() == 1,
+        if (!expect(ui_runtime->trace_view()->trace_snapshots().size() == 1,
                     "TracePlot ui-control self-apply should not add a snapshot")) {
             return 1;
         }
@@ -596,7 +596,7 @@ int main()
         plot_plugin::TracePlot time_plot(time_runtime, "time_plot");
         time_plot.set_property("x_axis", std::string("time_us"));
         (void)time_plot.process(make_trace_buffer(4));
-        if (!expect(time_runtime->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::Sample,
+        if (!expect(time_runtime->trace_view()->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::Sample,
                     "TracePlot x_axis=time_us without a sample rate should fall back to sample")) {
             return 1;
         }
@@ -610,7 +610,7 @@ int main()
         auto rate_buffer = make_trace_buffer(4);
         rate_buffer.set_metadata(leakflow::plot::sample_rate_metadata_key, "1000000");
         (void)rate_plot.process(rate_buffer);
-        if (!expect(rate_runtime->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::TimeUs,
+        if (!expect(rate_runtime->trace_view()->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::TimeUs,
                     "TracePlot x_axis=time_us with a sample rate should be honored")) {
             return 1;
         }
@@ -623,7 +623,7 @@ int main()
         plot_plugin::TracePlot edit_plot(edit_runtime, "edit_plot");
         (void)edit_plot.process(make_trace_buffer(4));
         edit_plot.set_property("x_axis", std::string("time_us"));
-        if (!expect(edit_runtime->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::Sample,
+        if (!expect(edit_runtime->trace_view()->trace_snapshots().front().x_axis == leakflow::plot::TracePlotXAxis::Sample,
                     "TracePlot x_axis=time_us edit without a rate should fall back to sample on the snapshot")) {
             return 1;
         }
@@ -655,7 +655,7 @@ int main()
         marker_inputs.emplace("sink", make_trace_buffer(4));
         marker_inputs.emplace("annotations", marker_annotation_buffer);
         (void)marker_plot.process_inputs(std::move(marker_inputs));
-        if (!expect(marker_runtime->trace_snapshots().front().annotations.front().marker ==
+        if (!expect(marker_runtime->trace_view()->trace_snapshots().front().annotations.front().marker ==
                         leakflow::plot::TracePlotAnnotationMarker::Cross,
                     "TracePlot should map annotation marker=x to Cross on the snapshot")) {
             return 1;

@@ -319,8 +319,9 @@ const std::vector<ScoreSnapshot> &ScoreView::snapshots() const {
     return snapshots_;
 }
 
-void ScoreView::draw() {
+void ScoreView::draw(const PlotDrawContext & /*context*/) {
     // Called on the UI thread; lock our own data against the worker's append_points.
+    // ScoreView needs neither the streaming flag nor the control runtime.
     const auto lock = std::scoped_lock(mutex_);
     std::map<std::string, std::vector<const ScoreSnapshot *>> groups;
     for (const auto &snapshot : snapshots_) {

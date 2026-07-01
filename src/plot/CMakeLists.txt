@@ -68,6 +68,7 @@ add_library(leakflow_plot
     plot_render_util.cpp
     plot_runtime.cpp
     score_view.cpp
+    trace_view.cpp
 )
 target_compile_features(leakflow_plot PUBLIC cxx_std_23)
 target_include_directories(leakflow_plot

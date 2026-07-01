@@ -83,7 +83,7 @@ public:
     [[nodiscard]] const std::vector<ScoreSnapshot> &snapshots() const;
 
     // PlotView:
-    void draw() override;
+    void draw(const PlotDrawContext &context) override;
     void clear() override;
     [[nodiscard]] bool empty() const override;
 

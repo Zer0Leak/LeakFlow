@@ -293,7 +293,7 @@ void warn_time_us_without_rate(Element& element, bool& warned)
 
 std::optional<Buffer> capture_trace_snapshot(
     Element& element,
-    leakflow::plot::PlotRuntime& runtime,
+    leakflow::plot::TraceView& view,
     const Buffer& input,
     const leakflow::base::PlotAnnotationPayload* annotations,
     bool accumulate,
@@ -305,7 +305,7 @@ std::optional<Buffer> capture_trace_snapshot(
     const bool time_axis_fell_back = finalize_time_axis(element, snapshot, warned_time_us_no_rate);
     const auto shape_text = leakflow::base::shape_caps_value(snapshot.shape.data(), snapshot.shape.size());
     const auto annotation_count = snapshot.annotations.size();
-    const auto snapshot_id = runtime.add_trace(std::move(snapshot));
+    const auto snapshot_id = view.add_trace(std::move(snapshot));
 
     auto record = element.make_log_record(log::LogLevel::Debug, "element", "captured TracePlot snapshot");
     record.fields.emplace("snapshot_id", std::to_string(snapshot_id));
@@ -320,7 +320,7 @@ std::optional<Buffer> capture_trace_snapshot(
     // control panel and graph follow the plot instead of staying on time_us. In a
     // headless/non-graph run there is no listener, so this is a no-op.
     if (time_axis_fell_back) {
-        runtime.notify_x_axis(element.name(), leakflow::plot::to_string(leakflow::plot::TracePlotXAxis::Sample));
+        view.notify_x_axis(element.name(), leakflow::plot::to_string(leakflow::plot::TracePlotXAxis::Sample));
     }
 
     return input;
@@ -425,18 +425,23 @@ ElementDescriptor TracePlot::descriptor()
     };
 }
 
-TracePlot::TracePlot(std::string name) : TracePlot(std::make_shared<leakflow::plot::PlotRuntime>(), std::move(name))
+TracePlot::TracePlot(std::string name) : TracePlot(std::make_shared<leakflow::plot::TraceView>(), std::move(name))
 {
 }
 
-TracePlot::TracePlot(std::shared_ptr<leakflow::plot::PlotRuntime> runtime, std::string name)
-    : Element(std::move(name)), runtime_(std::move(runtime))
+TracePlot::TracePlot(std::shared_ptr<leakflow::plot::TraceView> view, std::string name)
+    : Element(std::move(name)), view_(std::move(view))
 {
-    if (!runtime_) {
-        throw std::invalid_argument("TracePlot requires a PlotRuntime");
+    if (!view_) {
+        throw std::invalid_argument("TracePlot requires a TraceView");
     }
 
     configure_from_descriptor(descriptor());
+}
+
+TracePlot::TracePlot(const std::shared_ptr<leakflow::plot::PlotRuntime> &runtime, std::string name)
+    : TracePlot(runtime ? runtime->trace_view() : nullptr, std::move(name))
+{
 }
 
 void TracePlot::start()
@@ -461,12 +466,12 @@ void TracePlot::refresh_display()
     leakflow::plot::TracePlotSnapshot snapshot;
     assign_display_properties(*this, snapshot, accumulate,
         sample_rate > 0.0 ? std::optional<double>(sample_rate) : std::nullopt);
-    if (runtime_->refresh_trace_display(snapshot)) {
+    if (view_->refresh_trace_display(snapshot)) {
         // The live snapshot had no rate, so x_axis=time_us fell back to sample. Warn
         // once and reset the property so the control panel and graph follow the plot
         // (no rerun; the session applies the reset like any ui-control change).
         warn_time_us_without_rate(*this, warned_time_us_no_rate_);
-        runtime_->notify_x_axis(name(), leakflow::plot::to_string(leakflow::plot::TracePlotXAxis::Sample));
+        view_->notify_x_axis(name(), leakflow::plot::to_string(leakflow::plot::TracePlotXAxis::Sample));
     }
 }
 
@@ -489,7 +494,7 @@ std::optional<Buffer> TracePlot::process(std::optional<Buffer> input)
     if (!input) {
         throw std::invalid_argument("TracePlot requires an input buffer");
     }
-    return capture_trace_snapshot(*this, *runtime_, *input, nullptr, resolve_accumulate(), warned_time_us_no_rate_);
+    return capture_trace_snapshot(*this, *view_, *input, nullptr, resolve_accumulate(), warned_time_us_no_rate_);
 }
 
 std::optional<Buffer> TracePlot::process_inputs(ElementInputs inputs)
@@ -500,22 +505,22 @@ std::optional<Buffer> TracePlot::process_inputs(ElementInputs inputs)
         annotations = annotation_payload_for(*annotation_input);
     }
 
-    return capture_trace_snapshot(*this, *runtime_, trace_input, annotations.get(), resolve_accumulate(),
+    return capture_trace_snapshot(*this, *view_, trace_input, annotations.get(), resolve_accumulate(),
         warned_time_us_no_rate_);
 }
 
-std::shared_ptr<leakflow::plot::PlotRuntime> TracePlot::plot_runtime() const
+std::shared_ptr<leakflow::plot::TraceView> TracePlot::trace_view() const
 {
-    return runtime_;
+    return view_;
 }
 
-void TracePlot::set_plot_runtime(std::shared_ptr<leakflow::plot::PlotRuntime> runtime)
+void TracePlot::set_trace_view(std::shared_ptr<leakflow::plot::TraceView> view)
 {
-    if (!runtime) {
-        throw std::invalid_argument("TracePlot requires a PlotRuntime");
+    if (!view) {
+        throw std::invalid_argument("TracePlot requires a TraceView");
     }
 
-    runtime_ = std::move(runtime);
+    view_ = std::move(view);
 }
 
 } // namespace leakflow::plugins::plot

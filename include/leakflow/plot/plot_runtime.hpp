@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -16,6 +15,7 @@ namespace leakflow::plot {
 class PipelineControlRuntime;
 class PipelineGraphRuntime;
 class PlotView;
+class TraceView;
 
 inline constexpr auto sample_rate_metadata_key = "capture.sample_rate_hz";
 
@@ -145,74 +145,35 @@ struct PlotAxisView {
     double x_max = 0.0;
 };
 
+// A registry of PlotViews plus the shared window/loop entry points. It owns no plot
+// data itself: the built-in trace plot lives in a TraceView (created and registered
+// at construction, reachable via trace_view()), and every other plot type is another
+// registered PlotView (e.g. ScoreView). Drawing/clearing iterate the views without
+// knowing their type, so adding a plot type is a new PlotView, not an edit here.
 class PlotRuntime {
 public:
-    std::uint64_t add_trace(TracePlotSnapshot snapshot);
-
-    // Update only the presentation fields of the snapshot owned by
-    // update.element_name (group, labels, layout, center0, x_axis, color, line
-    // width, sample rate, order, and the replace-mode trace index), leaving the
-    // captured data (id, values, shape, annotations, accumulate) untouched. Used by
-    // TracePlot to self-apply a ui-control property change with no rerun. No-op if
-    // the element has not registered a snapshot yet. Returns true when x_axis=time_us
-    // had no sample rate and fell back to sample (the caller resets the property).
-    bool refresh_trace_display(const TracePlotSnapshot &update);
+    PlotRuntime();
 
     // Register a PlotView (a self-contained plot type, e.g. ScoreView). The runtime
-    // draws it each frame without knowing its type; adding a plot type is a new
-    // PlotView, not an edit here. See leakflow/plot/plot_view.hpp.
+    // draws it each frame without knowing its type. See leakflow/plot/plot_view.hpp.
     void add_view(std::shared_ptr<PlotView> view);
     [[nodiscard]] const std::vector<std::shared_ptr<PlotView>> &views() const;
 
+    // The built-in trace plot, created and registered at construction. TracePlot
+    // elements share it; the graph installs the slider/x-axis listeners on it.
+    [[nodiscard]] const std::shared_ptr<TraceView> &trace_view() const;
+
+    // True when any registered view has something to show (drives "No plot sessions").
     [[nodiscard]] bool has_sessions() const;
-    [[nodiscard]] const std::vector<TracePlotSnapshot> &trace_snapshots() const;
 
+    // Stop/Start recycle: cascade to every registered view's clear().
     void clear();
-
-    [[nodiscard]] int &mutable_trace_index(std::uint64_t snapshot_id, int initial_value);
-    // Whether an accumulate snapshot's slider auto-follows the newest trace. The
-    // renderer sets it false while the user holds the slider and true otherwise.
-    [[nodiscard]] bool &mutable_trace_follow_latest(std::uint64_t snapshot_id, bool initial_value);
-    // Whether the pipeline is actively streaming (session Running). Accumulate
-    // sliders only ride the newest trace while streaming; once a run is held (Idle)
-    // or frozen (Paused) the slider stays put so the history can be scrubbed.
-    void set_streaming(bool streaming);
-    [[nodiscard]] bool streaming() const;
-    [[nodiscard]] bool &mutable_group_trace_lock(std::string_view group, bool initial_value);
-    [[nodiscard]] TracePlotDisplayState &mutable_trace_display_state(const TracePlotSnapshot &snapshot);
-    [[nodiscard]] bool &mutable_group_controls_open(std::string_view group);
-    [[nodiscard]] PlotAxisView &mutable_axis_view(std::uint64_t panel_id);
-
-    // Two-way trace-index sync (Phase 25). When a listener is installed, moving a
-    // vertical trace slider notifies it so the owning element's trace_index
-    // property can be updated (the session run loop submits a SetProperty).
-    void set_trace_index_listener(std::function<void(std::string_view, int)> listener);
-    void notify_trace_index(std::string_view element_name, int trace_index);
-
-    // x_axis sync across an overlay sub-group: when one TracePlot's x_axis changes,
-    // the other members of its overlay sub-group are notified so the session can
-    // set their x_axis to match (an overlay sub-group shares one x-axis).
-    void set_x_axis_listener(std::function<void(std::string_view, std::string_view)> listener);
-    // Push an x_axis value back to the owning element's property through the listener
-    // (the session submits a SetProperty). Used to reconcile a time_us-without-rate
-    // fallback so the control panel and graph follow the effective sample axis.
-    void notify_x_axis(std::string_view element_name, std::string_view x_axis);
 
     [[nodiscard]] std::recursive_mutex &mutex() const;
 
 private:
     std::vector<std::shared_ptr<PlotView>> views_;
-    std::vector<TracePlotSnapshot> trace_snapshots_;
-    std::uint64_t next_snapshot_id_ = 1;
-    bool streaming_ = false;
-    std::map<std::uint64_t, int> trace_indices_;
-    std::map<std::uint64_t, bool> trace_follow_latest_;
-    std::map<std::string, bool> group_trace_locks_;
-    std::map<std::uint64_t, TracePlotDisplayState> trace_display_states_;
-    std::map<std::string, bool> group_control_windows_;
-    std::map<std::uint64_t, PlotAxisView> axis_views_;
-    std::function<void(std::string_view, int)> trace_index_listener_;
-    std::function<void(std::string_view, std::string_view)> x_axis_listener_;
+    std::shared_ptr<TraceView> trace_view_;
     mutable std::recursive_mutex mutex_;
 };
 

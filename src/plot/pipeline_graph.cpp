@@ -4,6 +4,7 @@
 #include "leakflow/core/pipeline.hpp"
 #include "leakflow/core/pipeline_session.hpp"
 #include "leakflow/log/logger.hpp"
+#include "leakflow/plot/trace_view.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -2310,7 +2311,7 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
 
     // Two-way trace-index sync: moving a vertical slider submits a SetProperty so
     // the owning TracePlot's trace_index property (and the gear/graph) follows.
-    plot_runtime.set_trace_index_listener([&session](std::string_view element_name, int trace_index) {
+    plot_runtime.trace_view()->set_trace_index_listener([&session](std::string_view element_name, int trace_index) {
         session.submit(SetPropertyCommand{
             .element_name = std::string(element_name),
             .property_name = "trace_index",
@@ -2319,7 +2320,7 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
     });
 
     // Overlay sub-group x-axis sync: a member's x_axis change propagates to peers.
-    plot_runtime.set_x_axis_listener([&session](std::string_view element_name, std::string_view x_axis) {
+    plot_runtime.trace_view()->set_x_axis_listener([&session](std::string_view element_name, std::string_view x_axis) {
         session.submit(SetPropertyCommand{
             .element_name = std::string(element_name),
             .property_name = "x_axis",
@@ -2483,8 +2484,8 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
     const auto restore = [&]() {
         worker.request_stop();
         worker.join();
-        plot_runtime.set_trace_index_listener(nullptr);
-        plot_runtime.set_x_axis_listener(nullptr);
+        plot_runtime.trace_view()->set_trace_index_listener(nullptr);
+        plot_runtime.trace_view()->set_x_axis_listener(nullptr);
         control_runtime.set_element_mutex(nullptr);
         control_runtime.bind_session(nullptr);
         session.set_observer(previous_observer);
