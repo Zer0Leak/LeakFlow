@@ -1,0 +1,30 @@
+# settings set interpreter.echo-commands false  # Suppress command echoing
+
+# .lldbinit (project-local)
+# ============================================================
+# PyTorch tensors in LLDB:
+#   - Watch/Variables summaries (automatic) via Python module import
+#   - Console command: ptf <expr>
+#
+# This file is for the *command-line* lldb. VS Code / CodeLLDB does NOT auto-load
+# it; that path is wired through .vscode/launch.json ("initCommands"). For CLI use,
+# run lldb from the repo root with cwd-init enabled, e.g.:
+#   lldb -o "settings set target.load-cwd-lldbinit true" ./build/leakflow
+# or simply: lldb -O "command script import ./torch_lldb.py" ./build/leakflow
+#
+# Requires: dtv(const torch::Tensor*) linked into the debug target. That symbol
+# comes from src/debug/tensor_debug.cpp (the leakflow_torch_debug module),
+# linked into ./build/leakflow when the CMake option LEAKFLOW_TORCH_DEBUG is ON
+# (the default).
+# ============================================================
+
+settings set target.prefer-dynamic-value run-target
+settings set target.max-children-count 256
+settings set auto-confirm true
+
+# Console command (manual)
+# Usage: (lldb) ptf x_train
+command regex ptf 's/(.+)/expression -l c++ -- dtv(&(%1))/'
+
+# Import the Python module (registers type summaries)
+command script import torch_lldb.py

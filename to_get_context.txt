@@ -1,0 +1,27 @@
+Read:
+
+1. AGENTS.md
+2. ROADMAP.md
+3. docs/context/START_HERE.md
+4. docs/context/CURRENT_STATE.md
+5. docs/context/ACTIVE_PHASE.md
+6. docs/context/MODULE_MAP.md
+7. docs/context/ARCHITECTURE_CONTRACTS.md
+
+Then read only the relevant docs/context/modules/*.md file for the requested
+task, and inspect source/tests only for that module.
+
+Do not recursively read all root Markdown, include, src, tests, and docs/design
+unless the user explicitly requests a full repository context refresh.
+
+
+
+TODO:
+
+Klass must be an array, not a string like "Source/File/Torch", in leadkflow-ls it is print like this string tough.
+
+
+Trace split to choose train/validation/test.
+
+
+

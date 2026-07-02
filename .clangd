@@ -1,0 +1,6 @@
+Hover:
+  ShowAKA: Yes
+  # Enable doxygen parsing/cleanup in hover
+  # (parses doxygen commands, converts some to markdown-like formatting, etc.)
+  Documentation: Doxygen
+
