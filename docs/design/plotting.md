@@ -259,6 +259,29 @@ shared view is what lets several units/elements stack together in one `group`
 window (the same `group` concept as `TracePlot`, but `ScorePlot` always stacks,
 never overlays).
 
+### TableView / ScoreTablePlot — the scoreboard view
+
+`TableView` (`include/leakflow/plot/table_view.hpp`, `src/plot/table_view.cpp`)
+is a generic table view: a grid of text cells with optional per-cell tint,
+emphasis, and hover, plus a bounded per-element history (an N-scrubber). It draws
+with ImGui (`BeginTable`), not ImPlot, and stays domain-free.
+
+`ScoreTablePlot` (in `leakflow_plugins_crypto_plot`) is the element that fills it
+from `AttackStatsPayload`. It complements `ScorePlot`: where the score plot shows
+convergence *over N*, the table is the *current scoreboard* — **columns are the
+attack units, rows are the ranked candidate guesses** (each cell = guess + score),
+sorted by score (default) or by guess value, with the correct-key cell tinted and
+the best-by-score cell emphasized. It reads `top_k`/`true_rank`/`true_guess` from
+`AttackStats`, so it shares ScorePlot's exact wiring (one `AttackStats ! Tee` can
+feed both) and needs no separate truth pad; setting `AttackStats(top_k=256)` makes
+every guess a row without changing the plot.
+
+Because the table is "the state at the current N", it is agnostic to *how* N
+arrives: a live source pushes a frame per buffer (kept up to `max_history`, an
+N-scrubber), and an offline source pushes exactly one frame — the final result,
+held on screen after EOS. Same element, no live/offline mode switch. History
+trimming: `max_history` = `1` replace (default), `N` keep last N, `0` unbounded.
+
 See `docs/context/modules/plot.md` for the module-boundary summary and
 `docs/design/cpa_attack.md` for the score/rank semantics.
 
@@ -415,13 +438,15 @@ Manual smoke examples:
 
 ## Future Plot Elements
 
-Implemented so far: `TracePlot` (trace view) and `ScorePlot` (score view, in
-`leakflow_plugins_crypto_plot`). Each is one `PlotView` behind the registry
-above, so the next plot types below are new views + elements, not runtime edits:
+Implemented so far: `TracePlot` (trace view), `ScorePlot` (score view), and
+`ScoreTablePlot` (table view) — the last two in `leakflow_plugins_crypto_plot`.
+Each is one `PlotView` behind the registry above, so the next plot types below
+are new views + elements, not runtime edits:
 
 - `RankPlot` / guessing-entropy convergence,
-- a tabular `AttackTablePlot`,
 - `CorrelationPlot` / `PoiOverlayPlot`,
+- a `[U,G]` correlation/score **heatmap** (the dense full-field view a table
+  should not be),
 - `SpectrumPlot`,
 - report/export helpers for AES validation.
 

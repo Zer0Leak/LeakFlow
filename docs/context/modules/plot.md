@@ -27,9 +27,9 @@ Tests:
 - `leakflow_plot`: ImGui/ImPlot runtime and backend support; owns `PlotView` and
   the registry (`ScoreView` lives here — display data only, domain-free).
 - `leakflow_plugins_plot`: plot plugin family with `TracePlot`.
-- `leakflow_plugins_crypto_plot`: crypto→plot bridge; the `ScorePlot` element
-  reads `AttackStatsPayload` and fills a `ScoreView`. Depends on
-  `leakflow_plugins_crypto` + `leakflow_plot`.
+- `leakflow_plugins_crypto_plot`: crypto→plot bridge; `ScorePlot` fills a
+  `ScoreView` and `ScoreTablePlot` fills a `TableView`, both from
+  `AttackStatsPayload`. Depends on `leakflow_plugins_crypto` + `leakflow_plot`.
 
 ## Dependency Boundary
 
@@ -139,12 +139,20 @@ unknown), per-unit "latest wrong key" vertical lines, draggable panel heights.
 Its display data is generic (panels/series/points), so `leakflow_plot` stays
 domain-free of CPA.
 
+`TableView` (`include/leakflow/plot/table_view.hpp`, `src/plot/table_view.cpp`)
+is a generic ImGui-table view (cells + tint + hover + a bounded history
+scrubber). `ScoreTablePlot` fills it from `AttackStatsPayload` as a scoreboard:
+units as columns, ranked guesses as rows, correct-key cell tinted. It works the
+same live (a frame per buffer, kept to `max_history`) and offline (one frame =
+final result), so it needs no live/offline switch.
+
 `ScorePlot`, the element that fills a `ScoreView`, lives in the separate
 `leakflow_plugins_crypto_plot` target (depends on `leakflow_plugins_crypto` +
 `leakflow_plot`) because it reads the crypto `AttackStatsPayload` directly. Its
 factory (`crypto_plot::register_element_factories(registry, runtime)`) creates
-one `ScoreView`, registers it with the shared `PlotRuntime`, and hands it to
-every `ScorePlot`, so all score elements/units stack together in one `group`
+one `ScoreView` and one `TableView`, registers both with the shared `PlotRuntime`,
+and hands the `ScoreView` to every `ScorePlot` and the `TableView` to every
+`ScoreTablePlot` — so all score elements/units stack together in one `group`
 window (`ScorePlot` always stacks; it never overlays). Design:
 `docs/design/plotting.md` (Plot View Architecture) and `docs/design/cpa_attack.md`.
 

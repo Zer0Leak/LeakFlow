@@ -415,9 +415,18 @@ Useful plot/converter elements:
 ```text
 AttackStatsToPlotAnnotations    // implemented
 ScorePlot                       // implemented (leakflow_plugins_crypto_plot)
+ScoreTablePlot                  // implemented (leakflow_plugins_crypto_plot)
 CpaRankPlot                     // future
-CpaCorrelationPlot              // future
+CpaCorrelationPlot              // future (dense [U,G] heatmap)
 ```
+
+`ScoreTablePlot` is the tabular companion to `ScorePlot`: it consumes the same
+`AttackStatsPayload` and renders a live scoreboard — attack units as columns,
+ranked candidate guesses as rows (cell = guess + score), sorted by score or by
+guess, with the correct-key cell highlighted via `true_guess`/`true_rank`. It
+works both live (a frame per streamed buffer) and offline (one frame = the final
+one-shot ranking), and `AttackStats(top_k=256)` turns it into the full per-unit
+guess table.
 
 Useful visualizations:
 

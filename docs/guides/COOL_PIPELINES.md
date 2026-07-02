@@ -287,15 +287,16 @@ Notes:
 - Increase `trace_rate` on the `FakeLiveSrc` sources to watch the convergence pace;
   drop `@key_src ! @stats.truth` to run without truth (markers become circles).
 
-## AES Sync CPA Live — TracePlot + ScorePlot Together
+## AES Sync CPA Live — TracePlot + ScorePlot + ScoreTablePlot Together
 
-The full live CPA workflow with **both** plot views open at once: `TracePlot`
+The full live CPA workflow with **all three** plot views open at once: `TracePlot`
 shows the trace with each byte's best-correlation sample annotated (via
-`AttackStatsToPlotAnnotations`), and `ScorePlot` shows the score / relative-margin
-convergence with the second-best score overlaid (`show_second_score=true`). A
-`Tee` after the trace queue fans traces to the plot and the attack; a `Tee` after
-`AttackStats` fans the stats to the annotation converter and the score plot. Uses
-the full checked-out `traces/` dataset (swap in the
+`AttackStatsToPlotAnnotations`), `ScorePlot` shows the score / relative-margin
+convergence with the second-best score overlaid (`show_second_score=true`), and
+`ScoreTablePlot` shows the live scoreboard (units × ranked guesses). A `Tee` after
+the trace queue fans traces to the plot and the attack; a `Tee` after `AttackStats`
+fans the stats three ways — to the annotation converter, the score plot, and the
+score table. Uses the full checked-out `traces/` dataset (swap in the
 `tests/fixtures/aes/sync/key_01/*_first_50.pt` files for a quick smoke run).
 
 ```bash
@@ -314,6 +315,7 @@ leakflow --log-level warning run --graph \
    AttackStatsToPlotAnnotations@ann(precision=3); \
    TracePlot@plot(title="AES CPA byte 0 - best correlation sample",group=cpa,label=traces,x_axis=sample); \
    ScorePlot@scoreplot(show_second_score=true); \
+   ScoreTablePlot@scoretable(title="CPA scoreboard",sort=score,max_history=50); \
    @traces_src ! @traces_queue ! @trace_tee; \
       @trace_tee.src_0 ! @plot.sink; \
       @trace_tee.src_1 ! @attack_sync.in_0; \
@@ -325,15 +327,19 @@ leakflow --log-level warning run --graph \
    @key_src ! @stats.truth; \
    @stats ! @stats_tee; \
       @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @scoreplot'
+      @stats_tee.src_1 ! @scoreplot; \
+      @stats_tee.src_2 ! @scoretable'
 ```
 
 Notes:
 
-- Both plots are `PlotView`s sharing one window loop: `TracePlot` fills the
-  built-in `TraceView` (group `cpa`), `ScorePlot` fills a `ScoreView` (always
-  stacked). Neither special-cases the runtime — see
-  `docs/design/plotting.md` (Plot View Architecture).
+- All three plots are `PlotView`s sharing one window loop: `TracePlot` fills the
+  built-in `TraceView` (group `cpa`), `ScorePlot` fills a `ScoreView`, and
+  `ScoreTablePlot` fills a `TableView` (both always stacked). None special-cases
+  the runtime — see `docs/design/plotting.md` (Plot View Architecture).
+- `@stats_tee.src_2 ! @scoretable` is the third `Tee` branch — `Tee` grows a new
+  `src_%u` pad on demand, so the same `AttackStats` feeds annotations, curves, and
+  the scoreboard. `max_history=50` keeps the last 50 updates for the N-scrubber.
 - `ScorePlot@scoreplot(show_second_score=true)` also plots the second-best score
   per byte in the score panel, same colour as the byte's line, toggled by a single
   legend entry. It needs `AttackStats(top_k>=2)` — here `top_k=3`. The toggle is a
@@ -348,6 +354,74 @@ Notes:
   separate row by row.
 - Drop `@key_src ! @stats.truth` to run without truth (all markers become circles,
   and `ScorePlot` shows no "latest wrong key" lines).
+
+## AES Sync CPA Scoreboard (ScoreTablePlot)
+
+`ScoreTablePlot` (in `leakflow_plugins_crypto_plot`) reads the same `AttackStats`
+results as `ScorePlot` and renders a live **scoreboard**: attack units as columns,
+the ranked candidate guesses as rows (each cell = guess + score), sorted by score
+(default) or by guess, with the correct-key cell highlighted. It complements the
+convergence curves with an "is the key recovered, and by how much margin?" view.
+
+**Offline (one-shot final ranking).** A file source runs the attack once and the
+table holds the final result on screen after EOS — no Sync/Queue needed:
+
+```bash
+leakflow --log-level info run --graph \
+  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); \
+   TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); \
+   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
+   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   CpaAttack@attack(compute_dtype=float64,correlation_mode=recompute); \
+   AttackStats@stats(top_k=8); \
+   ScoreTablePlot@table(title="CPA scoreboard",sort=score); \
+   @traces_src ! @attack.features; \
+   @plain_src ! @hyp.plaintexts; \
+   @hyp ! @attack.hypotheses; \
+   @attack ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @table'
+```
+
+**Live (scoreboard refreshing, with history).** A `FakeLiveSrc` streams rows; the
+table updates each buffer and keeps the last `max_history` frames so you can scrub
+back through how the ranking settled:
+
+```bash
+leakflow --log-level warning run --graph \
+  'FakeLiveSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt,trace_rate=0); \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt,trace_rate=0); \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
+   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
+   AttackStats@stats(top_k=8); \
+   ScoreTablePlot@table(title="CPA scoreboard",sort=score,max_history=50); \
+   @traces_src ! @traces_queue ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @table'
+```
+
+Notes:
+
+- Same `AttackStats` source as `ScorePlot`, so a single `AttackStats ! Tee` can
+  feed both a `ScorePlot` (curves) and a `ScoreTablePlot` (scoreboard) in one run;
+  put them in the same `group` to stack them in one window.
+- `sort=score` (default) ranks each unit's guesses best-first; `sort=guess` orders
+  each column by guess value. The correct-key cell is tinted (needs
+  `@key_src ! @stats.truth`); hover any cell for the unit's true rank / success.
+- Rows are capped at `AttackStats(top_k=…)`; set `top_k=256` for the full per-unit
+  guess table. `max_history`: `1` = replace (current only, default), `N` = keep the
+  last N frames (an N-scrubber appears), `0` = unbounded.
+- Offline (`TorchFileSrc`) and live (`FakeLiveSrc`) use the *same* element — the
+  table is just "the ranked state at the current N", so it needs no mode switch.
 
 ## Live Synchronized Version
 

@@ -2,7 +2,9 @@
 
 #include "leakflow/plot/plot_runtime.hpp"
 #include "leakflow/plot/score_view.hpp"
+#include "leakflow/plot/table_view.hpp"
 #include "leakflow/plugins/crypto_plot/score_plot.hpp"
+#include "leakflow/plugins/crypto_plot/score_table_plot.hpp"
 #include "crypto_plot_plugin_constants.hpp"
 
 #include <memory>
@@ -24,6 +26,7 @@ std::vector<PluginDescriptor> plugin_descriptors()
             .elements =
                 {
                     ScorePlot::descriptor(),
+                    ScoreTablePlot::descriptor(),
                 },
         }),
     };
@@ -55,17 +58,21 @@ void register_element_factories(
         throw std::invalid_argument("ScorePlot factory registration requires a PlotRuntime");
     }
 
-    // One ScoreView shared by every ScorePlot in this run: it is the score registry
-    // (all units/elements stack in one group window) and is registered with the
-    // PlotRuntime so the UI draws and clears it alongside the trace plots.
-    auto view = std::make_shared<leakflow::plot::ScoreView>();
-    runtime->add_view(view);
+    // One view per plot type, shared by every element of that type in this run, each
+    // registered with the PlotRuntime so the UI draws/clears it alongside the traces.
+    auto score_view = std::make_shared<leakflow::plot::ScoreView>();
+    runtime->add_view(score_view);
+    auto table_view = std::make_shared<leakflow::plot::TableView>();
+    runtime->add_view(table_view);
 
     registry.register_plugin(
         plugin_descriptors().front(),
         {
-            {"ScorePlot", [view = std::move(view)](std::string name) {
+            {"ScorePlot", [view = std::move(score_view)](std::string name) {
                  return std::make_shared<ScorePlot>(view, std::move(name));
+             }},
+            {"ScoreTablePlot", [view = std::move(table_view)](std::string name) {
+                 return std::make_shared<ScoreTablePlot>(view, std::move(name));
              }},
         });
 }

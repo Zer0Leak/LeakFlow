@@ -1,6 +1,7 @@
 add_library(leakflow_plugins_crypto_plot SHARED
     descriptor_catalog.cpp
     score_plot.cpp
+    score_table_plot.cpp
 )
 target_compile_features(leakflow_plugins_crypto_plot PUBLIC cxx_std_23)
 target_include_directories(leakflow_plugins_crypto_plot
