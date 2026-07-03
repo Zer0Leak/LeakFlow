@@ -635,14 +635,28 @@ int main()
         plot_plugin::TracePlot ui_plot(ui_runtime, "ui_plot");
         ui_plot.set_property("center0", false); // before any buffer: no snapshot, must not crash
         (void)ui_plot.process(make_trace_buffer(4));
+        auto &axis_view =
+            ui_runtime->trace_view()->mutable_axis_view(ui_runtime->trace_view()->trace_snapshots().front().id);
+        axis_view.y_fit_initialized = true;
+        axis_view.y_user_adjusted = true;
         ui_plot.set_property("center0", true);
         if (!expect(ui_runtime->trace_view()->trace_snapshots().front().center0,
                     "TracePlot center0 change should self-apply to the snapshot without a rerun")) {
             return 1;
         }
+        if (!expect(!axis_view.y_fit_initialized && !axis_view.y_user_adjusted,
+                    "TracePlot center0 change should request a fresh y-axis fit")) {
+            return 1;
+        }
+        axis_view.y_fit_initialized = true;
+        axis_view.y_user_adjusted = true;
         ui_plot.set_property("center0", false);
         if (!expect(!ui_runtime->trace_view()->trace_snapshots().front().center0,
                     "TracePlot center0=false should self-apply to the snapshot")) {
+            return 1;
+        }
+        if (!expect(!axis_view.y_fit_initialized && !axis_view.y_user_adjusted,
+                    "TracePlot center0=false should request a fresh y-axis fit")) {
             return 1;
         }
         ui_plot.set_property("title", std::string("updated"));

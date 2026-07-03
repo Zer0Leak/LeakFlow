@@ -1453,11 +1453,32 @@ std::uint64_t TraceView::add_trace(TracePlotSnapshot snapshot) {
     trace_snapshots_.push_back(std::move(snapshot));
     return id;
 }
-bool TraceView::refresh_trace_display(const TracePlotSnapshot &update) {
+bool TraceView::refresh_trace_display(const TracePlotSnapshot &update, bool force_y_refit) {
     const auto lock = std::scoped_lock(mutex_);
     for (auto &existing : trace_snapshots_) {
         if (existing.element_name != update.element_name) {
             continue;
+        }
+        if (force_y_refit) {
+            std::vector<const TracePlotSnapshot *> group_members;
+            for (const auto &candidate : trace_snapshots_) {
+                if (candidate.group == existing.group) {
+                    group_members.push_back(&candidate);
+                }
+            }
+            for (const auto &panel : build_trace_panels(ordered_snapshots(*this, group_members))) {
+                const bool contains =
+                    std::any_of(panel.snapshots.begin(), panel.snapshots.end(),
+                                [&existing](const auto *snapshot) { return snapshot->id == existing.id; });
+                if (!contains || panel.snapshots.empty()) {
+                    continue;
+                }
+                if (auto found = axis_views_.find(panel.snapshots.front()->id); found != axis_views_.end()) {
+                    found->second.y_fit_initialized = false;
+                    found->second.y_user_adjusted = false;
+                }
+                break;
+            }
         }
         existing.group = update.group.empty() ? "default" : update.group;
         existing.label = update.label;

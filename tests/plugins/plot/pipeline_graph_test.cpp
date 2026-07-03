@@ -207,6 +207,18 @@ int main() {
     if (!expect(controls.is_open("control"), "control runtime did not open element controls")) {
         return 1;
     }
+    if (!expect(controls.take_focus_request("control"),
+                "control runtime did not request focus when opening element controls")) {
+        return 1;
+    }
+    if (!expect(!controls.take_focus_request("control"), "control runtime focus request was not consumed")) {
+        return 1;
+    }
+    controls.open("control");
+    if (!expect(controls.take_focus_request("control"),
+                "control runtime did not request focus when reopening already-open element controls")) {
+        return 1;
+    }
     controls.close("control");
     if (!expect(!controls.is_open("control"), "control runtime did not close element controls")) {
         return 1;

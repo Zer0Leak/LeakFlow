@@ -42,7 +42,7 @@ class TracePlot final : public Element {
     void update_active_update_mode();
     // Apply ui-control (presentation) property changes to this element's registered
     // snapshot directly, so they show immediately in any state without a rerun.
-    void refresh_display();
+    void refresh_display(bool force_y_refit = false);
     void property_changed(std::string_view name) override;
     void live_driven_changed() override;
 

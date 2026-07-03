@@ -33,9 +33,11 @@ public:
     // leaving captured data (id, values, shape, annotations, accumulate) untouched.
     // Used by TracePlot to
     // self-apply a ui-control property change with no rerun. No-op if the element has
-    // not registered a snapshot yet. Returns true when x_axis=time_us had no sample
-    // rate and fell back to sample (the caller resets the property).
-    bool refresh_trace_display(const TracePlotSnapshot &update);
+    // not registered a snapshot yet. force_y_refit clears stored panel y-axis zoom
+    // state so explicit controls like center0 apply on the next draw. Returns true
+    // when x_axis=time_us had no sample rate and fell back to sample (the caller
+    // resets the property).
+    bool refresh_trace_display(const TracePlotSnapshot &update, bool force_y_refit = false);
 
     [[nodiscard]] const std::vector<TracePlotSnapshot> &trace_snapshots() const;
 

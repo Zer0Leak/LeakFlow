@@ -1097,6 +1097,9 @@ void draw_open_element_control_windows(PipelineControlRuntime &runtime) {
         auto open = true;
         const auto title = std::string("Controls: ") + element_name;
         ImGui::SetNextWindowSize(ImVec2(560.0F, 360.0F), ImGuiCond_FirstUseEver);
+        if (runtime.take_focus_request(element_name)) {
+            ImGui::SetNextWindowFocus();
+        }
         if (ImGui::Begin(title.c_str(), &open)) {
             if (have_elements) {
                 draw_element_controls(runtime, runtime.element(element_name));
@@ -1398,6 +1401,7 @@ void PipelineControlRuntime::bind(std::shared_ptr<Element> element) {
 void PipelineControlRuntime::clear() {
     elements_.clear();
     open_elements_.clear();
+    focus_element_.reset();
     text_edit_states_.clear();
     changes_.clear();
     last_error_.reset();
@@ -1429,7 +1433,9 @@ std::shared_ptr<Element> PipelineControlRuntime::element(std::string_view elemen
 
 void PipelineControlRuntime::open(std::string_view element_name) {
     if (has_element(element_name)) {
-        open_elements_.insert(std::string(element_name));
+        auto name = std::string(element_name);
+        open_elements_.insert(name);
+        focus_element_ = std::move(name);
     }
 }
 
@@ -1437,6 +1443,14 @@ void PipelineControlRuntime::close(std::string_view element_name) { open_element
 
 bool PipelineControlRuntime::is_open(std::string_view element_name) const {
     return open_elements_.contains(std::string(element_name));
+}
+
+bool PipelineControlRuntime::take_focus_request(std::string_view element_name) {
+    if (focus_element_ && *focus_element_ == element_name) {
+        focus_element_.reset();
+        return true;
+    }
+    return false;
 }
 
 void PipelineControlRuntime::set_edits_enabled(bool enabled) { edits_enabled_ = enabled; }

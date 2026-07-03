@@ -121,6 +121,7 @@ public:
     void open(std::string_view element_name);
     void close(std::string_view element_name);
     [[nodiscard]] bool is_open(std::string_view element_name) const;
+    [[nodiscard]] bool take_focus_request(std::string_view element_name);
 
     void set_edits_enabled(bool enabled);
     [[nodiscard]] bool edits_enabled() const;
@@ -168,6 +169,7 @@ private:
 
     std::map<std::string, std::weak_ptr<Element>> elements_;
     std::set<std::string> open_elements_;
+    std::optional<std::string> focus_element_;
     std::map<std::string, TextEditState> text_edit_states_;
     std::map<std::string, ColorEditState> color_edit_states_;
     std::vector<PipelineControlChange> changes_;

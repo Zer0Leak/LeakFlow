@@ -562,14 +562,14 @@ bool TracePlot::resolve_accumulate()
 
 void TracePlot::update_active_update_mode() { (void)resolve_accumulate(); }
 
-void TracePlot::refresh_display()
+void TracePlot::refresh_display(bool force_y_refit)
 {
     const auto accumulate = resolve_accumulate_for(string_property_or(*this, "update_mode", "auto"), is_live_driven());
     const auto sample_rate = double_property_or(*this, "sample_rate_hz", 0.0);
     leakflow::plot::TracePlotSnapshot snapshot;
     assign_display_properties(*this, snapshot, accumulate,
         sample_rate > 0.0 ? std::optional<double>(sample_rate) : std::nullopt);
-    if (view_->refresh_trace_display(snapshot)) {
+    if (view_->refresh_trace_display(snapshot, force_y_refit)) {
         // The live snapshot had no rate, so x_axis=time_us fell back to sample. Warn
         // once and reset the property so the control panel and graph follow the plot
         // (no rerun; the session applies the reset like any ui-control change).
@@ -587,7 +587,7 @@ void TracePlot::property_changed(std::string_view name)
     // shows immediately in any player state, with no rerun. No-op before the first
     // buffer (no snapshot registered yet). active_update_mode is read-only and is set
     // through set_read_only_property, which does not call property_changed.
-    refresh_display();
+    refresh_display(name == "center0");
 }
 
 void TracePlot::live_driven_changed() { update_active_update_mode(); }
