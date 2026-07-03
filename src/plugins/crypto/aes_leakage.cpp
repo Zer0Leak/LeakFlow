@@ -219,7 +219,7 @@ ElementDescriptor AesLeakage::descriptor() {
       .type_name = "AesLeakage",
       .klass = "Analyze/SCA/Crypto/LeakageModel",
       .purpose =
-          "compute AES Hamming-weight leakage targets for selected state bytes",
+          "compute AES first-round leakage targets for selected state bytes",
       .input_pads =
           {
               Pad("traces", PadDirection::Input,
@@ -258,12 +258,18 @@ ElementDescriptor AesLeakage::descriptor() {
                   StringList{aes_leakage_channel_hw_y},
                   "leakage channels to output; order controls output axis 2",
                   "", std::monostate{},
-                  "allowed values: HW(m), HW(m_xor_k), HW(y)",
+                  "allowed values: HW(m), HW(m_xor_k), HW(y), y(0)..y(7)",
                   PropertyEffect{
                       .kind = PropertyEffectKind::PayloadOutput,
                       .scope = PropertyInvalidationScope::Downstream,
                       .output_pads = {"leakage"},
                   }),
+          },
+      .telemetry_specs =
+          {
+              make_duration_telemetry_spec(
+                  "leakage_compute",
+                  "time computing the AES leakage tensor"),
           },
       .keywords = {"aes", "sca", "leakage", aes_leakage_model_id, "crypto"},
       .metadata_set_by_element =
@@ -285,6 +291,7 @@ ElementDescriptor AesLeakage::descriptor() {
                       aes_leakage_channel_hw_m,
                       aes_leakage_channel_hw_m_xor_k,
                       aes_leakage_channel_hw_y,
+                      std::string(aes_leakage_channel_y_bits[0]),
                   }),
               make_element_metadata_descriptor(
                   "payload.crypto.algorithm", std::string(),
@@ -299,12 +306,6 @@ ElementDescriptor AesLeakage::descriptor() {
                   "payload.trace.input", std::string(),
                   "whether the required traces pad was connected",
                   {"connected", "unconnected"}, {}, "connected or unconnected"),
-          },
-      .telemetry_specs =
-          {
-              make_duration_telemetry_spec(
-                  "leakage_compute",
-                  "time computing the AES Hamming-weight leakage tensor"),
           },
   };
 }

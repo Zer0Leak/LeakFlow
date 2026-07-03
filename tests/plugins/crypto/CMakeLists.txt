@@ -28,6 +28,16 @@ target_link_libraries(leakflow_plugins_crypto_cpa_attack_tests
 leakflow_configure_test_target(leakflow_plugins_crypto_cpa_attack_tests)
 add_test(NAME leakflow_plugins_crypto_cpa_attack COMMAND leakflow_plugins_crypto_cpa_attack_tests)
 
+add_executable(leakflow_plugins_crypto_dpa_attack_tests
+    dpa_attack_test.cpp
+)
+target_link_libraries(leakflow_plugins_crypto_dpa_attack_tests
+    PRIVATE
+        leakflow_plugins_crypto
+)
+leakflow_configure_test_target(leakflow_plugins_crypto_dpa_attack_tests)
+add_test(NAME leakflow_plugins_crypto_dpa_attack COMMAND leakflow_plugins_crypto_dpa_attack_tests)
+
 add_executable(leakflow_plugins_crypto_attack_stats_to_plot_annotations_tests
     attack_stats_to_plot_annotations_test.cpp
 )

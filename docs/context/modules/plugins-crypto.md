@@ -40,18 +40,19 @@ CLI/inspect files if affected:
 ## Current Elements
 
 - `AesLeakage` (`Analyze/SCA/Crypto/LeakageModel`): computes AES first-round S-box
-  Hamming-weight leakage targets. Required `traces` and `plaintexts` sink pads, an
-  optional `keys` sink pad (required at runtime for `HW(m xor k)`/`HW(y)`). Output
+  leakage targets. Required `traces` and `plaintexts` sink pads, an optional
+  `keys` sink pad (required at runtime for `HW(m xor k)`/`HW(y)`/`y(n)`). Output
   is a Torch `uint8` `[B,N,C]` leakage tensor. Properties: `byte_indexes` (default
-  all 16), `channels` (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`; default
-  `[HW(y)]`; `payload-output`, downstream invalidation on `leakage`).
+  all 16), `channels` (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and
+  `y(0)` through `y(7)`; default `[HW(y)]`; `payload-output`, downstream
+  invalidation on `leakage`).
 - `AesLeakageHypothesis` (`Analyze/SCA/Crypto/Hypothesis`): computes AES
   first-round predicted leakage hypotheses for every selected byte and guess.
   Required `plaintexts` sink pad. Output is a Torch `uint8` `[U,G,N,L]`
   hypothesis tensor. Properties: `byte_indexes` (default all 16), `channels`
-  (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`; default `[HW(y)]`),
-  `guess_values` (`[]` means full AES byte domain `0..255`; `payload-output`,
-  downstream invalidation on `hypotheses`).
+  (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and `y(0)` through `y(7)`;
+  default `[HW(y)]`), `guess_values` (`[]` means full AES byte domain `0..255`;
+  `payload-output`, downstream invalidation on `hypotheses`).
 - `CpaAttack` (`Analyze/SCA/Attack/CPA`): generic Pearson CPA ranker. Required
   named inputs: `features` (`[N,S]` or `[U,N,S]` Torch tensor) and `hypotheses`
   (`[U,G,N,L]` Torch tensor). Emits `AttackScoresPayload` with `scores [U,G]`,
@@ -62,6 +63,18 @@ CLI/inspect files if affected:
   `correlation_mode=auto|recompute|incremental`, read-only
   `active_correlation_mode`, `compute_dtype=input|float32|float64`, and
   `epsilon`. In incremental active mode, `can_replay()` is false.
+- `DpaAttack` (`Analyze/SCA/Attack/DPA`): generic difference-of-means DPA ranker.
+  Required named inputs: `features` (`[N,S]` or `[U,N,S]` Torch tensor) and binary
+  `hypotheses` (`[U,G,N,L]` Torch tensor, values `0/1`). Emits the same
+  `AttackScoresPayload` contract as `CpaAttack`, so `AttackStats`,
+  `AttackStatsToPlotAnnotations`, `ScorePlot`, and `ScoreTablePlot` connect
+  unchanged. The default score is the max absolute
+  `mean(group1)-mean(group0)` over channel/sample. Properties include
+  `score_method=max_abs|max_positive|max_negative`,
+  `score_channels=guess_dependent|all`,
+  `accumulation_mode=auto|recompute|incremental`, read-only
+  `active_accumulation_mode`, `compute_dtype=input|float32|float64`, and `top_k`.
+  In incremental active mode, `can_replay()` is false.
 - `AttackStats` (`Analyze/SCA/Attack/Stats`): known-key diagnostics for an attack
   score result. Inputs: `scores` (`leakflow/attack-scores`) and an **optional**
   `truth` Torch tensor (`[U]`, `[1,U]`, `[16]`, or AES key-like `[N,16]`). Without

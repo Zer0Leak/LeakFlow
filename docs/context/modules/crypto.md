@@ -69,7 +69,8 @@ Byte-index-list Torch leakage helpers return:
   byte-index order.
 
 The shared first-round leakage-channel helper accepts ordered channel values
-`HW(m)`, `HW(m_xor_k)`, and `HW(y)`. Known-key mode returns:
+`HW(m)`, `HW(m_xor_k)`, `HW(y)`, and the S-box output bit channels `y(0)` through
+`y(7)` (`y(0)` is the least significant bit). Known-key mode returns:
 
 - `leakage`: `[U,N,L]` `uint8`,
 
@@ -80,8 +81,8 @@ Guess-domain mode accepts `guess_values [G]` and returns:
 
 - `hypotheses`: `[U,G,N,L]` `uint8`.
 
-`HW(m)` is guess/key-independent. `HW(m_xor_k)` and `HW(y)` are
-guess/key-dependent.
+`HW(m)` is guess/key-independent. `HW(m_xor_k)`, `HW(y)`, and `y(0)` through
+`y(7)` are guess/key-dependent.
 
 Accepted Torch key inputs:
 

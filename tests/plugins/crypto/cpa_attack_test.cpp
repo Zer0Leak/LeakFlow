@@ -501,18 +501,22 @@ int main()
     if (!expect(descriptors.size() == 1, "crypto plugin descriptor count changed")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 7, "crypto plugin element count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 8, "crypto plugin element count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[2].type_name == "CpaAttack",
             "CpaAttack descriptor type name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[3].type_name == "AttackStats",
+    if (!expect(descriptors[0].elements[3].type_name == "DpaAttack",
+            "DpaAttack descriptor type name was wrong")) {
+        return 1;
+    }
+    if (!expect(descriptors[0].elements[4].type_name == "AttackStats",
             "AttackStats descriptor type name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements[4].type_name == "AttackStatsToPlotAnnotations",
+    if (!expect(descriptors[0].elements[5].type_name == "AttackStatsToPlotAnnotations",
             "AttackStatsToPlotAnnotations descriptor type name was wrong")) {
         return 1;
     }

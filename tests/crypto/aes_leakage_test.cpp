@@ -258,24 +258,26 @@ int main()
         leakflow::crypto::aes::first_round_leakage_channel_hw_m,
         leakflow::crypto::aes::first_round_leakage_channel_hw_m_xor_k,
         leakflow::crypto::aes::first_round_leakage_channel_hw_y,
+        std::string(leakflow::crypto::aes::first_round_leakage_channel_y_bits[0]),
+        std::string(leakflow::crypto::aes::first_round_leakage_channel_y_bits[7]),
     };
     const auto parsed_channels = leakflow::crypto::aes::parse_first_round_leakage_channels(channel_names);
     const auto parsed_channel_span =
         std::span<const leakflow::crypto::aes::FirstRoundLeakageChannel>(
             parsed_channels.data(),
             parsed_channels.size());
-    if (!expect(parsed_channels.size() == 3, "AES leakage channel parsing changed")) {
+    if (!expect(parsed_channels.size() == 5, "AES leakage channel parsing changed")) {
         return 1;
     }
     if (!expect(
             leakflow::crypto::aes::first_round_leakage_channels_metadata(parsed_channel_span)
-                == "HW(m),HW(m_xor_k),HW(y)",
+                == "HW(m),HW(m_xor_k),HW(y),y(0),y(7)",
             "AES leakage channel metadata changed")) {
         return 1;
     }
     if (!expect(
             leakflow::crypto::aes::first_round_leakage_channel_dependencies_metadata(parsed_channel_span)
-                == "false,true,true",
+                == "false,true,true,true,true",
             "AES leakage channel dependency metadata changed")) {
         return 1;
     }
@@ -291,7 +293,7 @@ int main()
         byte_indexes,
         parsed_channel_span);
     if (!expect(shared_known_leakage.dim() == 3 && shared_known_leakage.size(0) == 2
-            && shared_known_leakage.size(1) == 2 && shared_known_leakage.size(2) == 3,
+            && shared_known_leakage.size(1) == 2 && shared_known_leakage.size(2) == 5,
             "shared known-key leakage shape mismatch")) {
         return 1;
     }
@@ -321,6 +323,24 @@ int main()
             2,
             known_0.hw_y,
             "shared known-key HW(y) mismatch")) {
+        return 1;
+    }
+    if (!expect_leakage_channel(
+            shared_known_leakage,
+            0,
+            0,
+            3,
+            static_cast<Byte>((known_0.y >> 0U) & Byte{1}),
+            "shared known-key y(0) mismatch")) {
+        return 1;
+    }
+    if (!expect_leakage_channel(
+            shared_known_leakage,
+            0,
+            0,
+            4,
+            static_cast<Byte>((known_0.y >> 7U) & Byte{1}),
+            "shared known-key y(7) mismatch")) {
         return 1;
     }
 
@@ -358,7 +378,7 @@ int main()
         parsed_channel_span);
     if (!expect(hypotheses.dim() == 4 && hypotheses.size(0) == 2
             && hypotheses.size(1) == 2 && hypotheses.size(2) == 2
-            && hypotheses.size(3) == 3,
+            && hypotheses.size(3) == 5,
             "shared guess-domain hypothesis shape mismatch")) {
         return 1;
     }
@@ -391,6 +411,26 @@ int main()
             2,
             known_0.hw_y,
             "guess-domain HW(y) mismatch for contained guess")) {
+        return 1;
+    }
+    if (!expect_hypothesis_channel(
+            hypotheses,
+            0,
+            1,
+            0,
+            3,
+            static_cast<Byte>((known_0.y >> 0U) & Byte{1}),
+            "guess-domain y(0) mismatch for contained guess")) {
+        return 1;
+    }
+    if (!expect_hypothesis_channel(
+            hypotheses,
+            0,
+            1,
+            0,
+            4,
+            static_cast<Byte>((known_0.y >> 7U) & Byte{1}),
+            "guess-domain y(7) mismatch for contained guess")) {
         return 1;
     }
 

@@ -16,11 +16,29 @@ namespace leakflow::crypto::aes {
 inline constexpr auto first_round_leakage_channel_hw_m = "HW(m)";
 inline constexpr auto first_round_leakage_channel_hw_m_xor_k = "HW(m_xor_k)";
 inline constexpr auto first_round_leakage_channel_hw_y = "HW(y)";
+inline constexpr std::array<std::string_view, 8> first_round_leakage_channel_y_bits{
+    "y(0)",
+    "y(1)",
+    "y(2)",
+    "y(3)",
+    "y(4)",
+    "y(5)",
+    "y(6)",
+    "y(7)",
+};
 
 enum class FirstRoundLeakageChannel {
     HwM,
     HwMXorK,
     HwY,
+    YBit0,
+    YBit1,
+    YBit2,
+    YBit3,
+    YBit4,
+    YBit5,
+    YBit6,
+    YBit7,
 };
 
 inline constexpr std::array<Byte, 256> sbox_table{

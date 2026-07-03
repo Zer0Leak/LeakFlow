@@ -37,10 +37,12 @@ support:
 - `leakflow_log` exists and wraps spdlog behind a LeakFlow-owned logging API.
 - `leakflow_plot` exists and provides the ImGui/ImPlot plot runtime.
 - `leakflow_crypto` exists and provides Hamming weight/distance helpers plus
-  AES first-round S-box leakage helpers.
+  AES first-round S-box leakage helpers, including `y(0)`..`y(7)` S-box output
+  bit channels.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
-  guess-domain leakage hypotheses, generic Pearson CPA ranking, generic
-  known-key attack stats, attack stats plot-annotation conversion, Pearson PoI finding, and
+  guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
+  difference-of-means ranking, generic known-key attack stats, attack stats
+  plot-annotation conversion, Pearson PoI finding, and
   correlation-PoI-to-plot-annotation conversion elements.
 - `leakflow_plugins_plot` exists and provides sink-only `TracePlot`.
 - `TracePlot` accepts optional generic plot annotations and renders selected
@@ -204,7 +206,7 @@ remain deferred as low-priority future infrastructure.
 - `leakflow_plugins_extras`: linked shared plugin with `NumpySrc` and
   `NumpyToTorch`.
 - `leakflow_plugins_crypto`: linked shared plugin with `AesLeakage`,
-  `AesLeakageHypothesis`, `CpaAttack`, `AttackStats`,
+  `AesLeakageHypothesis`, `CpaAttack`, `DpaAttack`, `AttackStats`,
   `AttackStatsToPlotAnnotations`, `PearsonPoiFinder`, and
   `CorrelationPoiToPlotAnnotations`.
 - `leakflow_plugins_plot`: linked shared plugin with `TracePlot`.
@@ -327,6 +329,7 @@ Crypto plugin elements:
 - `AesLeakage`
 - `AesLeakageHypothesis`
 - `CpaAttack`
+- `DpaAttack`
 - `AttackStats`
 - `AttackStatsToPlotAnnotations`
 - `PearsonPoiFinder`

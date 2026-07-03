@@ -336,7 +336,7 @@ int main() {
               "crypto plugin descriptor count changed")) {
     return 1;
   }
-  if (!expect(descriptors[0].elements.size() == 7,
+  if (!expect(descriptors[0].elements.size() == 8,
               "crypto element descriptor count was wrong")) {
     return 1;
   }

@@ -4,6 +4,7 @@
 #include "leakflow/plugins/crypto/aes_leakage_hypothesis.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_to_plot_annotations.hpp"
 #include "leakflow/plugins/crypto/cpa_attack.hpp"
+#include "leakflow/plugins/crypto/dpa_attack.hpp"
 #include "leakflow/plugins/crypto/attack_stats.hpp"
 #include "leakflow/plugins/crypto/attack_stats_to_plot_annotations.hpp"
 #include "leakflow/plugins/crypto/pearson_poi_finder.hpp"
@@ -28,6 +29,7 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 AesLeakage::descriptor(),
                 AesLeakageHypothesis::descriptor(),
                 CpaAttack::descriptor(),
+                DpaAttack::descriptor(),
                 AttackStats::descriptor(),
                 AttackStatsToPlotAnnotations::descriptor(),
                 PearsonPoiFinder::descriptor(),
@@ -68,6 +70,9 @@ void register_element_factories(ElementFactoryRegistry& registry)
              }},
             {"CpaAttack", [](std::string name) {
                  return std::make_shared<CpaAttack>(std::move(name));
+             }},
+            {"DpaAttack", [](std::string name) {
+                 return std::make_shared<DpaAttack>(std::move(name));
              }},
             {"AttackStats", [](std::string name) {
                  return std::make_shared<AttackStats>(std::move(name));

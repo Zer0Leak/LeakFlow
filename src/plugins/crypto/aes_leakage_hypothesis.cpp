@@ -316,7 +316,7 @@ ElementDescriptor AesLeakageHypothesis::descriptor() {
                   StringList{aes_leakage_channel_hw_y},
                   "predicted leakage channels to output; order controls axis 3",
                   "", std::monostate{},
-                  "allowed values: HW(m), HW(m_xor_k), HW(y)",
+                  "allowed values: HW(m), HW(m_xor_k), HW(y), y(0)..y(7)",
                   PropertyEffect{
                       .kind = PropertyEffectKind::PayloadOutput,
                       .scope = PropertyInvalidationScope::Downstream,
@@ -357,6 +357,7 @@ ElementDescriptor AesLeakageHypothesis::descriptor() {
                       aes_leakage_channel_hw_m,
                       aes_leakage_channel_hw_m_xor_k,
                       aes_leakage_channel_hw_y,
+                      std::string(aes_leakage_channel_y_bits[0]),
                   }),
               make_element_metadata_descriptor(
                   "payload.crypto.algorithm", std::string(),

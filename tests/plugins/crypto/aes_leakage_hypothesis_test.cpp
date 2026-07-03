@@ -161,6 +161,7 @@ int main() {
                       crypto_plugin::aes_leakage_channel_hw_m,
                       crypto_plugin::aes_leakage_channel_hw_m_xor_k,
                       crypto_plugin::aes_leakage_channel_hw_y,
+                      std::string(crypto_plugin::aes_leakage_channel_y_bits[0]),
                   });
   combined_hypothesis.set_property("guess_values", leakflow::IntList{0, 0x7e});
   leakflow::ElementInputs combined_inputs;
@@ -172,12 +173,12 @@ int main() {
     return 1;
   }
   if (!expect(combined_output->metadata("payload.leakage.channels") ==
-                  "HW(m),HW(m_xor_k),HW(y)",
+                  "HW(m),HW(m_xor_k),HW(y),y(0)",
               "AesLeakageHypothesis multi-channel metadata was wrong")) {
     return 1;
   }
   if (!expect(combined_output->metadata("attack.channel.depends_on_guess") ==
-                  "false,true,true",
+                  "false,true,true,true",
               "AesLeakageHypothesis channel dependency metadata was wrong")) {
     return 1;
   }
@@ -196,7 +197,7 @@ int main() {
                   combined_payload->shape()[0] == 1 &&
                   combined_payload->shape()[1] == 2 &&
                   combined_payload->shape()[2] == 3 &&
-                  combined_payload->shape()[3] == 3,
+                  combined_payload->shape()[3] == 4,
               "AesLeakageHypothesis multi-channel output shape was wrong")) {
     return 1;
   }
@@ -209,6 +210,7 @@ int main() {
           leakflow::crypto::aes::FirstRoundLeakageChannel::HwM,
           leakflow::crypto::aes::FirstRoundLeakageChannel::HwMXorK,
           leakflow::crypto::aes::FirstRoundLeakageChannel::HwY,
+          leakflow::crypto::aes::FirstRoundLeakageChannel::YBit0,
       };
   const auto expected_combined =
       leakflow::crypto::aes::first_round_leakage_hypotheses_at(
@@ -297,7 +299,7 @@ int main() {
               "crypto plugin descriptor count changed")) {
     return 1;
   }
-  if (!expect(descriptors[0].elements.size() == 7,
+  if (!expect(descriptors[0].elements.size() == 8,
               "crypto element descriptor count was wrong")) {
     return 1;
   }

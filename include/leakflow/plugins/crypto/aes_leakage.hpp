@@ -16,6 +16,8 @@ inline constexpr auto aes_leakage_channel_hw_m_xor_k =
     leakflow::crypto::aes::first_round_leakage_channel_hw_m_xor_k;
 inline constexpr auto aes_leakage_channel_hw_y =
     leakflow::crypto::aes::first_round_leakage_channel_hw_y;
+inline constexpr auto aes_leakage_channel_y_bits =
+    leakflow::crypto::aes::first_round_leakage_channel_y_bits;
 
 class AesLeakage final : public Element {
 public:
