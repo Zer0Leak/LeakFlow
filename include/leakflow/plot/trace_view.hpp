@@ -28,9 +28,10 @@ public:
     std::uint64_t add_trace(TracePlotSnapshot snapshot);
 
     // Update only the presentation fields of the snapshot owned by
-    // update.element_name (group, labels, layout, center0, x_axis, color, line width,
-    // sample rate, order, and the replace-mode trace index), leaving captured data
-    // (id, values, shape, annotations, accumulate) untouched. Used by TracePlot to
+    // update.element_name (group, labels, layout, context label, center0, x_axis,
+    // color, line width, sample rate, order, and the replace-mode trace index),
+    // leaving captured data (id, values, shape, annotations, accumulate) untouched.
+    // Used by TracePlot to
     // self-apply a ui-control property change with no rerun. No-op if the element has
     // not registered a snapshot yet. Returns true when x_axis=time_us had no sample
     // rate and fell back to sample (the caller resets the property).
@@ -51,6 +52,7 @@ public:
     [[nodiscard]] TracePlotDisplayState &mutable_trace_display_state(const TracePlotSnapshot &snapshot);
     [[nodiscard]] bool &mutable_group_controls_open(std::string_view group);
     [[nodiscard]] PlotAxisView &mutable_axis_view(std::uint64_t panel_id);
+    [[nodiscard]] float &mutable_panel_height(std::string_view panel_key, float default_height);
 
     // Two-way trace-index sync (Phase 25). When a listener is installed, moving a
     // vertical trace slider notifies it so the owning element's trace_index property
@@ -83,6 +85,7 @@ private:
     std::map<std::uint64_t, TracePlotDisplayState> trace_display_states_;
     std::map<std::string, bool> group_control_windows_;
     std::map<std::uint64_t, PlotAxisView> axis_views_;
+    std::map<std::string, float> panel_heights_;
     std::function<void(std::string_view, int)> trace_index_listener_;
     std::function<void(std::string_view, std::string_view)> x_axis_listener_;
 };

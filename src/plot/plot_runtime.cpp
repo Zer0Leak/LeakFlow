@@ -165,6 +165,19 @@ double trace_plot_annotation_y_from_norm(double norm_value, double lower, double
     return lower + normalized * (higher - lower);
 }
 
+std::pair<double, double> trace_plot_fitted_y_range(double lower, double higher) {
+    if (!std::isfinite(lower) || !std::isfinite(higher) || lower > higher) {
+        throw std::invalid_argument("TracePlot fitted y range must be finite and ordered");
+    }
+
+    if (lower == higher) {
+        const auto padding = std::max(1.0, std::abs(lower) * 0.05);
+        return {lower - padding, higher + padding};
+    }
+
+    return {lower, higher};
+}
+
 std::pair<double, double> trace_plot_centered_y_range(double lower, double higher) {
     if (!std::isfinite(lower) || !std::isfinite(higher) || lower > higher) {
         throw std::invalid_argument("TracePlot centered y range must be finite and ordered");

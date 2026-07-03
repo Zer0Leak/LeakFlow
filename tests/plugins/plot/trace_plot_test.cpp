@@ -87,6 +87,20 @@ int main()
     if (!expect_near(centered_zero.second, 1.0, "TracePlot centered zero upper fallback was wrong")) {
         return 1;
     }
+    const auto fitted_flat = leakflow::plot::trace_plot_fitted_y_range(5.0, 5.0);
+    if (!expect_near(fitted_flat.first, 4.0, "TracePlot fitted flat lower fallback was wrong")) {
+        return 1;
+    }
+    if (!expect_near(fitted_flat.second, 6.0, "TracePlot fitted flat upper fallback was wrong")) {
+        return 1;
+    }
+    const auto fitted_mixed = leakflow::plot::trace_plot_fitted_y_range(-0.5, 2.0);
+    if (!expect_near(fitted_mixed.first, -0.5, "TracePlot fitted mixed lower limit was wrong")) {
+        return 1;
+    }
+    if (!expect_near(fitted_mixed.second, 2.0, "TracePlot fitted mixed upper limit was wrong")) {
+        return 1;
+    }
 
     auto runtime = std::make_shared<leakflow::plot::PlotRuntime>();
     plot_plugin::TracePlot trace_plot(runtime, "plot");
@@ -172,6 +186,12 @@ int main()
     if (!expect(snapshot.center0, "TracePlot center0 should default to true")) {
         return 1;
     }
+    if (!expect(snapshot.trace_context_label == "trace", "TracePlot context label should default to trace")) {
+        return 1;
+    }
+    if (!expect(snapshot.trace_context_values.empty(), "TracePlot default context values should be implicit")) {
+        return 1;
+    }
     if (!expect(snapshot.values == std::vector<float>{0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F},
                 "TracePlot snapshot values were wrong")) {
         return 1;
@@ -183,6 +203,39 @@ int main()
     (void)uncentered_plot.process(input);
     if (!expect(!uncentered_runtime->trace_view()->trace_snapshots().front().center0,
             "TracePlot center0=false property was not captured")) {
+        return 1;
+    }
+
+    auto unit_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
+    plot_plugin::TracePlot unit_plot(unit_runtime, "unit_plot");
+    auto unit_payload = std::make_shared<leakflow::base::TorchTensorPayload>(
+        torch::arange(0, 6, torch::TensorOptions().dtype(torch::kFloat32)).reshape({2, 3}));
+    leakflow::Buffer unit_input(unit_payload->caps());
+    unit_input.set_metadata("tensor.axes", "attack_unit,sample");
+    unit_input.set_metadata("attack.unit.indexes", "[0,3]");
+    unit_input.set_payload(unit_payload);
+    (void)unit_plot.process(unit_input);
+    const auto& unit_snapshot = unit_runtime->trace_view()->trace_snapshots().front();
+    if (!expect(unit_snapshot.trace_context_label == "unit",
+            "TracePlot should auto-derive unit context from tensor axes")) {
+        return 1;
+    }
+    if (!expect(unit_snapshot.trace_context_values == std::vector<std::int64_t>{0, 3},
+            "TracePlot should capture unit context values from metadata")) {
+        return 1;
+    }
+
+    auto custom_context_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
+    plot_plugin::TracePlot custom_context_plot(custom_context_runtime, "custom_context_plot");
+    custom_context_plot.set_property("trace_context_label", std::string("row"));
+    (void)custom_context_plot.process(unit_input);
+    const auto& custom_context_snapshot = custom_context_runtime->trace_view()->trace_snapshots().front();
+    if (!expect(custom_context_snapshot.trace_context_label == "row",
+            "TracePlot explicit context label was not captured")) {
+        return 1;
+    }
+    if (!expect(custom_context_snapshot.trace_context_values.empty(),
+            "TracePlot custom context label should use implicit row indexes")) {
         return 1;
     }
 
@@ -216,6 +269,15 @@ int main()
     auto& controls_open = runtime->trace_view()->mutable_group_controls_open("aes");
     controls_open = true;
     if (!expect(runtime->trace_view()->mutable_group_controls_open("aes"), "TracePlot group controls state was not mutable")) {
+        return 1;
+    }
+    auto& panel_height = runtime->trace_view()->mutable_panel_height("aes/0/1", 260.0F);
+    if (!expect(panel_height == 260.0F, "TracePlot panel height default was wrong")) {
+        return 1;
+    }
+    panel_height = 444.0F;
+    if (!expect(runtime->trace_view()->mutable_panel_height("aes/0/1", 260.0F) == 444.0F,
+            "TracePlot panel height was not mutable")) {
         return 1;
     }
     // The grouped trace-slider lock is a group-level UI toggle (no element
@@ -548,6 +610,7 @@ int main()
         (void)cycle_plot.process(make_trace_buffer(4));
         const auto first_id = cycle_runtime->trace_view()->trace_snapshots().front().id;
         const auto first_color = cycle_runtime->trace_view()->trace_snapshots().front().color;
+        cycle_runtime->trace_view()->mutable_panel_height("cycle/0/1", 260.0F) = 512.0F;
         cycle_runtime->clear();
         (void)cycle_plot.process(make_trace_buffer(4));
         const auto second_id = cycle_runtime->trace_view()->trace_snapshots().front().id;
@@ -557,6 +620,10 @@ int main()
         }
         if (!expect(first_color.has_value() && second_color.has_value() && *first_color == *second_color,
                     "PlotRuntime clear should keep auto palette colors stable across a Stop/Start cycle")) {
+            return 1;
+        }
+        if (!expect(cycle_runtime->trace_view()->mutable_panel_height("cycle/0/1", 260.0F) == 260.0F,
+                    "PlotRuntime clear should reset TracePlot panel heights")) {
             return 1;
         }
     }
@@ -581,6 +648,11 @@ int main()
         ui_plot.set_property("title", std::string("updated"));
         if (!expect(ui_runtime->trace_view()->trace_snapshots().front().title == "updated",
                     "TracePlot title change should self-apply to the snapshot")) {
+            return 1;
+        }
+        ui_plot.set_property("trace_context_label", std::string("unit"));
+        if (!expect(ui_runtime->trace_view()->trace_snapshots().front().trace_context_label == "unit",
+                    "TracePlot context label change should self-apply to the snapshot")) {
             return 1;
         }
         if (!expect(ui_runtime->trace_view()->trace_snapshots().size() == 1,

@@ -344,14 +344,23 @@ property has no effect. Later snapshots use their own `layout` value:
 - `stacked` starts a new panel.
 
 This allows a group to contain several overlaid panels and several stacked
-panels in one window.
+panels in one window. Each TracePlot panel has the same draggable horizontal
+splitter style as `ScoreView`: drag the thin grip below a plot to make that
+stacked graph taller or shorter.
 
 Rank-2 trace selection uses vertical sliders on the right side of each plot
-panel.
+panel. The slider context label defaults to `trace` and displays one-based trace
+numbers (`trace: 1`, `range: 1 - N`). `TracePlot(trace_context_label=...)` can
+override the label; `unit` uses zero-based implicit values unless
+`attack.unit.indexes` metadata provides actual unit values. Buffers with
+`tensor.axes=attack_unit,sample` auto-derive `unit` when the property is empty.
 
 `TracePlot(center0=true)` is the default. It sets each plot panel's y-axis to a
 symmetric range around zero using `max(abs(min_leakage), abs(max_leakage))` from
-the displayed trace data. Set `center0=false` to let ImPlot autoscale normally.
+the displayed trace data. The computed fit is applied when the data-fit range or
+center mode changes, but user zoom/pan is preserved afterward. Set
+`center0=false` to fit the displayed trace data without forcing symmetry around
+zero.
 
 Each group window has a controls button that opens a floating controls window
 for per-TracePlot color, alpha, and display order.

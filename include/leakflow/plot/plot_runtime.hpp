@@ -87,6 +87,7 @@ struct TracePlotSnapshot {
     double line_width = 1.0;
     std::int64_t initial_trace_index = 0;
     std::int64_t order = -1;
+    std::string trace_context_label = "trace";
     bool lock_trace_index = false;
     bool center0 = true;
     // When true, add_trace appends this as a distinct snapshot (history overlay)
@@ -97,6 +98,7 @@ struct TracePlotSnapshot {
     std::optional<TracePlotColor> color;
     std::vector<std::int64_t> shape;
     std::vector<float> values;
+    std::vector<std::int64_t> trace_context_values;
     std::vector<TracePlotAnnotation> annotations;
 
     [[nodiscard]] std::int64_t rank() const;
@@ -133,6 +135,7 @@ struct PlotLoopOptions {
 // Parse a generic marker hint ("square", "x"/"cross", anything else -> circle).
 [[nodiscard]] TracePlotAnnotationMarker parse_trace_plot_annotation_marker(std::string_view text);
 [[nodiscard]] double trace_plot_annotation_y_from_norm(double norm_value, double lower, double higher);
+[[nodiscard]] std::pair<double, double> trace_plot_fitted_y_range(double lower, double higher);
 [[nodiscard]] std::pair<double, double> trace_plot_centered_y_range(double lower, double higher);
 
 // Persisted per-panel X-axis view (Phase 25). Lets the renderer convert the
@@ -143,6 +146,11 @@ struct PlotAxisView {
     bool time_effective = false;
     double x_min = 0.0;
     double x_max = 0.0;
+    bool y_fit_initialized = false;
+    bool y_user_adjusted = false;
+    bool y_fit_centered = false;
+    double y_fit_min = 0.0;
+    double y_fit_max = 0.0;
 };
 
 // A registry of PlotViews plus the shared window/loop entry points. It owns no plot

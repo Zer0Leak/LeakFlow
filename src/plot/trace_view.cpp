@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +39,14 @@ namespace {
     }};
 
     return palette[static_cast<std::size_t>((id - 1U) % palette.size())];
+}
+[[nodiscard]] std::string lower_string(std::string_view text) {
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const auto character : text) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+    }
+    return lowered;
 }
 [[nodiscard]] bool color_component_is_valid(float value) { return value >= 0.0F && value <= 1.0F; }
 [[nodiscard]] bool color_is_valid(const TracePlotColor &color) {
@@ -77,6 +86,13 @@ void validate_snapshot(const TracePlotSnapshot &snapshot) {
     }
     if (snapshot.sample_rate_hz && *snapshot.sample_rate_hz <= 0.0) {
         throw std::invalid_argument("TracePlotSnapshot sample rate must be positive when set");
+    }
+    if (snapshot.trace_context_label.empty()) {
+        throw std::invalid_argument("TracePlotSnapshot trace context label cannot be empty");
+    }
+    if (!snapshot.trace_context_values.empty() &&
+        snapshot.trace_context_values.size() != static_cast<std::size_t>(snapshot.trace_count())) {
+        throw std::invalid_argument("TracePlotSnapshot trace context values must match trace count");
     }
     for (const auto &annotation : snapshot.annotations) {
         if (annotation.sample_index < 0 || annotation.sample_index >= snapshot.sample_count()) {
@@ -260,15 +276,56 @@ void move_snapshot_before(TraceView &view, std::vector<const TracePlotSnapshot *
     return count;
 }
 
-bool draw_vertical_slider(std::string_view tooltip_label, const std::string &imgui_id, int &value, int max_value,
+[[nodiscard]] bool trace_context_is_one_based(std::string_view label) {
+    return lower_string(label) == "trace";
+}
+
+[[nodiscard]] std::int64_t trace_context_value(const TracePlotSnapshot &snapshot, int trace_index) {
+    if (snapshot.trace_context_values.size() == static_cast<std::size_t>(snapshot.trace_count())) {
+        return snapshot.trace_context_values[static_cast<std::size_t>(trace_index)];
+    }
+
+    return static_cast<std::int64_t>(trace_index) + (trace_context_is_one_based(snapshot.trace_context_label) ? 1 : 0);
+}
+
+struct TraceSliderContext {
+    std::string label;
+    std::string value;
+    std::string range_min;
+    std::string range_max;
+};
+
+[[nodiscard]] TraceSliderContext trace_slider_context_for(const TracePlotSnapshot &snapshot, int trace_index) {
+    std::int64_t lower = 0;
+    std::int64_t higher = 0;
+    if (snapshot.trace_context_values.size() == static_cast<std::size_t>(snapshot.trace_count())) {
+        const auto [minimum, maximum] =
+            std::minmax_element(snapshot.trace_context_values.begin(), snapshot.trace_context_values.end());
+        lower = *minimum;
+        higher = *maximum;
+    } else {
+        lower = trace_context_is_one_based(snapshot.trace_context_label) ? 1 : 0;
+        higher = lower + snapshot.trace_count() - 1;
+    }
+
+    return TraceSliderContext{
+        .label = snapshot.trace_context_label.empty() ? "trace" : snapshot.trace_context_label,
+        .value = std::to_string(trace_context_value(snapshot, trace_index)),
+        .range_min = std::to_string(lower),
+        .range_max = std::to_string(higher),
+    };
+}
+
+bool draw_vertical_slider(const TracePlotSnapshot &snapshot, std::string_view tooltip_label,
+                          const std::string &imgui_id, int &value, int max_value,
                           float height, const TracePlotColor &color, float alpha) {
     const auto previous_value = std::clamp(value, 0, max_value);
     auto display_value = max_value - std::clamp(value, 0, max_value);
 
     const auto changed = ImGui::VSliderInt(imgui_id.c_str(), ImVec2(42.0F, height), &display_value, 0, max_value, "");
     value = max_value - std::clamp(display_value, 0, max_value);
-    // Traces are presented to the user as 1..N; the stored value stays the 0-based index.
-    const auto value_text = std::to_string(value + 1);
+    const auto context = trace_slider_context_for(snapshot, value);
+    const auto value_text = context.value;
     const auto item_min = ImGui::GetItemRectMin();
     const auto item_max = ImGui::GetItemRectMax();
     const auto text_size = ImGui::CalcTextSize(value_text.c_str());
@@ -282,8 +339,8 @@ bool draw_vertical_slider(std::string_view tooltip_label, const std::string &img
                        ImGui::GetColorU32(ImVec4(0.0F, 0.0F, 0.0F, 0.85F)), value_text.c_str());
     draw_list->AddText(text_position, ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 0.95F)), value_text.c_str());
     if (ImGui::IsItemHovered()) {
-        const auto tooltip = std::string(tooltip_label) + "\ntrace " + std::to_string(value + 1) + " / " +
-                             std::to_string(max_value + 1);
+        const auto tooltip = std::string(tooltip_label) + "\n" + context.label + ": " + context.value +
+                             "\nrange: " + context.range_min + " - " + context.range_max;
         ImGui::SetTooltip("%s", tooltip.c_str());
     }
     return changed && value != previous_value;
@@ -359,9 +416,10 @@ void draw_vertical_trace_controls(TraceView &view, std::string_view group,
         auto requested_trace_index = trace_index;
         const auto &display_state = view.mutable_trace_display_state(*snapshot);
         const auto changed =
-            draw_vertical_slider(snapshot_display_name(*snapshot), "##trace_index_" + std::to_string(snapshot->id),
-                                 requested_trace_index, static_cast<int>(snapshot->trace_count() - 1), slider_height,
-                                 display_state.color, display_state.alpha);
+            draw_vertical_slider(*snapshot, snapshot_display_name(*snapshot),
+                                 "##trace_index_" + std::to_string(snapshot->id), requested_trace_index,
+                                 static_cast<int>(snapshot->trace_count() - 1), slider_height, display_state.color,
+                                 display_state.alpha);
         // Captured immediately after the slider so it reflects the slider widget.
         const auto slider_active = ImGui::IsItemActive();
 
@@ -591,16 +649,21 @@ void plot_annotation_legend_items(std::vector<AnnotationStyle> &styles) {
     return {*minimum, *maximum};
 }
 
-[[nodiscard]] std::optional<std::pair<double, double>>
-centered_y_range_for(TraceView &view, const std::vector<const TracePlotSnapshot *> &snapshots) {
+struct TraceYFitRange {
+    double lower = 0.0;
+    double higher = 0.0;
+    bool centered = false;
+};
+
+[[nodiscard]] std::optional<TraceYFitRange>
+fitted_y_range_for(TraceView &view, const std::vector<const TracePlotSnapshot *> &snapshots) {
     auto lower = std::numeric_limits<double>::infinity();
     auto higher = -std::numeric_limits<double>::infinity();
     auto found = false;
+    auto centered = false;
 
     for (const auto *snapshot : snapshots) {
-        if (!snapshot->center0) {
-            continue;
-        }
+        centered = centered || snapshot->center0;
         const auto trace_index = selected_trace_index(view, *snapshot);
         const auto *values = snapshot->trace_data(trace_index);
         for (std::int64_t index = 0; index < snapshot->sample_count(); ++index) {
@@ -617,7 +680,26 @@ centered_y_range_for(TraceView &view, const std::vector<const TracePlotSnapshot 
     if (!found) {
         return std::nullopt;
     }
-    return trace_plot_centered_y_range(lower, higher);
+    const auto range = centered ? trace_plot_centered_y_range(lower, higher) : trace_plot_fitted_y_range(lower, higher);
+    return TraceYFitRange{
+        .lower = range.first,
+        .higher = range.second,
+        .centered = centered,
+    };
+}
+
+[[nodiscard]] bool close_enough(double left, double right) {
+    const auto scale = std::max({1.0, std::abs(left), std::abs(right)});
+    return std::abs(left - right) <= scale * 1.0e-9;
+}
+
+[[nodiscard]] bool y_fit_matches(const PlotAxisView &axis_view, const TraceYFitRange &range) {
+    return axis_view.y_fit_initialized && axis_view.y_fit_centered == range.centered &&
+           close_enough(axis_view.y_fit_min, range.lower) && close_enough(axis_view.y_fit_max, range.higher);
+}
+
+[[nodiscard]] bool y_limits_match_fit(const ImPlotRect &limits, const TraceYFitRange &range) {
+    return close_enough(limits.Y.Min, range.lower) && close_enough(limits.Y.Max, range.higher);
 }
 
 [[nodiscard]] double normalized_annotation_y(const TracePlotAnnotation &annotation, std::pair<double, double> y_range) {
@@ -929,14 +1011,15 @@ void draw_trace_plot_panel(TraceView &view, std::string_view group,
     auto &axis_view = view.mutable_axis_view(front.id);
 
     if (ImPlot::BeginPlot(title.c_str(), ImVec2(-1.0F, plot_height))) {
-        // center0 snapshots force a symmetric Y range; otherwise the Y axis auto-fits
-        // the data each frame. Without the AutoFit flag ImPlot keeps stale limits
-        // (e.g. a previous center0 run), so center0=false would appear centered.
-        const auto y_limits = centered_y_range_for(view, snapshots);
-        const auto y_flags = y_limits ? ImPlotAxisFlags_None : ImPlotAxisFlags_AutoFit;
-        ImPlot::SetupAxes(x_label.c_str(), y_label.c_str(), ImPlotAxisFlags_None, y_flags);
-        if (y_limits) {
-            ImPlot::SetupAxisLimits(ImAxis_Y1, y_limits->first, y_limits->second, ImPlotCond_Always);
+        const auto y_fit = fitted_y_range_for(view, snapshots);
+        const auto y_mode_changed = y_fit && axis_view.y_fit_initialized &&
+                                    axis_view.y_fit_centered != y_fit->centered;
+        const auto should_apply_y_fit = y_fit &&
+            (!axis_view.y_fit_initialized || y_mode_changed ||
+                (!axis_view.y_user_adjusted && !y_fit_matches(axis_view, *y_fit)));
+        ImPlot::SetupAxes(x_label.c_str(), y_label.c_str(), ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        if (should_apply_y_fit) {
+            ImPlot::SetupAxisLimits(ImAxis_Y1, y_fit->lower, y_fit->higher, ImPlotCond_Always);
         }
 
         // Keep the same visible window when the panel switches between sample and
@@ -958,17 +1041,56 @@ void draw_trace_plot_panel(TraceView &view, std::string_view group,
         axis_view.x_max = limits.X.Max;
         axis_view.time_effective = time_effective;
         axis_view.initialized = true;
+        if (y_fit) {
+            axis_view.y_fit_min = y_fit->lower;
+            axis_view.y_fit_max = y_fit->higher;
+            axis_view.y_fit_centered = y_fit->centered;
+            axis_view.y_fit_initialized = true;
+            axis_view.y_user_adjusted = should_apply_y_fit ? false : !y_limits_match_fit(limits, *y_fit);
+        }
 
         ImPlot::EndPlot();
     }
 }
 
+[[nodiscard]] std::string trace_panel_key(
+    std::string_view group,
+    const TracePanel &panel,
+    std::size_t panel_index)
+{
+    const auto front_id = panel.snapshots.empty() ? 0U : panel.snapshots.front()->id;
+    return std::string(group) + "/" + std::to_string(panel_index) + "/" + std::to_string(front_id);
+}
+
+void draw_trace_panel_splitter(const std::string &panel_key, float &panel_height)
+{
+    ImGui::InvisibleButton(("##trace_splitter_" + panel_key).c_str(), ImVec2(-1.0F, 7.0F));
+    const auto splitter_active = ImGui::IsItemActive();
+    if (splitter_active) {
+        panel_height = std::clamp(panel_height + ImGui::GetIO().MouseDelta.y, 80.0F, 1600.0F);
+    }
+    if (splitter_active || ImGui::IsItemHovered()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    }
+    const auto grip_min = ImGui::GetItemRectMin();
+    const auto grip_max = ImGui::GetItemRectMax();
+    const auto grip_mid_y = (grip_min.y + grip_max.y) * 0.5F;
+    const auto grip_color = ImGui::GetColorU32(
+        splitter_active ? ImGuiCol_SeparatorActive
+                        : (ImGui::IsItemHovered() ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(grip_min.x + 24.0F, grip_mid_y),
+                                        ImVec2(grip_max.x - 24.0F, grip_mid_y), grip_color, 2.0F);
+}
+
 void draw_trace_panel(TraceView &view, std::string_view group, const TracePanel &panel,
                       const std::vector<const TracePlotSnapshot *> &group_snapshots, std::size_t panel_index) {
-    const auto plot_height = panel.snapshots.size() == 1 ? 260.0F : 340.0F;
+    const auto default_height = panel.snapshots.size() == 1 ? 260.0F : 340.0F;
+    const auto panel_key = trace_panel_key(group, panel, panel_index);
+    auto &plot_height = view.mutable_panel_height(panel_key, default_height);
     const auto controls = trace_control_count(panel.snapshots);
     if (controls == 0) {
         draw_trace_plot_panel(view, group, panel.snapshots, panel_index, plot_height);
+        draw_trace_panel_splitter(panel_key, plot_height);
         return;
     }
 
@@ -983,6 +1105,7 @@ void draw_trace_panel(TraceView &view, std::string_view group, const TracePanel 
         draw_vertical_trace_controls(view, group, panel.snapshots, group_snapshots, plot_height);
         ImGui::EndTable();
     }
+    draw_trace_panel_splitter(panel_key, plot_height);
 }
 
 [[nodiscard]] bool draw_gear_button(const char *id) {
@@ -1120,13 +1243,16 @@ void draw_group(TraceView &view, std::string_view group, const std::vector<const
 
 std::uint64_t TraceView::add_trace(TracePlotSnapshot snapshot) {
     const auto lock = std::scoped_lock(mutex_);
-    validate_snapshot(snapshot);
     if (snapshot.group.empty()) {
         snapshot.group = "default";
     }
     if (snapshot.label.empty()) {
         snapshot.label = "trace";
     }
+    if (snapshot.trace_context_label.empty()) {
+        snapshot.trace_context_label = "trace";
+    }
+    validate_snapshot(snapshot);
 
     // accumulate (TracePlot update_mode=accumulate): grow this element's single
     // snapshot by appending the incoming buffer's rows as new traces, so the
@@ -1147,6 +1273,14 @@ std::uint64_t TraceView::add_trace(TracePlotSnapshot snapshot) {
             const auto samples = existing.sample_count();
             existing.values.insert(existing.values.end(), snapshot.values.begin(), snapshot.values.end());
             existing.shape = {base_row + added_rows, samples};
+            if (!snapshot.trace_context_values.empty()) {
+                existing.trace_context_values.insert(
+                    existing.trace_context_values.end(),
+                    snapshot.trace_context_values.begin(),
+                    snapshot.trace_context_values.end());
+            } else if (!existing.trace_context_values.empty()) {
+                existing.trace_context_values.clear();
+            }
             for (auto &annotation : snapshot.annotations) {
                 annotation.trace_row = base_row + std::max<std::int64_t>(annotation.trace_row, 0);
                 existing.annotations.push_back(std::move(annotation));
@@ -1333,6 +1467,14 @@ bool TraceView::refresh_trace_display(const TracePlotSnapshot &update) {
         existing.layout = update.layout;
         existing.line_width = update.line_width;
         existing.order = update.order;
+        if (update.trace_context_label.empty()) {
+            existing.trace_context_label = existing.trace_context_values.empty() ? "trace" : "unit";
+        } else {
+            existing.trace_context_label = update.trace_context_label;
+            if (lower_string(update.trace_context_label) != "unit") {
+                existing.trace_context_values.clear();
+            }
+        }
         existing.center0 = update.center0;
         existing.x_axis = update.x_axis;
         // sample rate: keep the captured (metadata) value when no property override.
@@ -1404,6 +1546,10 @@ PlotAxisView &TraceView::mutable_axis_view(std::uint64_t panel_id) {
     const auto lock = std::scoped_lock(mutex_);
     return axis_views_[panel_id];
 }
+float &TraceView::mutable_panel_height(std::string_view panel_key, float default_height) {
+    const auto lock = std::scoped_lock(mutex_);
+    return panel_heights_.try_emplace(std::string(panel_key), default_height).first->second;
+}
 void TraceView::set_trace_index_listener(std::function<void(std::string_view, int)> listener) {
     const auto lock = std::scoped_lock(mutex_);
     trace_index_listener_ = std::move(listener);
@@ -1465,6 +1611,7 @@ void TraceView::clear() {
     trace_display_states_.clear();
     group_control_windows_.clear();
     axis_views_.clear();
+    panel_heights_.clear();
 }
 
 bool TraceView::empty() const {

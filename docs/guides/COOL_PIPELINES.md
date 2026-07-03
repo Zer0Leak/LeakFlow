@@ -380,7 +380,7 @@ leakflow --log-level warning run --graph \
    Tee@stats_tee; \
    AttackStatsToPlotAnnotations@ann(precision=3); \
    TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
-   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa_diff,label=best-diff,x_axis=sample,update_mode=replace); \
+   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa_diff,label=best-diff,x_axis=sample,update_mode=replace,trace_context_label=unit); \
    ScorePlot@scoreplot(show_second_score=true); \
    ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
    @traces_src ! @traces_queue ! @trace_tee; \

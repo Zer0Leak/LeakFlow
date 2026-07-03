@@ -4,6 +4,7 @@
 #include "leakflow/base/plot_annotation_payload.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -59,6 +60,71 @@ constexpr auto default_trace_alpha = 1.0;
     }
 
     return fallback;
+}
+
+[[nodiscard]] std::string lower_string(std::string_view text)
+{
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const auto character : text) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+    }
+    return lowered;
+}
+
+[[nodiscard]] std::string trim_to_string(std::string_view text)
+{
+    const auto begin = text.find_first_not_of(" \t\n\r");
+    if (begin == std::string_view::npos) {
+        return {};
+    }
+    const auto end = text.find_last_not_of(" \t\n\r");
+    return std::string(text.substr(begin, end - begin + 1));
+}
+
+[[nodiscard]] std::vector<std::string> split_comma_list(std::string_view text)
+{
+    std::vector<std::string> values;
+    std::size_t begin = 0;
+    for (std::size_t index = 0; index <= text.size(); ++index) {
+        if (index == text.size() || text[index] == ',') {
+            values.push_back(trim_to_string(text.substr(begin, index - begin)));
+            begin = index + 1;
+        }
+    }
+    return values;
+}
+
+[[nodiscard]] std::optional<std::vector<std::int64_t>> parse_metadata_int_list(
+    std::string_view text,
+    std::int64_t expected_count)
+{
+    const auto trimmed = trim_to_string(text);
+    if (trimmed.empty() || trimmed.front() != '[' || trimmed.back() != ']') {
+        return std::nullopt;
+    }
+
+    const auto body = std::string_view(trimmed).substr(1, trimmed.size() - 2);
+    std::vector<std::int64_t> values;
+    if (!trim_to_string(body).empty()) {
+        for (const auto& part : split_comma_list(body)) {
+            std::size_t parsed = 0;
+            std::int64_t value = 0;
+            try {
+                value = std::stoll(part, &parsed, 10);
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+            if (parsed != part.size()) {
+                return std::nullopt;
+            }
+            values.push_back(value);
+        }
+    }
+    if (values.size() != static_cast<std::size_t>(expected_count)) {
+        return std::nullopt;
+    }
+    return values;
 }
 
 [[nodiscard]] double double_property_or(const Element& element, std::string_view name, double fallback)
@@ -155,6 +221,38 @@ constexpr auto default_trace_alpha = 1.0;
     return annotations;
 }
 
+[[nodiscard]] bool first_tensor_axis_is_attack_unit(const Buffer& buffer)
+{
+    if (!buffer.has_metadata("tensor.axes")) {
+        return false;
+    }
+    const auto axes = split_comma_list(buffer.metadata("tensor.axes"));
+    return !axes.empty() && lower_string(axes.front()) == "attack_unit";
+}
+
+[[nodiscard]] std::optional<std::vector<std::int64_t>> trace_context_values_from_metadata(
+    const Buffer& buffer,
+    std::int64_t trace_count)
+{
+    if (!buffer.has_metadata("attack.unit.indexes")) {
+        return std::nullopt;
+    }
+    return parse_metadata_int_list(buffer.metadata("attack.unit.indexes"), trace_count);
+}
+
+void resolve_trace_context(const Element& element, const Buffer& buffer, leakflow::plot::TracePlotSnapshot& snapshot)
+{
+    const auto configured_label = trim_to_string(string_property_or(element, "trace_context_label", ""));
+    const auto values = trace_context_values_from_metadata(buffer, snapshot.trace_count());
+    const auto has_unit_context = first_tensor_axis_is_attack_unit(buffer) || values.has_value();
+    snapshot.trace_context_label = configured_label.empty()
+        ? (has_unit_context ? "unit" : "trace")
+        : configured_label;
+    snapshot.trace_context_values = lower_string(snapshot.trace_context_label) == "unit" && values
+        ? *values
+        : std::vector<std::int64_t>{};
+}
+
 // Assign the presentation fields (everything except captured tensor data) from the
 // element's properties. Shared by snapshot_for (capture) and the live self-apply in
 // property_changed, so a ui-control change updates the snapshot the same way. The
@@ -177,6 +275,7 @@ void assign_display_properties(const Element& element, leakflow::plot::TracePlot
     snapshot.initial_trace_index = accumulate ? 0 : integer_property_or(element, "trace_index", 0);
     // order < 0 means automatic: keep registration order (resolved at render time).
     snapshot.order = integer_property_or(element, "order", -1);
+    snapshot.trace_context_label = trim_to_string(string_property_or(element, "trace_context_label", ""));
     snapshot.center0 = bool_property_or(element, "center0", true);
     snapshot.x_axis = leakflow::plot::parse_trace_plot_x_axis(string_property_or(element, "x_axis", "sample"));
     snapshot.sample_rate_hz = sample_rate_hz;
@@ -208,6 +307,7 @@ void assign_display_properties(const Element& element, leakflow::plot::TracePlot
     assign_display_properties(element, snapshot, accumulate, sample_rate_for(element, buffer));
     snapshot.shape = tensor_shape(payload);
     snapshot.values = snapshot_values(payload.tensor());
+    resolve_trace_context(element, buffer, snapshot);
     snapshot.annotations = snapshot_annotations(annotations);
     snapshot.accumulate = accumulate;
     return snapshot;
@@ -375,6 +475,9 @@ ElementDescriptor TracePlot::descriptor()
                 PropertySpec("line_width", 1.0, "plot line width", "", DoubleRangeConstraint{0.1, 20.0}, "", display),
                 PropertySpec("trace_index", std::int64_t{0}, "initial rank-2 trace index", "",
                              IntRangeConstraint{0, std::numeric_limits<std::int64_t>::max()}, "", display),
+                PropertySpec("trace_context_label", std::string(),
+                             "rank-2 slider context label; empty auto-derives trace or unit",
+                             "", std::monostate{}, "", display),
                 PropertySpec("order", std::int64_t{-1}, "group display order; -1 = automatic"),
                 PropertySpec("center0", true,
                              "center y-axis at zero with symmetric limits from the maximum absolute leakage",
