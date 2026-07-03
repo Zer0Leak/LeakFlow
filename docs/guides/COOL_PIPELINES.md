@@ -355,6 +355,61 @@ Notes:
 - Drop `@key_src ! @stats.truth` to run without truth (all markers become circles,
   and `ScorePlot` shows no "latest wrong key" lines).
 
+## AES Sync DPA Live — Bit Hypotheses + Score Views
+
+This live DPA workflow is the difference-of-means counterpart to the full CPA
+view above. `AesLeakageHypothesis(channels=[y(0),y(3),y(7)])` builds binary
+S-box-output bit hypotheses, `DpaAttack(accumulation_mode=auto)` resolves to
+incremental under the live sources, and `AttackStats` feeds trace annotations,
+score curves, and the live scoreboard. Uses the full checked-out `traces/`
+dataset.
+
+```bash
+leakflow --log-level warning run --graph \
+  'FakeLiveSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0); \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+   Tee@trace_tee; \
+   AesLeakageHypothesis@hyp(channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   DpaAttack@attack(score_method=max_abs,compute_dtype=float32,accumulation_mode=auto); \
+   AttackStats@stats(top_k=3); \
+   Tee@stats_tee; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
+   ScorePlot@scoreplot(show_second_score=true); \
+   ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
+   @traces_src ! @traces_queue ! @trace_tee; \
+      @trace_tee.src_0 ! @plot.sink; \
+      @trace_tee.src_1 ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @plot.annotations; \
+      @stats_tee.src_1 ! @scoreplot; \
+      @stats_tee.src_2 ! @scoretable'
+```
+
+Notes:
+
+- `y(0)`, `y(3)`, and `y(7)` are S-box output bit channels; `y(0)` is the least
+  significant bit. `byte_indexes=[]` means all 16 AES state bytes, so this is a
+  heavy `16 bytes × 256 guesses × 3 bit channels × samples` live score update.
+- For a faster interactive demo, narrow the hypothesis space first, for example
+  `AesLeakageHypothesis@hyp(channels=[y(0)],byte_indexes=[0],guess_values=[])`.
+- `DpaAttack` incremental mode keeps running sums and counts, not raw traces.
+  The expensive part is still deriving and reducing the current
+  `[unit,guess,channel,sample]` difference surface after each streamed row.
+- `TracePlot` accumulates streamed traces in graph mode; if score convergence is
+  the focus, temporarily drop the raw trace branch and keep `ScorePlot` /
+  `ScoreTablePlot`.
+
 ## AES Sync CPA Scoreboard (ScoreTablePlot)
 
 `ScoreTablePlot` (in `leakflow_plugins_crypto_plot`) reads the same `AttackStats`

@@ -371,10 +371,12 @@ void require_binary_hypotheses(const torch::Tensor& tensor)
     const auto count1 = sums.group1_count;
     const auto count0 = static_cast<double>(sums.count) - count1;
     const auto valid = torch::logical_and(count1 >= 1, count0 >= 1).unsqueeze(-1);
-    const auto mean1 = sums.group1_sum / count1.clamp_min(1).unsqueeze(-1);
-    const auto sum0 = sums.sum_x.unsqueeze(1).unsqueeze(1) - sums.group1_sum;
-    const auto mean0 = sum0 / count0.clamp_min(1).unsqueeze(-1);
-    const auto difference = mean1 - mean0;
+    const auto count1_safe = count1.clamp_min(1).unsqueeze(-1);
+    const auto count0_safe = count0.clamp_min(1).unsqueeze(-1);
+    const auto inv0 = torch::reciprocal(count0_safe);
+    const auto difference =
+        sums.group1_sum * (torch::reciprocal(count1_safe) + inv0)
+        - sums.sum_x.unsqueeze(1).unsqueeze(1) * inv0;
     return torch::where(valid, difference, torch::zeros_like(difference)).contiguous();
 }
 
