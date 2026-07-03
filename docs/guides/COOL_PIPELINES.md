@@ -418,6 +418,42 @@ Notes:
   the focus, temporarily drop the raw trace branch and keep `ScorePlot` /
   `ScoreTablePlot`.
 
+## AES Sync DPA Offline — Best Difference Trace + Score Views
+
+This offline DPA workflow runs the full trace/plaintext tensors in one shot with
+`TorchFileSrc`, so no `Queue` or `Sync` is needed. It builds `y(0)` bit
+hypotheses, scores them with `DpaAttack`, plots the raw traces with best-sample
+annotations, and sends `DpaAttack.best_difference` to a second `TracePlot`.
+
+```bash
+leakflow --log-level warning run --graph \
+  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
+   TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); \
+   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+   Tee@trace_tee; \
+   AesLeakageHypothesis@hyp(channels=[y(0)],byte_indexes=[],guess_values=[]); \
+   DpaAttack@attack(score_method=max_abs,compute_dtype=float32,accumulation_mode=auto); \
+   AttackStats@stats(top_k=10); \
+   Tee@stats_tee; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
+   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa,label=best-diff,x_axis=sample,update_mode=replace); \
+   ScorePlot@scoreplot(show_second_score=true); \
+   ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
+   @traces_src ! @trace_tee; \
+      @trace_tee.src_0 ! @plot.sink; \
+      @trace_tee.src_1 ! @attack.features; \
+   @plain_src ! @hyp.plaintexts; \
+   @hyp ! @attack.hypotheses; \
+   @attack.scores ! @stats.scores; \
+   @attack.best_difference ! @diff_plot.sink; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @plot.annotations; \
+      @stats_tee.src_1 ! @scoreplot; \
+      @stats_tee.src_2 ! @scoretable'
+```
+
 ## AES Sync CPA Scoreboard (ScoreTablePlot)
 
 `ScoreTablePlot` (in `leakflow_plugins_crypto_plot`) reads the same `AttackStats`
