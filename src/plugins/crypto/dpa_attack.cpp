@@ -565,6 +565,23 @@ void require_binary_hypotheses(const torch::Tensor& tensor)
     };
 }
 
+[[nodiscard]] torch::Tensor best_difference_traces(
+    const torch::Tensor& difference,
+    const ScoreResult& score_result)
+{
+    const auto unit_count = difference.size(0);
+    const auto unit_indexes = torch::arange(
+        0,
+        unit_count,
+        torch::TensorOptions().dtype(torch::kLong).device(difference.device()));
+    const auto best_guess_index = score_result.best_guess_index.to(difference.device());
+    const auto best_channel = score_result.best_channel.to(difference.device());
+    return difference
+        .index({unit_indexes, best_guess_index, best_channel, torch::indexing::Slice()})
+        .to(torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
+        .contiguous();
+}
+
 void copy_hypothesis_semantic_metadata(const Buffer& hypotheses, Buffer& output)
 {
     static const std::vector<std::string_view> keys{
@@ -677,6 +694,12 @@ ElementDescriptor DpaAttack::descriptor()
         },
         .output_pads = {
             Pad("scores", PadDirection::Output, Caps(attack_scores_caps_type)),
+            Pad("best_difference",
+                PadDirection::Output,
+                torch_tensor_caps({{leakflow::base::caps_param_dtype, "float32"},
+                    {leakflow::base::caps_param_device, "cpu"},
+                    {leakflow::base::caps_param_rank, "2"}}),
+                PadPresence::Optional),
         },
         .property_specs = {
             PropertySpec(
@@ -688,7 +711,7 @@ ElementDescriptor DpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"scores"}}),
+                    .output_pads = {"scores", "best_difference"}}),
             PropertySpec(
                 "score_channels",
                 std::string("guess_dependent"),
@@ -698,7 +721,7 @@ ElementDescriptor DpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"scores"}}),
+                    .output_pads = {"scores", "best_difference"}}),
             PropertySpec(
                 "top_k",
                 std::int64_t{5},
@@ -719,7 +742,7 @@ ElementDescriptor DpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"scores"}}),
+                    .output_pads = {"scores", "best_difference"}}),
             PropertySpec(
                 "active_accumulation_mode",
                 std::string("recompute"),
@@ -739,7 +762,7 @@ ElementDescriptor DpaAttack::descriptor()
                 "",
                 PropertyEffect{.kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"scores"}}),
+                    .output_pads = {"scores", "best_difference"}}),
         },
         .telemetry_specs = {
             make_duration_telemetry_spec("prepare", "time marshaling/casting/reshaping the feature and hypothesis tensors"),
@@ -769,6 +792,16 @@ ElementDescriptor DpaAttack::descriptor()
                 "attack.ranking.order", std::string(), "ranking tensor order", {"descending_score"}),
             make_element_metadata_descriptor(
                 "attack.ranking.values", std::string(), "ranking tensor value meaning", {"guess_index"}),
+            make_element_metadata_descriptor(
+                "payload.dpa.trace",
+                std::string(),
+                "DPA trace payload kind emitted by the best_difference pad",
+                {"best_difference"}),
+            make_element_metadata_descriptor(
+                "attack.best_difference.selection",
+                std::string(),
+                "selection used to reduce the DPA difference surface to rank-2 traces",
+                {"best_guess,best_channel"}),
         },
     };
 }
@@ -785,6 +818,16 @@ std::optional<Buffer> DpaAttack::process(std::optional<Buffer>)
 }
 
 std::optional<Buffer> DpaAttack::process_inputs(ElementInputs inputs)
+{
+    auto outputs = process_pads(std::move(inputs));
+    auto found = outputs.find("scores");
+    if (found == outputs.end()) {
+        return std::nullopt;
+    }
+    return std::move(found->second);
+}
+
+ElementOutputs DpaAttack::process_pads(ElementInputs inputs)
 {
     const auto& features_buffer = required_input(inputs, "features", "DpaAttack");
     const auto& hypotheses_buffer = required_input(inputs, "hypotheses", "DpaAttack");
@@ -874,6 +917,26 @@ std::optional<Buffer> DpaAttack::process_inputs(ElementInputs inputs)
     output.set_metadata("attack.differences.emitted", "false");
     output.set_payload(std::move(payload));
 
+    auto best_difference_payload =
+        std::make_shared<leakflow::base::TorchTensorPayload>(best_difference_traces(difference, score_result));
+    Buffer best_difference_output{best_difference_payload->caps()};
+    forward_metadata(inputs, profile_for_klass(element_kclass()), best_difference_output, name());
+    copy_hypothesis_semantic_metadata(hypotheses_buffer, best_difference_output);
+    best_difference_output.set_metadata("routing.element", name());
+    best_difference_output.set_metadata("attack.method", dpa_attack_method_id);
+    best_difference_output.set_metadata("attack.difference.method", "mean(group1)-mean(group0)");
+    best_difference_output.set_metadata(
+        "attack.accumulation.mode",
+        active_mode == AccumulationMode::Recompute ? "recompute" : "incremental");
+    best_difference_output.set_metadata("attack.observation_count", std::to_string(observation_count));
+    best_difference_output.set_metadata("attack.feature.count", std::to_string(prepared.sample_count));
+    best_difference_output.set_metadata("attack.score.method", score_method_text);
+    best_difference_output.set_metadata("attack.score.channels", score_channels_text);
+    best_difference_output.set_metadata("payload.dpa.trace", "best_difference");
+    best_difference_output.set_metadata("attack.best_difference.selection", "best_guess,best_channel");
+    best_difference_output.set_metadata("tensor.axes", "attack_unit,sample");
+    best_difference_output.set_payload(std::move(best_difference_payload));
+
     auto record = make_log_record(log::LogLevel::Debug, "element", "computed DPA attack ranking");
     record.fields.emplace("attack.method", dpa_attack_method_id);
     record.fields.emplace("accumulation_mode", output.metadata("attack.accumulation.mode"));
@@ -885,7 +948,10 @@ std::optional<Buffer> DpaAttack::process_inputs(ElementInputs inputs)
     record.fields.emplace("observations", std::to_string(observation_count));
     leakflow::log::write(std::move(record));
 
-    return output;
+    ElementOutputs outputs;
+    outputs.emplace("scores", std::move(output));
+    outputs.emplace("best_difference", std::move(best_difference_output));
+    return outputs;
 }
 
 bool DpaAttack::can_replay() const

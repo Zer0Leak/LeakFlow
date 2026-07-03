@@ -65,10 +65,12 @@ CLI/inspect files if affected:
   `epsilon`. In incremental active mode, `can_replay()` is false.
 - `DpaAttack` (`Analyze/SCA/Attack/DPA`): generic difference-of-means DPA ranker.
   Required named inputs: `features` (`[N,S]` or `[U,N,S]` Torch tensor) and binary
-  `hypotheses` (`[U,G,N,L]` Torch tensor, values `0/1`). Emits the same
-  `AttackScoresPayload` contract as `CpaAttack`, so `AttackStats`,
-  `AttackStatsToPlotAnnotations`, `ScorePlot`, and `ScoreTablePlot` connect
-  unchanged. The default score is the max absolute
+  `hypotheses` (`[U,G,N,L]` Torch tensor, values `0/1`). Emits `scores`
+  (`AttackScoresPayload`, same contract as `CpaAttack`) plus optional
+  `best_difference` (CPU float32 Torch `[U,S]`, axes `attack_unit,sample`) for
+  plotting the current best guess/channel difference trace per unit. `AttackStats`,
+  `AttackStatsToPlotAnnotations`, `ScorePlot`, and `ScoreTablePlot` still connect
+  to `scores`. The default score is the max absolute
   `mean(group1)-mean(group0)` over channel/sample. Properties include
   `score_method=max_abs|max_positive|max_negative`,
   `score_channels=guess_dependent|all`,

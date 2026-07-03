@@ -360,9 +360,10 @@ Notes:
 This live DPA workflow is the difference-of-means counterpart to the full CPA
 view above. `AesLeakageHypothesis(channels=[y(0),y(3),y(7)])` builds binary
 S-box-output bit hypotheses, `DpaAttack(accumulation_mode=auto)` resolves to
-incremental under the live sources, and `AttackStats` feeds trace annotations,
-score curves, and the live scoreboard. Uses the full checked-out `traces/`
-dataset.
+incremental under the live sources, and `DpaAttack.best_difference` emits the
+current best difference-of-means trace for each attack unit. `AttackStats` feeds
+raw-trace annotations, score curves, and the live scoreboard. Uses the full
+checked-out `traces/` dataset.
 
 ```bash
 leakflow --log-level warning run --graph \
@@ -379,6 +380,7 @@ leakflow --log-level warning run --graph \
    Tee@stats_tee; \
    AttackStatsToPlotAnnotations@ann(precision=3); \
    TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
+   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa_diff,label=best-diff,x_axis=sample,update_mode=replace); \
    ScorePlot@scoreplot(show_second_score=true); \
    ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
    @traces_src ! @traces_queue ! @trace_tee; \
@@ -388,7 +390,8 @@ leakflow --log-level warning run --graph \
    @hyp ! @attack_sync.in_1; \
    @attack_sync.out_0 ! @attack.features; \
    @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
+   @attack.scores ! @stats.scores; \
+   @attack.best_difference ! @diff_plot.sink; \
    @key_src ! @stats.truth; \
    @stats ! @stats_tee; \
       @stats_tee.src_0 ! @ann ! @plot.annotations; \
@@ -406,6 +409,11 @@ Notes:
 - `DpaAttack` incremental mode keeps running sums and counts, not raw traces.
   The expensive part is still deriving and reducing the current
   `[unit,guess,channel,sample]` difference surface after each streamed row.
+- `@attack.best_difference` emits a CPU float32 `[attack_unit,sample]` tensor:
+  each row is the current best guess/channel difference trace for that unit. The
+  `diff_plot` uses `update_mode=replace`, so it shows the latest DPA state rather
+  than appending every update as another trace row; this generated trace plot has
+  no annotation input wired.
 - `TracePlot` accumulates streamed traces in graph mode; if score convergence is
   the focus, temporarily drop the raw trace branch and keep `ScorePlot` /
   `ScoreTablePlot`.

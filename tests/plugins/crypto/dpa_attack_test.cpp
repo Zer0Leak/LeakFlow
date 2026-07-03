@@ -1,3 +1,4 @@
+#include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/plugins/crypto/crypto_elements.hpp"
 #include "leakflow/plugins/crypto/descriptor_catalog.hpp"
@@ -142,6 +143,66 @@ int main()
         return 1;
     }
 
+    crypto_plugin::DpaAttack pad_attack;
+    pad_attack.set_property("score_method", std::string("max_abs"));
+    leakflow::ElementInputs pad_attack_inputs;
+    pad_attack_inputs.emplace("features", torch_buffer(features));
+    pad_attack_inputs.emplace("hypotheses", hypothesis_buffer(hypotheses));
+    auto pad_outputs = pad_attack.process_pads(std::move(pad_attack_inputs));
+    if (!expect(pad_outputs.size() == 2, "DpaAttack did not emit both output pads")) {
+        return 1;
+    }
+    const auto pad_scores = pad_outputs.find("scores");
+    if (!expect(pad_scores != pad_outputs.end(), "DpaAttack process_pads did not emit scores")) {
+        return 1;
+    }
+    const auto pad_best_difference = pad_outputs.find("best_difference");
+    if (!expect(pad_best_difference != pad_outputs.end(), "DpaAttack process_pads did not emit best_difference")) {
+        return 1;
+    }
+    const auto pad_scores_payload = pad_scores->second.payload_as<crypto_plugin::AttackScoresPayload>();
+    if (!expect(pad_scores_payload != nullptr, "DpaAttack process_pads scores payload was wrong")) {
+        return 1;
+    }
+    if (!expect(torch::allclose(pad_scores_payload->scores(), payload->scores(), 1.0e-5, 1.0e-5),
+            "DpaAttack process_pads scores did not match process_inputs")) {
+        return 1;
+    }
+    if (!expect(pad_best_difference->second.caps().type() == leakflow::base::torch_tensor_caps_type,
+            "DpaAttack best_difference caps type was wrong")) {
+        return 1;
+    }
+    if (!expect(pad_best_difference->second.metadata("payload.dpa.trace") == "best_difference",
+            "DpaAttack best_difference trace metadata was wrong")) {
+        return 1;
+    }
+    if (!expect(pad_best_difference->second.metadata("tensor.axes") == "attack_unit,sample",
+            "DpaAttack best_difference axes metadata was wrong")) {
+        return 1;
+    }
+    const auto best_difference_payload =
+        pad_best_difference->second.payload_as<leakflow::base::TorchTensorPayload>();
+    if (!expect(best_difference_payload != nullptr, "DpaAttack best_difference payload was wrong")) {
+        return 1;
+    }
+    if (!expect(best_difference_payload->tensor().sizes() == c10::IntArrayRef({1, 2}),
+            "DpaAttack best_difference shape was wrong")) {
+        return 1;
+    }
+    if (!expect(best_difference_payload->tensor().scalar_type() == torch::kFloat32,
+            "DpaAttack best_difference dtype was wrong")) {
+        return 1;
+    }
+    if (!expect(best_difference_payload->tensor().device().is_cpu(),
+            "DpaAttack best_difference device was wrong")) {
+        return 1;
+    }
+    const auto expected_best_difference = torch::tensor({{10.0F, 0.0F}}, torch::TensorOptions().dtype(torch::kFloat32));
+    if (!expect(torch::allclose(best_difference_payload->tensor(), expected_best_difference, 1.0e-5, 1.0e-5),
+            "DpaAttack best_difference values were wrong")) {
+        return 1;
+    }
+
     crypto_plugin::DpaAttack incremental_attack;
     incremental_attack.set_property("accumulation_mode", std::string("incremental"));
     incremental_attack.start();
@@ -162,8 +223,13 @@ int main()
     leakflow::ElementInputs second_inputs;
     second_inputs.emplace("features", torch_buffer(second_features));
     second_inputs.emplace("hypotheses", hypothesis_buffer(second_hypotheses));
-    const auto incremental_output = incremental_attack.process_inputs(std::move(second_inputs));
-    const auto incremental_payload = incremental_output->payload_as<crypto_plugin::AttackScoresPayload>();
+    auto incremental_outputs = incremental_attack.process_pads(std::move(second_inputs));
+    const auto incremental_output = incremental_outputs.find("scores");
+    if (!expect(incremental_output != incremental_outputs.end(),
+            "DpaAttack incremental process_pads did not emit scores")) {
+        return 1;
+    }
+    const auto incremental_payload = incremental_output->second.payload_as<crypto_plugin::AttackScoresPayload>();
     if (!expect(incremental_payload != nullptr, "DpaAttack incremental payload was wrong")) {
         return 1;
     }
@@ -171,12 +237,28 @@ int main()
             "DpaAttack incremental scores did not match recompute scores")) {
         return 1;
     }
-    if (!expect(incremental_output->metadata("attack.accumulation.mode") == "incremental",
+    if (!expect(incremental_output->second.metadata("attack.accumulation.mode") == "incremental",
             "DpaAttack incremental mode metadata was wrong")) {
         return 1;
     }
     if (!expect(incremental_payload->observation_count() == 4,
             "DpaAttack incremental observation count was wrong")) {
+        return 1;
+    }
+    const auto incremental_best_difference = incremental_outputs.find("best_difference");
+    if (!expect(incremental_best_difference != incremental_outputs.end(),
+            "DpaAttack incremental process_pads did not emit best_difference")) {
+        return 1;
+    }
+    const auto incremental_best_difference_payload =
+        incremental_best_difference->second.payload_as<leakflow::base::TorchTensorPayload>();
+    if (!expect(incremental_best_difference_payload != nullptr,
+            "DpaAttack incremental best_difference payload was wrong")) {
+        return 1;
+    }
+    if (!expect(torch::allclose(
+            incremental_best_difference_payload->tensor(), expected_best_difference, 1.0e-5, 1.0e-5),
+            "DpaAttack incremental best_difference values were wrong")) {
         return 1;
     }
 
@@ -226,6 +308,22 @@ int main()
     }
     if (!expect(descriptors[0].elements[3].type_name == "DpaAttack",
             "DpaAttack descriptor type name was wrong")) {
+        return 1;
+    }
+    if (!expect(descriptors[0].elements[3].output_pads.size() == 2,
+            "DpaAttack descriptor output pad count was wrong")) {
+        return 1;
+    }
+    if (!expect(descriptors[0].elements[3].output_pads[0].name() == "scores",
+            "DpaAttack descriptor scores pad was wrong")) {
+        return 1;
+    }
+    if (!expect(descriptors[0].elements[3].output_pads[1].name() == "best_difference",
+            "DpaAttack descriptor best_difference pad was wrong")) {
+        return 1;
+    }
+    if (!expect(descriptors[0].elements[3].output_pads[1].presence() == leakflow::PadPresence::Optional,
+            "DpaAttack descriptor best_difference pad was not optional")) {
         return 1;
     }
 

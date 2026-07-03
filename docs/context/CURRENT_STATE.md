@@ -41,8 +41,9 @@ support:
   bit channels.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
   guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
-  difference-of-means ranking, generic known-key attack stats, attack stats
-  plot-annotation conversion, Pearson PoI finding, and
+  difference-of-means ranking with an optional best-difference trace output,
+  generic known-key attack stats, attack stats plot-annotation conversion,
+  Pearson PoI finding, and
   correlation-PoI-to-plot-annotation conversion elements.
 - `leakflow_plugins_plot` exists and provides sink-only `TracePlot`.
 - `TracePlot` accepts optional generic plot annotations and renders selected

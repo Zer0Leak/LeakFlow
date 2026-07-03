@@ -21,6 +21,7 @@ public:
     void start() override;
     [[nodiscard]] std::optional<Buffer> process(std::optional<Buffer> input) override;
     [[nodiscard]] std::optional<Buffer> process_inputs(ElementInputs inputs) override;
+    [[nodiscard]] ElementOutputs process_pads(ElementInputs inputs) override;
     [[nodiscard]] bool can_replay() const override;
 
 private:
