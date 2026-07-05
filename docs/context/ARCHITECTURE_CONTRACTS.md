@@ -117,7 +117,7 @@ before stamping their own keys:
   relabels origin as `origin.<pad>.<key>`, and drops payload + routing.
 
 An Analyze element may additionally re-own a curated subset of payload facts it
-asserts about its output (for example `PearsonPoiFinder` keeps the target model's
+asserts about its output (for example `PoiSelect` keeps the target model's
 `leakage.*`/`crypto.*`). Pass-through elements that return the input buffer keep
 the envelope, including routing, until the next reframe/analyze drops it.
 

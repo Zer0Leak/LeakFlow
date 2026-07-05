@@ -3,7 +3,7 @@
 #include "leakflow/base/plot_annotation_payload.hpp"
 #include "leakflow/core/metadata_forwarding.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
-#include "leakflow/plugins/crypto/pearson_poi_finder.hpp"
+#include "leakflow/plugins/crypto/poi_select.hpp"
 
 #include <algorithm>
 #include <cmath>

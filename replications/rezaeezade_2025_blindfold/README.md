@@ -14,25 +14,30 @@ scope for now.
 Aggregates the Pearson PoI finder across **many capture folders**. Each `key_*`
 folder is one aligned `(traces, plaintexts, key)` capture. The app streams one
 folder per step into an `AppSrc` (application-fed live source). Because `AppSrc`
-declares itself live, `PearsonPoiFinder` auto-selects its **incremental** mode and
+declares itself live, `PearsonCorrelator` auto-selects its **incremental** mode and
 folds each folder into running correlation moments — it never resets between
-folders, only at `start()`. The final emitted PoI is the aggregate over every
-folder.
+folders, only at `start()`. `PoiSelect` (stateless) then picks the top-k PoIs from
+that running correlation. The final emitted PoI is the aggregate over every folder.
+
+The old `PearsonPoiFinder` was split into `PearsonCorrelator` (stateful accumulation)
+and `PoiSelect` (stateless selection) so that, in Idle, changing `top_k`/`rank_by`
+re-selects from the cached correlation without re-streaming.
 
 Pipeline (built once by the app, then fed frame-by-frame):
 
 ```
 AppSrc@src
-  src_0 (traces) ─► Tee@trace_tee ─┬─► @poi.features
+  src_0 (traces) ─► Tee@trace_tee ─┬─► @corr.features
   │                                └─► @leakage.traces
   src_1 (plain)  ────────────────────► @leakage.plaintexts
   src_2 (key)    ────────────────────► @leakage.keys
-AesLeakage@leakage (channels=[HW(m),HW(y)]) ─► @poi.targets
-PearsonPoiFinder@poi (top_k=[50], rank_by=[abs])   # auto → incremental (live)
+AesLeakage@leakage (channels=[HW(m),HW(y)]) ─► @corr.targets
+PearsonCorrelator@corr ─► @poi         # stateful: incremental correlation (live)
+PoiSelect@poi (top_k=[50], rank_by=[abs])   # stateless: top-k selection
 ```
 
 One `AppSrc` step = one folder = one buffer per pad, all stamped with a single
-shared vector clock, so `AesLeakage` and `PearsonPoiFinder` pair the three inputs
+shared vector clock, so `AesLeakage` and `PearsonCorrelator` pair the three inputs
 per folder with the default barrier (no `Sync` element needed).
 
 ## Data layout

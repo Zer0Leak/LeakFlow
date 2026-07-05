@@ -297,7 +297,7 @@ AesLeakage.channels: [HW(m)] -> [HW(m), HW(y)]
 effect: payload-output, scope: downstream, output pad: leakage
 ```
 
-reruns from `AesLeakage.leakage` downstream through `PearsonPoiFinder`,
+reruns from `AesLeakage.leakage` downstream through `PearsonCorrelator`, `PoiSelect`,
 annotation conversion, and plot sinks using cached/latest inputs, without
 rerunning upstream trace loading.
 

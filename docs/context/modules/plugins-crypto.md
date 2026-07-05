@@ -105,12 +105,18 @@ CLI/inspect files if affected:
   fields and `correct key` are omitted, `norm_value` stays positive, and
   `payload.annotation.success_source=none`. Useful as
   `@attack ! @stats.scores; @key ! @stats.truth; @stats ! @ann ! @plot.annotations`.
-- `PearsonPoiFinder` (`Analyze/SCA/Statistics/PoI`): joins the trace branch
-  (`features`) and the leakage branch (`targets`) and selects per-target PoI sample
-  indexes by Pearson correlation. Emits a `CorrelationPoiPayload`. Properties
-  include `top_k` and `rank_by`. Re-owns the target model's
-  `payload.leakage.*`/`payload.crypto.*` facts and stamps `payload.poi.*` and
-  per-target `poi.target.N.*` metadata.
+- `PearsonCorrelator` (`Analyze/SCA/Statistics/Correlation`): joins the trace branch
+  (`features`) and the leakage branch (`targets`) and emits the Pearson correlation of
+  every sample against each target as a `CorrelationPayload` (`leakflow/correlation`).
+  Properties: `correlation_mode` (auto/recompute/incremental), `compute_dtype`, `epsilon`.
+  **Stateful** in incremental mode (`can_replay()==false`); accumulation-property changes
+  need a restart. Re-owns the target model's `payload.leakage.*`/`payload.crypto.*` facts.
+- `PoiSelect` (`Analyze/SCA/Statistics/PoI`): selects the top-k PoI sample indexes per
+  (byte, channel) from a `CorrelationPayload` and emits a `CorrelationPoiPayload`.
+  Properties: `top_k`, `rank_by`. **Stateless** (`can_replay()==true`), so changing
+  `top_k`/`rank_by` in Idle re-selects from the cached correlation without re-streaming.
+  Stamps `payload.poi.*` metadata. (`PearsonCorrelator` + `PoiSelect` are the split of
+  the former `PearsonPoiFinder`.)
 - `CorrelationPoiToPlotAnnotations` (`Convert/SCA/Plot/Annotations`): converts a
   `CorrelationPoiPayload` into a generic `PlotAnnotationPayload` for
   `TracePlot.annotations`. Property `precision` (0–12, default 3).
@@ -135,14 +141,14 @@ Apache-2.0
 in `leakflow_crypto` (helpers) and this plugin (elements); it must not leak into
 core, base, or the generic plugin families.
 
-`PearsonPoiFinder` is generic SCA and is expected to move to a future
+`PearsonCorrelator`/`PoiSelect` are generic SCA and are expected to move to a future
 `leakflow_plugins_sca`; for now only its klass reflects that. See
 `docs/design/metadata_klass_taxonomy.md`.
 
 ## Correctness
 
 The AES PoI pipeline (`TorchFileSrc` ×3 → `Tee` → `AesLeakage` →
-`PearsonPoiFinder` → `CorrelationPoiToPlotAnnotations` → `TracePlot`) is validated
+`PearsonCorrelator` → `PoiSelect` → `CorrelationPoiToPlotAnnotations` → `TracePlot`) is validated
 numerically over the checked-in `key_01`/`key_02` fixtures by
 `tests/plugins/crypto/aes_poi_correctness_test.cpp` (Phase 26), not just for
 running. See `docs/guides/AES.md` for runnable examples.

@@ -79,12 +79,12 @@ This is the real pipeline. It proves the default barrier and partial rerun.
 
 ```
 TorchFileSrc(traces)     [slot 1] ─► Tee [0 slots] ┬─► TracePlot.sink   [0 slots, sink]
-                                                   ├─► PearsonPoiFinder.features
+                                                   ├─► PearsonCorrelator.features
                                                    └─► AesLeakage.traces
 TorchFileSrc(plaintexts) [slot 2] ─► AesLeakage.plaintexts
 TorchFileSrc(key)        [slot 3] ─► AesLeakage.keys
-AesLeakage               [slot 4] ─► PearsonPoiFinder.targets
-PearsonPoiFinder         [slot 5] ─► CorrelationPoiToPlotAnnotations [slot 6] ─► TracePlot.annotations
+AesLeakage               [slot 4] ─► PearsonCorrelator.targets
+PearsonCorrelator [slot 5] ─► PoiSelect [slot 6] ─► CorrelationPoiToPlotAnnotations [slot 7] ─► TracePlot.annotations
 ```
 
 **Threads.** No Queue ⇒ **1 thread** (offline, synchronous).
@@ -98,26 +98,30 @@ PearsonPoiFinder         [slot 5] ─► CorrelationPoiToPlotAnnotations [slot 6
 | plain_src | — | — | `{2:1}` |
 | key_src | — | — | `{3:1}` |
 | AesLeakage | traces `{1:1}`, plain `{2:1}`, keys `{3:1}` | no shared non-zero slot → fires | `{1:1, 2:1, 3:1, 4:1}` |
-| PearsonPoiFinder | features `{1:1}`, targets `{1:1,2:1,3:1,4:1}` | **slot 1: 1==1 → match** (2,3,4 wildcard on features) | `{1:1,2:1,3:1,4:1,5:1}` |
-| ann | `{1:1,…,5:1}` | single input | `{1:1,…,5:1,6:1}` |
-| TracePlot | sink `{1:1}`, annotations `{1:1,…,6:1}` | **slot 1: 1==1 → match** | renders |
+| PearsonCorrelator | features `{1:1}`, targets `{1:1,2:1,3:1,4:1}` | **slot 1: 1==1 → match** (2,3,4 wildcard on features) | `{1:1,2:1,3:1,4:1,5:1}` |
+| PoiSelect | `{1:1,…,5:1}` | single input | `{1:1,…,5:1,6:1}` |
+| ann | `{1:1,…,6:1}` | single input | `{1:1,…,6:1,7:1}` |
+| TracePlot | sink `{1:1}`, annotations `{1:1,…,7:1}` | **slot 1: 1==1 → match** | renders |
 
 **Why this is the proof.** `TracePlot.sink` (raw traces) and `TracePlot.annotations`
 (derived) both carry **slot 1 = traces_src's count**. The fold-match on slot 1 **is
 the barrier**: it guarantees the annotations were derived from *these* traces. The
-derived elements' slots (4, 5, 6) are wildcards on the raw branch, so they never
+derived elements' slots (4, 5, 6, 7) are wildcards on the raw branch, so they never
 interfere. No tuning, no configuration — the diamond just synchronizes.
 
 **Partial rerun (change `AesLeakage.channels`).** `rerun_from(AesLeakage)`; replay
-set `{AesLeakage, PearsonPoiFinder, ann, TracePlot}`. The traces branch to
-`TracePlot.sink` is **not** in the replay set → seeded from cache.
+set `{AesLeakage, PearsonCorrelator, PoiSelect, ann, TracePlot}`. The traces branch to
+`TracePlot.sink` is **not** in the replay set → seeded from cache. (Offline, so
+`PearsonCorrelator` is in recompute mode and replayable; changing `PoiSelect.top_k`
+alone would replay only `{PoiSelect, ann, TracePlot}` from the cached correlation.)
 
 | element | inputs | output clock |
 |---|---|---|
 | AesLeakage (reprocessed, cached inputs) | `{1:1}`, `{2:1}`, `{3:1}` | `{1:1,2:1,3:1, 4:2}` ← own slot bumped |
-| PearsonPoiFinder | features **cached** `{1:1}`, targets new `{1:1,2:1,3:1,4:2}` | slot 1: 1==1 → match → `{…,4:2,5:2}` |
-| ann | `{…,5:2}` | `{…,5:2,6:2}` |
-| TracePlot | sink **cached** `{1:1}`, annotations new `{1:1,…,6:2}` | **slot 1: 1==1 → match** → renders cached traces + new annotations |
+| PearsonCorrelator | features **cached** `{1:1}`, targets new `{1:1,2:1,3:1,4:2}` | slot 1: 1==1 → match → `{…,4:2,5:2}` |
+| PoiSelect | `{…,5:2}` | `{…,5:2,6:2}` |
+| ann | `{…,6:2}` | `{…,6:2,7:2}` |
+| TracePlot | sink **cached** `{1:1}`, annotations new `{1:1,…,7:2}` | **slot 1: 1==1 → match** → renders cached traces + new annotations |
 
 The reconfigured elements bumped slots 4/5/6 (their generation), but **slot 1
 (traces_src) is unchanged on both branches**, so the barrier still matches and

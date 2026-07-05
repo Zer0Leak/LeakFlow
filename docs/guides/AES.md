@@ -150,11 +150,13 @@ print(leakage.shape)  # torch.Size([2, 50, 1])
 
 ## Pearson PoI Annotations For TracePlot
 
-`PearsonPoiFinder` joins the trace branch and the AES leakage branch:
+`PearsonCorrelator` joins the trace branch and the AES leakage branch, then
+`PoiSelect` picks the top-k PoIs (the split of the old `PearsonPoiFinder`):
 
 ```text
-traces [N,M]                 -> PearsonPoiFinder.features
-AES leakage [B,N,C]          -> PearsonPoiFinder.targets
+traces [N,M]                 -> PearsonCorrelator.features
+AES leakage [B,N,C]          -> PearsonCorrelator.targets
+correlation                  -> PoiSelect.correlation
 Pearson PoIs                 -> CorrelationPoiToPlotAnnotations
 plot annotations             -> TracePlot.annotations
 trace branch copy            -> TracePlot.sink
@@ -169,8 +171,8 @@ byte_indexes[1].HW(y)
 ...
 ```
 
-`PearsonPoiFinder` forwards the AES byte-index metadata and stamps expanded
-target metadata such as:
+`PearsonCorrelator` (and `PoiSelect` downstream) forwards the AES byte-index
+metadata and stamps expanded target metadata such as:
 
 ```text
 leakage.byte_indexes=[3,5]
@@ -190,14 +192,14 @@ and `5`. It opens the interactive TracePlot window after pipeline execution.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonPoiFinder@poi(top_k=[10],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @ann ! @plot.annotations'
+  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[10],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @plot.annotations'
 ```
 
 For a non-GUI smoke check, stop at `Summary` after the annotation converter:
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonPoiFinder@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=3); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @ann ! @summary'
+  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=3); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary'
 ```
 
 Expected summary facts include:

@@ -744,7 +744,7 @@ affected output: leakage
 
 This changes target payload shape and target metadata. A future incremental
 executor should rerun `AesLeakage.leakage` and downstream consumers such as
-`PearsonPoiFinder`, annotation conversion, and plot sinks using cached/latest
+`PearsonCorrelator`, `PoiSelect`, annotation conversion, and plot sinks using cached/latest
 inputs. It should not reload unrelated upstream traces.
 
 ### Descriptor Use

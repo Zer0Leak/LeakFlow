@@ -105,7 +105,7 @@ PoIs overlaid on the trace browser.
 
 ```bash
 leakflow --log-level info run \
-  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt); Tee@traces; TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); AesLeakage@leakage(byte_indexes=[0]); PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @ann ! @plot.annotations'
+  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt); Tee@traces; TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); AesLeakage@leakage(byte_indexes=[0]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[50],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @plot.annotations'
 ```
 # Metadata version
 
@@ -125,7 +125,8 @@ leakflow --log-level info run --graph \
       @trace_tee.src_2{routing.branch=analysis-leakage}; \
   AesLeakage@leakage \
       (channels=[HW(y)],byte_indexes=[0]); \
-  PearsonPoiFinder@poi \
+  PearsonCorrelator@corr; \
+  PoiSelect@poi \
       (top_k=[50],rank_by=[abs]); \
   CorrelationPoiToPlotAnnotations@ann \
       (precision=3); \
@@ -133,10 +134,10 @@ leakflow --log-level info run --graph \
       (title="AES byte 0 PoIs",group=aes,label=traces,x_axis=sample); \
   @traces_src ! @trace_tee; \
                     @trace_tee.src_0 ! @plot.sink; \
-                    @trace_tee.src_1 ! @poi.features; \
+                    @trace_tee.src_1 ! @corr.features; \
                     @trace_tee.src_2 ! @leakage.traces; \
   @plain_src ! @leakage.plaintexts; \
-                                              @leakage ! @poi.targets; \
+                                              @leakage ! @corr.targets; @corr ! @poi; \
   @key_src   ! @leakage.keys; \
   @poi ! @ann ! @plot.annotations'
 ```
@@ -547,35 +548,35 @@ leakflow --log-level info run --graph \
       @trace_tee.src_2{routing.branch=analysis-leakage}; \
    Sync@leakage_sync(policy=zip); \
    AesLeakage@leakage(channels=[HW(y)],byte_indexes=[0]); \
-   PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); \
+   PearsonCorrelator@corr; PoiSelect@poi(top_k=[50],rank_by=[abs]); \
    CorrelationPoiToPlotAnnotations@ann(precision=3); \
    TracePlot@plot \
       (title="AES byte 0 PoIs",group=aes,label=traces,x_axis=sample); \
    @traces_src ! @traces_queue ! @trace_tee; \
       @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @poi.features; \
+      @trace_tee.src_1 ! @corr.features; \
       @trace_tee.src_2 ! @leakage_sync.in_0; \
    @plain_src ! @plain_queue; \
       @plain_queue.src ! @leakage_sync.in_1; \
    @leakage_sync.out_0 ! @leakage.traces; \
    @leakage_sync.out_1 ! @leakage.plaintexts; \
    @key_src ! @leakage.keys; \
-   @leakage ! @poi.targets; \
+   @leakage ! @corr.targets; @corr ! @poi; \
    @poi ! @ann ! @plot.annotations'
 ```
 
 Notes:
 
 - `Tee@trace_tee` fans the trace tensor to three branches: `TracePlot.sink`
-  (plot), `PearsonPoiFinder.features` (correlation), and `AesLeakage.traces`
+  (plot), `PearsonCorrelator.features` (correlation), and `AesLeakage.traces`
   (leakage alignment check).
 - `FakeLiveSrc@traces_src{...}` carries explicit user `capture` facts
   (`capture.sample_rate_hz`) that are unioned and preserved through
-  `AesLeakage`, `PearsonPoiFinder`, and `CorrelationPoiToPlotAnnotations` all
-  the way to the plot. The trace-describing `payload.leakage.inverted`/
-  `payload.leakage.range` are `payload`-group: they ride the pass-through
-  traces→plot branch but are dropped when `AesLeakage`/`PearsonPoiFinder`
-  derive new buffers.
+  `AesLeakage`, `PearsonCorrelator`, `PoiSelect`, and
+  `CorrelationPoiToPlotAnnotations` all the way to the plot. The trace-describing
+  `payload.leakage.inverted`/`payload.leakage.range` are `payload`-group: they ride
+  the pass-through traces→plot branch but are dropped when
+  `AesLeakage`/`PearsonCorrelator` derive new buffers.
 - The `@trace_tee.src_%u{routing.branch.family=...}` and exact
   `@trace_tee.src_N{routing.branch=...}` annotations are `routing`-group metadata.
   They ride each buffer to its immediate consumer (and appear in `--graph`/logs),
@@ -583,16 +584,18 @@ Notes:
   results.
 - File provenance (`origin.file.path`, `origin.file.size`, `origin.file.format`)
   is `origin`-group. Pass-through hops keep it as-is, but the multi-input
-  `AesLeakage` and `PearsonPoiFinder` relabel each input's origin as
+  `AesLeakage` and `PearsonCorrelator` relabel each input's origin as
   `origin.<pad>.<key>` (for example `origin.plaintexts.file.path`,
   `origin.keys.file.path`, `origin.features.file.path`) so the fused buffer keeps
   unambiguous provenance.
 - `AesLeakage(channels=[HW(m)],byte_indexes=[0])` creates the `HW(m)` target
   for AES byte `0` and stamps its own `payload.leakage.*`/`payload.crypto.*`/
   `payload.trace.*` metadata.
-- `PearsonPoiFinder(top_k=[50],rank_by=[abs])` selects the strongest absolute
-  correlations per target, re-owns the target model's
-  `payload.leakage.*`/`payload.crypto.*` facts, and adds `payload.poi.*` results.
+- `PearsonCorrelator` computes the correlation of every sample against each
+  target (recompute or incremental) and `PoiSelect(top_k=[50],rank_by=[abs])`
+  selects the strongest absolute correlations per target, re-owns the target
+  model's `payload.leakage.*`/`payload.crypto.*` facts, and adds `payload.poi.*`
+  results.
 - `CorrelationPoiToPlotAnnotations(precision=3)` turns those PoIs into
   `TracePlot.annotations` markers with rounded display text.
 - Change `byte_indexes=[0]` and the `TracePlot` title together when preparing a

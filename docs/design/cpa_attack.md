@@ -28,7 +28,7 @@ LeakFlow already has the building blocks needed to start this work:
   and guess-domain first-round leakage hypotheses `[U,G,N,L]`.
 - `AesLeakageHypothesis` exposes AES guess-domain leakage hypotheses to
   pipelines with output shape `[U,G,N,L]`.
-- `PearsonPoiFinder` already computes Pearson correlation between trace samples
+- `PearsonCorrelator` already computes Pearson correlation between trace samples
   and target leakage and has the recompute/incremental mode vocabulary that
   should be reused by CPA later.
 - `CorrelationPoiPayload`, `CorrelationPoiToPlotAnnotations`, `TracePlot`, and
@@ -451,7 +451,7 @@ through a generic `ScoreView` behind the `PlotView` registry
 
 ## Recompute And Incremental Modes
 
-`CpaAttack` uses the same mode vocabulary as `PearsonPoiFinder`:
+`CpaAttack` uses the same mode vocabulary as `PearsonCorrelator`:
 
 ```text
 correlation_mode=auto|recompute|incremental
@@ -662,7 +662,7 @@ Validation:
 ### Phase 7: Incremental/live CPA
 
 Status: implemented in `CpaAttack` using sufficient statistics and the same mode
-vocabulary as `PearsonPoiFinder`.
+vocabulary as `PearsonCorrelator`.
 
 Add incremental CPA state and `auto` mode.
 

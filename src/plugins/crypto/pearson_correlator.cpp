@@ -1,18 +1,16 @@
-#include "leakflow/plugins/crypto/pearson_poi_finder.hpp"
+#include "leakflow/plugins/crypto/pearson_correlator.hpp"
 
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/statistics.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/metadata_forwarding.hpp"
-#include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
+#include "leakflow/plugins/crypto/correlation_payload.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,12 +20,6 @@
 
 namespace leakflow::plugins::crypto {
 namespace {
-
-enum class RankBy {
-    Abs,
-    Positive,
-    Negative,
-};
 
 enum class CorrelationMode {
     Auto,
@@ -92,25 +84,6 @@ struct CorrelationTargetLayout {
     if (const auto value = element.property_as<std::string>(name)) {
         return *value;
     }
-
-    return fallback;
-}
-
-[[nodiscard]] IntList int_list_property_or(const Element& element, std::string_view name, IntList fallback)
-{
-    if (const auto value = element.property_as<IntList>(name)) {
-        return *value;
-    }
-
-    return fallback;
-}
-
-[[nodiscard]] StringList string_list_property_or(const Element& element, std::string_view name, StringList fallback)
-{
-    if (const auto value = element.property_as<StringList>(name)) {
-        return *value;
-    }
-
     return fallback;
 }
 
@@ -119,7 +92,6 @@ struct CorrelationTargetLayout {
     if (const auto value = element.property_as<double>(name)) {
         return *value;
     }
-
     return fallback;
 }
 
@@ -135,8 +107,7 @@ struct CorrelationTargetLayout {
     if (lowered == "float64") {
         return leakflow::base::PearsonComputeDtype::Float64;
     }
-
-    throw std::invalid_argument("PearsonPoiFinder compute_dtype must be input, float32, or float64");
+    throw std::invalid_argument("PearsonCorrelator compute_dtype must be input, float32, or float64");
 }
 
 [[nodiscard]] CorrelationMode correlation_mode_for(std::string_view text)
@@ -151,8 +122,7 @@ struct CorrelationTargetLayout {
     if (lowered == "incremental") {
         return CorrelationMode::Incremental;
     }
-
-    throw std::invalid_argument("PearsonPoiFinder correlation_mode must be auto, recompute, or incremental");
+    throw std::invalid_argument("PearsonCorrelator correlation_mode must be auto, recompute, or incremental");
 }
 
 [[nodiscard]] CorrelationMode effective_correlation_mode(CorrelationMode configured_mode, bool live_driven)
@@ -161,131 +131,6 @@ struct CorrelationTargetLayout {
         return live_driven ? CorrelationMode::Incremental : CorrelationMode::Recompute;
     }
     return configured_mode;
-}
-
-[[nodiscard]] RankBy rank_by_for(std::string_view text)
-{
-    const auto lowered = lower_string(text);
-    if (lowered == "abs") {
-        return RankBy::Abs;
-    }
-    if (lowered == "positive") {
-        return RankBy::Positive;
-    }
-    if (lowered == "negative") {
-        return RankBy::Negative;
-    }
-
-    throw std::invalid_argument("PearsonPoiFinder rank_by values must be abs, positive, or negative");
-}
-
-// rank_by is applied per leakage feature/channel (the last target dimension, for
-// example HW(m), HW(y)). It must be one value (applied to every feature) or one
-// value per feature. The returned vector is indexed by channel.
-[[nodiscard]] std::vector<RankBy> rank_modes_for(const Element& element, std::int64_t channel_count)
-{
-    auto values = string_list_property_or(element, "rank_by", StringList{"abs"});
-    if (values.empty()) {
-        throw std::invalid_argument("PearsonPoiFinder rank_by cannot be empty");
-    }
-
-    std::vector<RankBy> modes;
-    if (values.size() == 1) {
-        modes.assign(static_cast<std::size_t>(channel_count), rank_by_for(values.front()));
-        return modes;
-    }
-    if (values.size() != static_cast<std::size_t>(channel_count)) {
-        throw std::invalid_argument(
-            "PearsonPoiFinder rank_by must have length 1 or the number of leakage features/channels");
-    }
-
-    modes.reserve(values.size());
-    for (const auto& value : values) {
-        modes.push_back(rank_by_for(value));
-    }
-    return modes;
-}
-
-[[nodiscard]] std::vector<std::int64_t> per_result_group_top_k_for(const Element& element, std::int64_t result_group_count)
-{
-    auto values = int_list_property_or(element, "top_k", IntList{10});
-    if (values.empty()) {
-        throw std::invalid_argument("PearsonPoiFinder top_k cannot be empty");
-    }
-
-    if (values.size() == 1) {
-        return std::vector<std::int64_t>(static_cast<std::size_t>(result_group_count), values.front());
-    }
-    if (values.size() != static_cast<std::size_t>(result_group_count)) {
-        throw std::invalid_argument("PearsonPoiFinder top_k must have length 1 or result group count");
-    }
-
-    return values;
-}
-
-void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
-{
-    if (top_k <= 0) {
-        throw std::invalid_argument("PearsonPoiFinder top_k values must be positive");
-    }
-    if (top_k > feature_count) {
-        throw std::invalid_argument("PearsonPoiFinder top_k values must not exceed feature count");
-    }
-}
-
-[[nodiscard]] torch::Tensor contribution_for(const torch::Tensor& correlations, RankBy rank_by)
-{
-    switch (rank_by) {
-    case RankBy::Abs:
-        return correlations.abs();
-    case RankBy::Positive:
-        return correlations.clamp_min(0);
-    case RankBy::Negative:
-        return (-correlations).clamp_min(0);
-    }
-
-    throw std::invalid_argument("unsupported PearsonPoiFinder rank_by");
-}
-
-[[nodiscard]] torch::Tensor pairs_from_indexes_and_values(
-    const torch::Tensor& indexes,
-    const torch::Tensor& values)
-{
-    return torch::stack({indexes.to(torch::kFloat64), values.to(torch::kFloat64)}, 1).contiguous();
-}
-
-[[nodiscard]] std::vector<CorrelationPoiResult> per_byte_results(
-    const CorrelationTargetLayout& layout,
-    const std::vector<std::int64_t>& top_k_values,
-    const std::vector<RankBy>& rank_modes)
-{
-    std::vector<CorrelationPoiResult> results;
-    results.reserve(layout.byte_indexes.size());
-
-    for (auto byte_offset = std::int64_t{0};
-         byte_offset < static_cast<std::int64_t>(layout.byte_indexes.size());
-         ++byte_offset) {
-        const auto top_k = top_k_values.at(static_cast<std::size_t>(byte_offset));
-        validate_top_k(top_k, layout.feature_count);
-
-        std::vector<torch::Tensor> channel_results;
-        channel_results.reserve(static_cast<std::size_t>(layout.channel_count));
-        for (auto channel_index = std::int64_t{0}; channel_index < layout.channel_count; ++channel_index) {
-            const auto correlations = layout.grouped_correlation[byte_offset][channel_index];
-            const auto scores = contribution_for(correlations, rank_modes.at(static_cast<std::size_t>(channel_index)));
-            const auto [selected_scores, selected_indexes] = torch::topk(scores, top_k);
-            (void)selected_scores;
-            const auto selected_correlations = correlations.index_select(0, selected_indexes);
-            channel_results.push_back(pairs_from_indexes_and_values(selected_indexes, selected_correlations));
-        }
-
-        results.push_back(CorrelationPoiResult{
-            .target_byte_index = layout.byte_indexes.at(static_cast<std::size_t>(byte_offset)),
-            .result = torch::stack(channel_results, 0).contiguous(),
-        });
-    }
-
-    return results;
 }
 
 void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
@@ -299,7 +144,6 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
         "payload.trace.count",
         "payload.trace.input",
     };
-
     for (const auto key : keys) {
         if (source.has_metadata(key)) {
             sink.set_metadata(std::string(key), source.metadata(key));
@@ -313,7 +157,6 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     if (begin == std::string_view::npos) {
         return {};
     }
-
     const auto end = text.find_last_not_of(" \t\n\r");
     return std::string(text.substr(begin, end - begin + 1));
 }
@@ -340,7 +183,6 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     if (trimmed.empty()) {
         return {};
     }
-
     std::vector<std::int64_t> values;
     for (const auto& part : split_comma_list(trimmed)) {
         std::size_t consumed = 0;
@@ -358,7 +200,6 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     if (!targets_buffer.has_metadata("payload.leakage.channels")) {
         return {};
     }
-
     return split_comma_list(targets_buffer.metadata("payload.leakage.channels"));
 }
 
@@ -367,16 +208,14 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     if (!targets_buffer.has_metadata("payload.leakage.byte_indexes")) {
         return {};
     }
-
     return parse_int_metadata_list(targets_buffer.metadata("payload.leakage.byte_indexes"));
 }
 
 [[nodiscard]] std::uint16_t checked_byte_index(std::int64_t value)
 {
     if (value < 0 || value > std::numeric_limits<std::uint16_t>::max()) {
-        throw std::invalid_argument("PearsonPoiFinder byte indexes must fit in uint16");
+        throw std::invalid_argument("PearsonCorrelator byte indexes must fit in uint16");
     }
-
     return static_cast<std::uint16_t>(value);
 }
 
@@ -418,7 +257,7 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
             static_cast<std::int64_t>(byte_indexes.size()) * channel_count;
         if (represented_target_count != flattened_target_count) {
             throw std::invalid_argument(
-                "PearsonPoiFinder leakage byte indexes and channels must match flattened target count");
+                "PearsonCorrelator leakage byte indexes and channels must match flattened target count");
         }
     } else {
         byte_indexes = default_byte_indexes(flattened_target_count);
@@ -438,12 +277,12 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
 
 } // namespace
 
-ElementDescriptor PearsonPoiFinder::descriptor()
+ElementDescriptor PearsonCorrelator::descriptor()
 {
     return {
-        .type_name = "PearsonPoiFinder",
-        .klass = "Analyze/SCA/Statistics/PoI",
-        .purpose = "select points of interest from Pearson correlations between features and target models",
+        .type_name = "PearsonCorrelator",
+        .klass = "Analyze/SCA/Statistics/Correlation",
+        .purpose = "compute the Pearson correlation of features against target models (recompute or incremental)",
         .input_pads = {
             Pad(
                 "features",
@@ -452,23 +291,9 @@ ElementDescriptor PearsonPoiFinder::descriptor()
             Pad("targets", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
         },
         .output_pads = {
-            Pad("poi", PadDirection::Output, Caps(correlation_poi_caps_type)),
+            Pad("correlation", PadDirection::Output, Caps(correlation_caps_type)),
         },
         .property_specs = {
-            PropertySpec("top_k", IntList{10}, "PoI count list; one value applies to all result groups",
-                "", std::monostate{}, "",
-                PropertyEffect{
-                    .kind = PropertyEffectKind::PayloadOutput,
-                    .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"poi"},
-                }),
-            PropertySpec("rank_by", StringList{"abs"}, "Ranking mode list per result group: abs, positive, or negative",
-                "", std::monostate{}, "",
-                PropertyEffect{
-                    .kind = PropertyEffectKind::PayloadOutput,
-                    .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"poi"},
-                }),
             PropertySpec(
                 "correlation_mode",
                 std::string("auto"),
@@ -480,7 +305,7 @@ ElementDescriptor PearsonPoiFinder::descriptor()
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"poi"},
+                    .output_pads = {"correlation"},
                 }),
             PropertySpec(
                 "active_correlation_mode",
@@ -502,7 +327,7 @@ ElementDescriptor PearsonPoiFinder::descriptor()
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"poi"},
+                    .output_pads = {"correlation"},
                 }),
             PropertySpec(
                 "epsilon",
@@ -514,35 +339,35 @@ ElementDescriptor PearsonPoiFinder::descriptor()
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"poi"},
+                    .output_pads = {"correlation"},
                 }),
         },
-        .keywords = {"pearson", "correlation", "poi", "sca", "statistics"},
+        .keywords = {"pearson", "correlation", "sca", "statistics"},
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
                 "routing.element",
                 std::string(),
-                "element instance name that produced the PoI buffer",
-                {"poi"}),
+                "element instance name that produced the correlation buffer",
+                {"correlator"}),
             make_element_metadata_descriptor(
-                "payload.poi.method",
+                "payload.correlation.method",
                 std::string(),
-                "PoI selection method",
-                {pearson_poi_method_id}),
+                "correlation method",
+                {pearson_correlation_method_id}),
             make_element_metadata_descriptor(
-                "payload.poi.features_count",
+                "payload.correlation.features_count",
                 std::int64_t{},
-                "number of input features searched for PoI selection",
+                "number of input features correlated",
                 {"5000"}),
             make_element_metadata_descriptor(
-                "payload.poi.correlation_mode",
+                "payload.correlation.mode",
                 std::string(),
-                "effective correlation mode used for this PoI result",
+                "effective correlation mode used for this buffer",
                 {"recompute", "incremental"}),
             make_element_metadata_descriptor(
-                "payload.poi.observation_count",
+                "payload.correlation.observation_count",
                 std::int64_t{},
-                "number of trace observations represented by this PoI result",
+                "number of trace observations represented by this correlation",
                 {"1", "50", "10000"}),
         },
         .metadata_suggestions = {
@@ -559,33 +384,33 @@ ElementDescriptor PearsonPoiFinder::descriptor()
             make_element_metadata_descriptor(
                 "payload.crypto.algorithm",
                 std::string(),
-                "algorithm name carried into PoI results",
+                "algorithm name carried into correlation results",
                 {"AES"}),
         },
     };
 }
 
-PearsonPoiFinder::PearsonPoiFinder(std::string name)
+PearsonCorrelator::PearsonCorrelator(std::string name)
     : Element(std::move(name))
 {
     configure_from_descriptor(descriptor());
 }
 
-void PearsonPoiFinder::start()
+void PearsonCorrelator::start()
 {
     update_active_correlation_mode();
     reset_incremental_correlation();
 }
 
-std::optional<Buffer> PearsonPoiFinder::process(std::optional<Buffer>)
+std::optional<Buffer> PearsonCorrelator::process(std::optional<Buffer>)
 {
-    throw std::invalid_argument("PearsonPoiFinder requires named features and targets inputs");
+    throw std::invalid_argument("PearsonCorrelator requires named features and targets inputs");
 }
 
-std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
+std::optional<Buffer> PearsonCorrelator::process_inputs(ElementInputs inputs)
 {
-    const auto& features_buffer = required_input(inputs, "features", "PearsonPoiFinder");
-    const auto& targets_buffer = required_input(inputs, "targets", "PearsonPoiFinder");
+    const auto& features_buffer = required_input(inputs, "features", "PearsonCorrelator");
+    const auto& targets_buffer = required_input(inputs, "targets", "PearsonCorrelator");
     const auto features_payload = torch_payload_for(features_buffer, "features");
     const auto targets_payload = torch_payload_for(targets_buffer, "targets");
 
@@ -614,7 +439,6 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
             incremental_correlation_.emplace(correlation_options);
             incremental_options_ = correlation_options;
         }
-
         correlation = incremental_correlation_->update(
             features_payload->tensor(),
             targets_payload->tensor());
@@ -622,51 +446,50 @@ std::optional<Buffer> PearsonPoiFinder::process_inputs(ElementInputs inputs)
     }
 
     const auto layout = correlation_target_layout(correlation, targets_buffer);
-    const auto result_group_count = static_cast<std::int64_t>(layout.byte_indexes.size());
-    const auto rank_modes = rank_modes_for(*this, layout.channel_count);
-
-    auto results =
-        per_byte_results(layout, per_result_group_top_k_for(*this, result_group_count), rank_modes);
     const auto score_name = std::string("correlation");
 
-    Buffer output{Caps(correlation_poi_caps_type)};
+    Buffer output{Caps(correlation_caps_type)};
     forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     copy_target_semantic_metadata(targets_buffer, output);
     output.set_metadata("routing.element", name());
-    output.set_metadata("payload.poi.method", pearson_poi_method_id);
-    output.set_metadata("payload.poi.features_count", std::to_string(layout.feature_count));
+    output.set_metadata("payload.correlation.method", pearson_correlation_method_id);
+    output.set_metadata("payload.correlation.features_count", std::to_string(layout.feature_count));
     output.set_metadata(
-        "payload.poi.correlation_mode",
+        "payload.correlation.mode",
         correlation_mode == CorrelationMode::Recompute ? "recompute" : "incremental");
-    output.set_metadata("payload.poi.observation_count", std::to_string(observation_count));
-    output.set_payload(std::make_shared<CorrelationPoiPayload>(std::move(results), score_name));
+    output.set_metadata("payload.correlation.observation_count", std::to_string(observation_count));
+    output.set_payload(std::make_shared<CorrelationPayload>(
+        layout.grouped_correlation,
+        layout.byte_indexes,
+        layout.channel_count,
+        layout.feature_count,
+        score_name,
+        observation_count));
 
-    auto record = make_log_record(log::LogLevel::Debug, "element", "selected Pearson correlation PoIs");
-    record.fields.emplace("payload.poi.method", pearson_poi_method_id);
-    record.fields.emplace("score", score_name);
-    record.fields.emplace("result_groups", std::to_string(result_group_count));
+    auto record = make_log_record(log::LogLevel::Debug, "element", "computed Pearson correlation");
+    record.fields.emplace("payload.correlation.method", pearson_correlation_method_id);
+    record.fields.emplace("byte_groups", std::to_string(layout.byte_indexes.size()));
     record.fields.emplace("channel_count", std::to_string(layout.channel_count));
-    record.fields.emplace("target_count", std::to_string(layout.flattened_target_count));
     record.fields.emplace("features_count", std::to_string(layout.feature_count));
-    record.fields.emplace("correlation_mode", output.metadata("payload.poi.correlation_mode"));
+    record.fields.emplace("correlation_mode", output.metadata("payload.correlation.mode"));
     record.fields.emplace("observation_count", std::to_string(observation_count));
     leakflow::log::write(std::move(record));
 
     return output;
 }
 
-bool PearsonPoiFinder::can_replay() const
+bool PearsonCorrelator::can_replay() const
 {
     return string_property_or(*this, "active_correlation_mode", "recompute") == "recompute";
 }
 
-void PearsonPoiFinder::reset_incremental_correlation()
+void PearsonCorrelator::reset_incremental_correlation()
 {
     incremental_correlation_.reset();
     incremental_options_.reset();
 }
 
-void PearsonPoiFinder::update_active_correlation_mode()
+void PearsonCorrelator::update_active_correlation_mode()
 {
     const auto configured_mode =
         correlation_mode_for(string_property_or(*this, "correlation_mode", "auto"));
@@ -676,14 +499,14 @@ void PearsonPoiFinder::update_active_correlation_mode()
         std::string(active_mode == CorrelationMode::Recompute ? "recompute" : "incremental"));
 }
 
-void PearsonPoiFinder::property_changed(std::string_view name)
+void PearsonCorrelator::property_changed(std::string_view name)
 {
     if (name == "correlation_mode") {
         update_active_correlation_mode();
     }
 }
 
-void PearsonPoiFinder::live_driven_changed()
+void PearsonCorrelator::live_driven_changed()
 {
     update_active_correlation_mode();
 }

@@ -19,7 +19,7 @@ process_pads(inputs) -> outputs
 ```
 
 Examples: `AesLeakage`, `AesLeakageHypothesis`, `CpaAttack`, `AttackStats`,
-`PearsonPoiFinder`, annotations, summaries.
+`PearsonCorrelator`, `PoiSelect`, annotations, summaries.
 
 Only elements that naturally drive or decouple a stream should become runtime-aware:
 

@@ -7,7 +7,8 @@
 #include "leakflow/plugins/crypto/dpa_attack.hpp"
 #include "leakflow/plugins/crypto/attack_stats.hpp"
 #include "leakflow/plugins/crypto/attack_stats_to_plot_annotations.hpp"
-#include "leakflow/plugins/crypto/pearson_poi_finder.hpp"
+#include "leakflow/plugins/crypto/pearson_correlator.hpp"
+#include "leakflow/plugins/crypto/poi_select.hpp"
 #include "crypto_plugin_constants.hpp"
 
 #include <memory>
@@ -32,7 +33,8 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 DpaAttack::descriptor(),
                 AttackStats::descriptor(),
                 AttackStatsToPlotAnnotations::descriptor(),
-                PearsonPoiFinder::descriptor(),
+                PearsonCorrelator::descriptor(),
+                PoiSelect::descriptor(),
                 CorrelationPoiToPlotAnnotations::descriptor(),
             },
         }),
@@ -80,8 +82,11 @@ void register_element_factories(ElementFactoryRegistry& registry)
             {"AttackStatsToPlotAnnotations", [](std::string name) {
                  return std::make_shared<AttackStatsToPlotAnnotations>(std::move(name));
              }},
-            {"PearsonPoiFinder", [](std::string name) {
-                 return std::make_shared<PearsonPoiFinder>(std::move(name));
+            {"PearsonCorrelator", [](std::string name) {
+                 return std::make_shared<PearsonCorrelator>(std::move(name));
+             }},
+            {"PoiSelect", [](std::string name) {
+                 return std::make_shared<PoiSelect>(std::move(name));
              }},
             {"CorrelationPoiToPlotAnnotations", [](std::string name) {
                  return std::make_shared<CorrelationPoiToPlotAnnotations>(std::move(name));

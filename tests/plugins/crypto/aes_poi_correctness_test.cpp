@@ -210,7 +210,7 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
         return false;
     }
 
-    // ---- PearsonPoiFinder numeric correctness against an independent recompute ----
+    // ---- PoiSelect numeric correctness against an independent recompute ----
     crypto_plugin::AesLeakage target_leakage;
     target_leakage.set_property("byte_indexes", leakflow::IntList{static_cast<std::int64_t>(byte_index)});
     target_leakage.set_property("channels", leakflow::StringList{crypto_plugin::aes_leakage_channel_hw_y});
@@ -229,48 +229,55 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
         return false;
     }
 
-    crypto_plugin::PearsonPoiFinder finder;
+    // PearsonCorrelator (accumulation) + PoiSelect (top-k) -- the split of the old
+    // PearsonPoiFinder; the end-to-end PoI must be numerically identical.
+    crypto_plugin::PearsonCorrelator correlator;
+    // Match the independent recompute dtype so we can assert tight equality.
+    correlator.set_property("compute_dtype", std::string("float64"));
+    crypto_plugin::PoiSelect finder;
     finder.set_property("top_k", leakflow::IntList{1});
     finder.set_property("rank_by", leakflow::StringList{"abs"});
-    // Match the independent recompute dtype so we can assert tight equality.
-    finder.set_property("compute_dtype", std::string("float64"));
 
     leakflow::ElementInputs finder_inputs;
     finder_inputs.emplace("features", torch_buffer(traces));
     finder_inputs.emplace("targets", *target_buffer);
-    const auto poi_output = finder.process_inputs(std::move(finder_inputs));
-    if (!expect(poi_output.has_value(), label + ": PearsonPoiFinder produced no output")) {
+    const auto correlation_output = correlator.process_inputs(std::move(finder_inputs));
+    if (!expect(correlation_output.has_value(), label + ": PearsonCorrelator produced no output")) {
+        return false;
+    }
+    const auto poi_output = finder.process(*correlation_output);
+    if (!expect(poi_output.has_value(), label + ": PoiSelect produced no output")) {
         return false;
     }
 
     const auto poi_payload = poi_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
     if (!expect(poi_payload != nullptr && poi_payload->result_count() == 1,
-            label + ": PearsonPoiFinder result count was wrong")) {
+            label + ": PoiSelect result count was wrong")) {
         return false;
     }
     const auto& result = poi_payload->result(0);
-    if (!expect(result.target_byte_index == byte_index, label + ": PearsonPoiFinder reported wrong byte index")) {
+    if (!expect(result.target_byte_index == byte_index, label + ": PoiSelect reported wrong byte index")) {
         return false;
     }
     // result tensor is [channel, top_k, 2]: pair is (sample_index, correlation).
     if (!expect(result.result.dim() == 3 && result.result.size(0) == 1 && result.result.size(1) == 1
                 && result.result.size(2) == 2,
-            label + ": PearsonPoiFinder result shape was wrong")) {
+            label + ": PoiSelect result shape was wrong")) {
         return false;
     }
 
     const auto poi_sample_index = static_cast<std::int64_t>(result.result[0][0][0].item<double>());
     const auto poi_correlation = result.result[0][0][1].item<double>();
     if (!expect(poi_sample_index == poi_reference.sample_index,
-            label + ": PearsonPoiFinder PoI sample index did not match the strongest correlation sample")) {
+            label + ": PoiSelect PoI sample index did not match the strongest correlation sample")) {
         return false;
     }
     if (!expect_near(poi_correlation, poi_reference.correlation,
-            label + ": PearsonPoiFinder PoI correlation did not match the independent recompute")) {
+            label + ": PoiSelect PoI correlation did not match the independent recompute")) {
         return false;
     }
     if (!expect(std::abs(poi_correlation) >= poi_correlation_threshold,
-            label + ": PearsonPoiFinder PoI correlation magnitude did not clear the threshold")) {
+            label + ": PoiSelect PoI correlation magnitude did not clear the threshold")) {
         return false;
     }
 

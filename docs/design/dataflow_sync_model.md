@@ -158,7 +158,7 @@ Two overlays decide difficulty:
 
 Inside "converge" there are two strengths:
 
-- **Row-aligned combine** (PearsonPoiFinder: `features[n]` ↔ `targets[n]`) — needs
+- **Row-aligned combine** (PearsonCorrelator: `features[n]` ↔ `targets[n]`) — needs
   row sync.
 - **Reference / overlay combine** (TracePlot: traces + annotations that index into
   them by sample) — needs only **provenance/epoch consistency**, not row sync. So

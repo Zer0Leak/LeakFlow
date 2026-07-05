@@ -220,7 +220,7 @@ When caching is enabled, the executor caches the latest accepted **input buffer
 per element input pad** and the latest **output buffer per element output pad**.
 
 Per-input-pad granularity is **mandatory**, not optional: multi-input elements
-(e.g. `PearsonPoiFinder` with `features` + `targets`) reprocessing during a
+(e.g. `PearsonCorrelator` with `features` + `targets`) reprocessing during a
 partial rerun must take the unaffected pad's buffer from the cache while the
 affected pad's buffer comes fresh from the rerun frontier. The executor already
 gathers inputs keyed by pad (`inputs_by_element`) and asserts

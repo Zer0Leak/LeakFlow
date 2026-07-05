@@ -97,7 +97,7 @@ set_tests_properties(leakflow_cli_summary_level_env PROPERTIES
 )
 
 add_test(NAME leakflow_cli_log_payload_nested_fields
-    COMMAND leakflow --log-level info --log-color never run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[3]); PearsonPoiFinder@poi(top_k=[2],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); FakeSink@sink; @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @ann ! @sink"
+    COMMAND leakflow --log-level info --log-color never run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[3]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[2],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); FakeSink@sink; @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @sink"
 )
 set_tests_properties(leakflow_cli_log_payload_nested_fields PROPERTIES
     PASS_REGULAR_EXPRESSION "sample_index="
@@ -243,15 +243,15 @@ set_tests_properties(leakflow_cli_run_attack_annotations PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"
 )
 
-add_test(NAME leakflow_cli_run_pearson_poi_finder
-    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[0]); PearsonPoiFinder@poi(top_k=[3],rank_by=[abs]); Summary@summary(level=2); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @summary"
+add_test(NAME leakflow_cli_run_poi_select
+    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[0]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); Summary@summary(level=2); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @summary"
 )
-set_tests_properties(leakflow_cli_run_pearson_poi_finder PROPERTIES
+set_tests_properties(leakflow_cli_run_poi_select PROPERTIES
     PASS_REGULAR_EXPRESSION "payload.poi.method"
 )
 
 add_test(NAME leakflow_cli_run_correlation_poi_to_plot_annotations
-    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[3,5]); PearsonPoiFinder@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @traces_src ! @traces; @traces.src_0 ! @poi.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @poi.targets; @poi ! @ann ! @summary"
+    COMMAND leakflow run "TorchFileSrc@traces_src(path=${LEAKFLOW_AES_TRACES}); Tee@traces; TorchFileSrc@plain_src(path=${LEAKFLOW_AES_PLAINTEXTS}); TorchFileSrc@key_src(path=${LEAKFLOW_AES_KEY}); AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary"
 )
 set_tests_properties(leakflow_cli_run_correlation_poi_to_plot_annotations PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"
@@ -374,8 +374,8 @@ set_tests_properties(leakflow_ls_attack_stats_to_plot_annotations PROPERTIES
     PASS_REGULAR_EXPRESSION "plot annotations"
 )
 
-add_test(NAME leakflow_ls_pearson_poi_finder COMMAND leakflow-ls PearsonPoiFinder)
-set_tests_properties(leakflow_ls_pearson_poi_finder PROPERTIES
+add_test(NAME leakflow_ls_poi_select COMMAND leakflow-ls PoiSelect)
+set_tests_properties(leakflow_ls_poi_select PROPERTIES
     PASS_REGULAR_EXPRESSION "rank_by"
 )
 

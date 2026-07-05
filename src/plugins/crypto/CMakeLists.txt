@@ -1,6 +1,7 @@
 add_library(leakflow_plugins_crypto SHARED
     aes_leakage.cpp
     aes_leakage_hypothesis.cpp
+    correlation_payload.cpp
     correlation_poi_to_plot_annotations.cpp
     correlation_poi_payload.cpp
     cpa_attack.cpp
@@ -9,7 +10,8 @@ add_library(leakflow_plugins_crypto SHARED
     attack_stats.cpp
     attack_stats_to_plot_annotations.cpp
     descriptor_catalog.cpp
-    pearson_poi_finder.cpp
+    pearson_correlator.cpp
+    poi_select.cpp
 )
 target_compile_features(leakflow_plugins_crypto PUBLIC cxx_std_23)
 target_include_directories(leakflow_plugins_crypto

@@ -501,7 +501,7 @@ int main()
     if (!expect(descriptors.size() == 1, "crypto plugin descriptor count changed")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 8, "crypto plugin element count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 9, "crypto plugin element count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[2].type_name == "CpaAttack",

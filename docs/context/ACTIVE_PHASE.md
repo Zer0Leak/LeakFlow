@@ -42,7 +42,7 @@ plots, and Kyber hypotheses remain deferred.
 Implemented. Numeric correctness is asserted in
 `tests/plugins/crypto/aes_poi_correctness_test.cpp` for `key_01`/`key_02`:
 `AesLeakage` HW(m)/HW(y) vs values computed directly from the fixture bytes,
-`PearsonPoiFinder` PoI landing on the strongest-correlation sample with an
+`PoiSelect` PoI landing on the strongest-correlation sample with an
 independently recomputed correlation clearing a sane threshold, and
 `CorrelationPoiToPlotAnnotations` sample indexes/values/precision formatting
 matching the PoI output. No dependency on the local `traces/` tree.
@@ -228,7 +228,7 @@ Phase 24 has added `leakflow_plugins_crypto`:
 
 - `AesLeakage` for AES Hamming-weight leakage targets,
 - `AesLeakageHypothesis` for AES Hamming-weight key-guess leakage hypotheses,
-- `PearsonPoiFinder` with real named `features` and `targets` sink pads,
+- `PearsonCorrelator` (correlation) + `PoiSelect` (top-k) with named `features`/`targets` pads,
 - `CorrelationPoiPayload` for correlation PoI results,
 - target-label, AES byte-index, and channel metadata such as
   `poi.target.0.label`, `poi.target.0.byte_index`, and

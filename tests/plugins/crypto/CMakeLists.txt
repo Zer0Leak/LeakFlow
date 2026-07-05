@@ -49,15 +49,15 @@ leakflow_configure_test_target(leakflow_plugins_crypto_attack_stats_to_plot_anno
 add_test(NAME leakflow_plugins_crypto_attack_stats_to_plot_annotations
     COMMAND leakflow_plugins_crypto_attack_stats_to_plot_annotations_tests)
 
-add_executable(leakflow_plugins_crypto_pearson_poi_finder_tests
-    pearson_poi_finder_test.cpp
+add_executable(leakflow_plugins_crypto_poi_split_tests
+    poi_split_test.cpp
 )
-target_link_libraries(leakflow_plugins_crypto_pearson_poi_finder_tests
+target_link_libraries(leakflow_plugins_crypto_poi_split_tests
     PRIVATE
         leakflow_plugins_crypto
 )
-leakflow_configure_test_target(leakflow_plugins_crypto_pearson_poi_finder_tests)
-add_test(NAME leakflow_plugins_crypto_pearson_poi_finder COMMAND leakflow_plugins_crypto_pearson_poi_finder_tests)
+leakflow_configure_test_target(leakflow_plugins_crypto_poi_split_tests)
+add_test(NAME leakflow_plugins_crypto_poi_split COMMAND leakflow_plugins_crypto_poi_split_tests)
 
 add_executable(leakflow_plugins_crypto_aes_poi_correctness_tests
     aes_poi_correctness_test.cpp

@@ -114,7 +114,7 @@ Rules and rationale:
   but **drops upstream payload** — the element re-owns only the payload facts it
   can vouch for (for example `conversion.*`).
 - An Analyze element may additionally **re-own a curated subset** of payload
-  facts it is asserting about its output. `PearsonPoiFinder` does this for
+  facts it is asserting about its output. `PearsonCorrelator`/`PoiSelect` do this for
   `leakage.*`/`crypto.*`/`trace.*` that describe the target model, since the PoI
   results remain *about* those targets.
 
@@ -161,7 +161,7 @@ leakflow_core   framework kernel; no domain knowledge
 - `leakflow_sca` is for side-channel work that still applies across algorithms
   (AES, Kyber, ...).
 - `leakflow_crypto` is for truly algorithm-specific helpers.
-- `PearsonPoiFinder` is generic SCA and will eventually move to
+- `PearsonCorrelator`/`PoiSelect` are generic SCA and will eventually move to
   `leakflow_plugins_sca`; for now only its klass was updated.
 
 ## 7. SCA building-block taxonomy (the Lego slots)
@@ -200,7 +200,7 @@ feeding a `Predict` brick.
 | Tee / Queue / Summary | `PassThrough/Branch`, `PassThrough/Queue`, `PassThrough/Summary` | PassThrough |
 | TorchConvert / NumpyToTorch | `Convert/Tensor/Torch`, `Convert/Tensor/NumpyToTorch` | Reframe |
 | CorrelationPoiToPlotAnnotations | `Convert/SCA/Plot/Annotations` | Reframe |
-| AesLeakage / PearsonPoiFinder | `Analyze/SCA/Crypto/LeakageModel`, `Analyze/SCA/Statistics/PoI` | Analyze |
+| AesLeakage / PearsonCorrelator / PoiSelect | `Analyze/SCA/Crypto/LeakageModel`, `Analyze/SCA/Statistics/Correlation`, `Analyze/SCA/Statistics/PoI` | Analyze |
 
 ## 9. Deferred work
 

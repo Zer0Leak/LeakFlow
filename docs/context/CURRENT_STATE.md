@@ -140,7 +140,7 @@ support:
   `docs/design/metadata_klass_taxonomy.md`.
 
 Phase 25 (control/session layer) is implemented. The full AES PoI plotting
-pipeline (`TorchFileSrc` ×3 → `Tee` → `AesLeakage` → `PearsonPoiFinder` →
+pipeline (`TorchFileSrc` ×3 → `Tee` → `AesLeakage` → `PearsonCorrelator` → `PoiSelect` →
 `CorrelationPoiToPlotAnnotations` → `TracePlot`) is built and runs end to end:
 manually validated in `leakflow run --graph`, with headless CLI smoke tests in
 `tests/apps` (`leakflow_cli_run_aes_leakage`, `leakflow_cli_run_pearson_poi_finder`,
@@ -153,7 +153,7 @@ numeric test (`tests/plugins/crypto/aes_poi_correctness_test.cpp`, CTest
 (`key_01`, `key_02`) via the same `torch::pickle_load` path the pipeline uses and
 asserts: `AesLeakage` HW(m)/HW(y) for a known byte match values computed directly
 from the fixture plaintext/key (raw S-box table + `std::popcount`, plus the
-`leakflow_crypto` scalar helper); `PearsonPoiFinder` selects the
+`leakflow_crypto` scalar helper); `PoiSelect` selects the
 strongest-correlation sample with a correlation matching an independent float64
 recompute to 1e-6 and clearing a sane threshold; and
 `CorrelationPoiToPlotAnnotations` sample indexes/values/precision formatting match
@@ -208,7 +208,7 @@ remain deferred as low-priority future infrastructure.
   `NumpyToTorch`.
 - `leakflow_plugins_crypto`: linked shared plugin with `AesLeakage`,
   `AesLeakageHypothesis`, `CpaAttack`, `DpaAttack`, `AttackStats`,
-  `AttackStatsToPlotAnnotations`, `PearsonPoiFinder`, and
+  `AttackStatsToPlotAnnotations`, `PearsonCorrelator`, `PoiSelect`, and
   `CorrelationPoiToPlotAnnotations`.
 - `leakflow_plugins_plot`: linked shared plugin with `TracePlot`.
 - `leakflow_cli`: static CLI helper library.
@@ -333,7 +333,8 @@ Crypto plugin elements:
 - `DpaAttack`
 - `AttackStats`
 - `AttackStatsToPlotAnnotations`
-- `PearsonPoiFinder`
+- `PearsonCorrelator`
+- `PoiSelect`
 - `CorrelationPoiToPlotAnnotations`
 
 Logging:

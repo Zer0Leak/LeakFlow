@@ -9,11 +9,17 @@
 
 namespace leakflow::plugins::crypto {
 
-inline constexpr auto pearson_poi_method_id = "pearson-correlation";
+inline constexpr auto pearson_correlation_method_id = "pearson-correlation";
 
-class PearsonPoiFinder final : public Element {
+// Computes the Pearson correlation of every feature against every target and emits it
+// as a CorrelationPayload (grouped [byte, channel, feature]). This is the *stateful*
+// half of the old PearsonPoiFinder: in incremental mode it folds each buffer into
+// running moments, so it is NOT replayable (can_replay() is false) and changing an
+// accumulation property (correlation_mode / compute_dtype / epsilon) requires a
+// restart. The (cheap, stateless) top-k selection lives in PoiSelect.
+class PearsonCorrelator final : public Element {
 public:
-    explicit PearsonPoiFinder(std::string name = "pearsonpoifinder0");
+    explicit PearsonCorrelator(std::string name = "pearsoncorrelator0");
 
     [[nodiscard]] static ElementDescriptor descriptor();
     void start() override;

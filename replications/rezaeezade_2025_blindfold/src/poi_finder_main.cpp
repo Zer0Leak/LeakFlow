@@ -3,19 +3,19 @@
 // This app aggregates the Pearson PoI finder across many capture folders. Each
 // key_* folder holds one aligned (traces, plaintexts, key) capture. We feed one
 // folder per streaming step into an AppSrc (application-fed live source); because
-// AppSrc declares itself live, PearsonPoiFinder auto-selects its incremental mode
+// AppSrc declares itself live, PearsonCorrelator auto-selects its incremental mode
 // and folds every folder into running correlation moments -- it never resets
-// between folders, only at start(). The last emitted PoI is the aggregate over all
-// folders.
+// between folders, only at start(). PoiSelect (stateless) then picks the top-k PoIs.
+// The last emitted PoI is the aggregate over all folders.
 //
 // Pipeline (built once, fed by the app):
 //
 //   AppSrc@src
-//     src_0 (traces) -> Tee@trace_tee -> @poi.features / @leakage.traces
+//     src_0 (traces) -> Tee@trace_tee -> @corr.features / @leakage.traces
 //     src_1 (plain)  -> @leakage.plaintexts
 //     src_2 (key)    -> @leakage.keys
-//   AesLeakage@leakage -> @poi.targets
-//   PearsonPoiFinder@poi  (auto -> incremental because upstream is live)
+//   AesLeakage@leakage -> @corr.targets
+//   PearsonCorrelator@corr -> PoiSelect@poi  (auto -> incremental because upstream is live)
 //
 // Usage:
 //   leakflow_rezaeezade_poi_finder [--graph] [ROOT_DIR]
@@ -108,7 +108,8 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
         "AppSrc@src; "
         "Tee@trace_tee; "
         "AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); "
-        "PearsonPoiFinder@poi(top_k=[50],rank_by=[abs]); ";
+        "PearsonCorrelator@corr; "                 // stateful: accumulates the correlation
+        "PoiSelect@poi(top_k=[50],rank_by=[abs]); ";  // stateless: selects top-k PoIs
 
     if (with_plot) {
         expression +=
@@ -119,11 +120,12 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
 
     expression +=
         "@src.src_0 ! @trace_tee; "
-        "@trace_tee.src_0 ! @poi.features; "
+        "@trace_tee.src_0 ! @corr.features; "
         "@trace_tee.src_1 ! @leakage.traces; "
         "@src.src_1 ! @leakage.plaintexts; "
         "@src.src_2 ! @leakage.keys; "
-        "@leakage ! @poi.targets";
+        "@leakage ! @corr.targets; "
+        "@corr ! @poi";
 
     if (with_plot) {
         expression +=
