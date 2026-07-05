@@ -351,10 +351,42 @@ void PipelineSession::emit_command(PipelineCommandStatus status, const std::shar
         .generation = generation_,
         .detail = std::move(detail),
     };
+    const auto detail_copy = observation.detail;
     emit(PipelineEvent{
         .kind = kind_for_status(status),
         .command = std::move(observation),
     });
+
+    // Also surface command outcomes in the log so they are visible on the terminal,
+    // not only in the UI observer stream. Severity: rejected = warning (a declined
+    // request, recoverable), failed = error (an exception while applying), applied =
+    // info, accepted = debug (routine intermediate step).
+    const auto [level, word] = [status]() -> std::pair<log::LogLevel, std::string_view> {
+        switch (status) {
+        case PipelineCommandStatus::Rejected:
+            return {log::LogLevel::Warning, "rejected"};
+        case PipelineCommandStatus::Failed:
+            return {log::LogLevel::Error, "failed"};
+        case PipelineCommandStatus::Applied:
+            return {log::LogLevel::Info, "applied"};
+        case PipelineCommandStatus::Accepted:
+            break;
+        }
+        return {log::LogLevel::Debug, "accepted"};
+    }();
+
+    log::LogRecord record{
+        .level = level,
+        .component = "session",
+        .message = "property change " + std::string(word),
+    };
+    record.element_name = command.element_name;
+    record.fields.emplace("property", command.property_name);
+    record.fields.emplace("value", property_value_to_string(command.value));
+    if (!detail_copy.empty()) {
+        record.fields.emplace("detail", detail_copy);
+    }
+    log::write(std::move(record));
 }
 
 void PipelineSession::emit(PipelineEvent event)

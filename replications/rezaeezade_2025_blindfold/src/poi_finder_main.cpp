@@ -26,16 +26,19 @@
 
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/pipeline_session.hpp"
+#include "leakflow/log/logger.hpp"
 #include "leakflow/plot/pipeline_graph.hpp"
 #include "leakflow/plot/plot_runtime.hpp"
 #include "leakflow/plugins/base/app_src.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <string>
 #include <torch/torch.h>
 #include <utility>
@@ -49,6 +52,16 @@ constexpr auto default_root = "traces/aes/sync/aes_sync_poi";
 constexpr auto traces_file = "traces.pt";
 constexpr auto plaintexts_file = "plain_texts.pt";
 constexpr auto key_file = "key.pt";
+
+void log_info(std::string message, std::map<std::string, std::string> fields = {})
+{
+    leakflow::log::write(leakflow::log::LogRecord{
+        .level = leakflow::log::LogLevel::Info,
+        .component = "replication",
+        .message = std::move(message),
+        .fields = std::move(fields),
+    });
+}
 
 [[nodiscard]] torch::Tensor load_pt(const fs::path& path)
 {
@@ -140,6 +153,14 @@ void print_poi_summary(const std::optional<leakflow::Buffer>& result)
 int main(int argc, char** argv)
 {
     try {
+        // This app reports its progress through the LeakFlow log at info level.
+        // LEAKFLOW_LOG_LEVEL (and the other LEAKFLOW_LOG_* vars) still override it.
+        auto log_config = leakflow::log::config_from_environment();
+        if (std::getenv("LEAKFLOW_LOG_LEVEL") == nullptr) {
+            log_config.level = leakflow::log::LogLevel::Info;
+        }
+        leakflow::log::configure(std::move(log_config));
+
         bool graph = false;
         bool auto_start = false;
         fs::path root = default_root;
@@ -166,7 +187,8 @@ int main(int argc, char** argv)
         if (folders.empty()) {
             throw std::runtime_error("no capture folders with " + std::string(traces_file) + " under " + root.string());
         }
-        std::cout << "Aggregating PoI over " << folders.size() << " capture folder(s) under " << root << "\n";
+        log_info("aggregating PoI over capture folders",
+                 {{"folders", std::to_string(folders.size())}, {"root", root.string()}});
 
         auto built = leakflow::cli::build_builtin_pipeline_from_expression(pipeline_expression(graph));
         auto source_element = built.pipeline.element("src");
@@ -195,7 +217,8 @@ int main(int argc, char** argv)
                 frame.push_back(std::move(traces));
                 frame.push_back(tensor_buffer(load_pt(folder / plaintexts_file)));
                 frame.push_back(tensor_buffer(load_pt(folder / key_file)));
-                std::cout << "  streaming " << folder.filename().string() << "\n";
+                log_info("streaming capture folder",
+                         {{"folder", folder.filename().string()}, {"index", std::to_string(index)}});
                 return frame;
             });
 
@@ -212,7 +235,7 @@ int main(int argc, char** argv)
             // Terminal here is the TracePlot sink, not @poi, so the returned buffer is
             // not the PoI -- the result is shown live in the trace/annotation plot.
             (void)leakflow::plot::run_pipeline_graph_until_closed(session, *built.plot_runtime, options);
-            std::cout << "graph closed\n";
+            log_info("graph closed");
             return 0;
         }
 
