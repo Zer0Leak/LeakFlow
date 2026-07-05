@@ -1124,6 +1124,11 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
 
 void Pipeline::start_all() {
     started_count_ = 0;
+    // A run starts fresh: reset the vector-clock production counters so each run's
+    // provenance begins at 0 (a Stop -> Start cycle restarts the clocks rather than
+    // continuing from the previous run). Slot allocation (element_base_/next_slot_)
+    // is topology, not per-run state, so it is preserved.
+    emit_counts_.clear();
     refresh_live_driven_flags();
 
     log::LogRecord start_record{
@@ -1182,6 +1187,8 @@ void Pipeline::stop_all() {
         });
     }
     started_count_ = 0;
+    // Stop clears the run's vector-clock counters so the next start begins at 0.
+    emit_counts_.clear();
     emit(PipelineEvent{
         .kind = PipelineEventKind::Stopped,
         .message = "stopped",

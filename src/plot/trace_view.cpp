@@ -288,6 +288,23 @@ void move_snapshot_before(TraceView &view, std::vector<const TracePlotSnapshot *
     return static_cast<std::int64_t>(trace_index) + (trace_context_is_one_based(snapshot.trace_context_label) ? 1 : 0);
 }
 
+// Inverse of trace_context_value: map a displayed trace number (what the slider and
+// the goto box show) back to a 0-based trace index, clamped in range. Used by the
+// slider's right-click "Go to" box. Unit-value snapshots resolve by matching the
+// value; sequential ones invert the 0/1-based offset.
+[[nodiscard]] int trace_index_from_context_value(const TracePlotSnapshot &snapshot, std::int64_t context_value) {
+    if (snapshot.trace_context_values.size() == static_cast<std::size_t>(snapshot.trace_count())) {
+        for (std::size_t i = 0; i < snapshot.trace_context_values.size(); ++i) {
+            if (snapshot.trace_context_values[i] == context_value) {
+                return static_cast<int>(i);
+            }
+        }
+        return clamped_trace_index(snapshot, static_cast<int>(context_value));
+    }
+    const auto base = trace_context_is_one_based(snapshot.trace_context_label) ? 1 : 0;
+    return clamped_trace_index(snapshot, static_cast<int>(context_value) - base);
+}
+
 struct TraceSliderContext {
     std::string label;
     std::string value;
@@ -415,7 +432,7 @@ void draw_vertical_trace_controls(TraceView &view, std::string_view group,
         trace_index = clamped_trace_index(*snapshot, trace_index);
         auto requested_trace_index = trace_index;
         const auto &display_state = view.mutable_trace_display_state(*snapshot);
-        const auto changed =
+        auto changed =
             draw_vertical_slider(*snapshot, snapshot_display_name(*snapshot),
                                  "##trace_index_" + std::to_string(snapshot->id), requested_trace_index,
                                  static_cast<int>(snapshot->trace_count() - 1), slider_height, display_state.color,
@@ -423,13 +440,40 @@ void draw_vertical_trace_controls(TraceView &view, std::string_view group,
         // Captured immediately after the slider so it reflects the slider widget.
         const auto slider_active = ImGui::IsItemActive();
 
-        // Right-clicking any slider exposes the group trace-lock toggle, but only when
-        // the group has more than one trace slider to keep in sync. group_snapshots
-        // spans the whole group, so this behaves the same in stacked and overlay layouts.
-        if (group_has_multiple_sliders) {
-            const auto popup_id = "##trace_lock_ctx_" + std::to_string(snapshot->id);
+        // Right-click context menu: a precise "Go to" box (the slider alone has coarse
+        // resolution) plus the group trace-lock toggle when the group has more than one
+        // slider to keep in sync. The goto reads/writes the displayed trace number.
+        {
+            const auto popup_id = "##trace_ctx_" + std::to_string(snapshot->id);
             if (ImGui::BeginPopupContextItem(popup_id.c_str())) {
-                ImGui::Checkbox("Lock trace sliders", &group_trace_lock);
+                const auto context = trace_slider_context_for(*snapshot, requested_trace_index);
+                ImGui::TextDisabled("%s %s  (range %s - %s)", context.label.c_str(), context.value.c_str(),
+                                    context.range_min.c_str(), context.range_max.c_str());
+                static std::map<std::uint64_t, int> goto_values;
+                auto &goto_value = goto_values[snapshot->id];
+                if (ImGui::IsWindowAppearing()) {
+                    goto_value = static_cast<int>(trace_context_value(*snapshot, requested_trace_index));
+                }
+                ImGui::SetNextItemWidth(120.0F);
+                // InputInt forbids EnterReturnsTrue (asserted off). Commit only on the
+                // Enter key or the Go button -- NOT on plain deactivation, otherwise
+                // clicking the +/- steppers (which deactivates the text field) would
+                // submit and close the popup, making the steppers useless.
+                ImGui::InputInt(("Go to " + context.label).c_str(), &goto_value, 1, 100);
+                const bool submitted =
+                    ImGui::IsItemDeactivatedAfterEdit() &&
+                    (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter));
+                ImGui::SameLine();
+                const bool go_clicked = ImGui::Button("Go");
+                if (submitted || go_clicked) {
+                    requested_trace_index = trace_index_from_context_value(*snapshot, goto_value);
+                    changed = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                if (group_has_multiple_sliders) {
+                    ImGui::Separator();
+                    ImGui::Checkbox("Lock trace sliders", &group_trace_lock);
+                }
                 ImGui::EndPopup();
             }
         }

@@ -101,7 +101,7 @@ constexpr auto key_file = "key.pt";
         expression +=
             "CorrelationPoiToPlotAnnotations@ann(precision=3); "
             "TracePlot@plot(title=\"AES aggregate PoIs\",group=aes,label=traces,"
-            "update_mode=replace,x_axis=sample); ";
+            "update_mode=accumulate,x_axis=sample); ";
     }
 
     expression +=

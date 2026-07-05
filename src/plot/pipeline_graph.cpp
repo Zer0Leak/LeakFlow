@@ -1315,6 +1315,13 @@ void PipelineGraphRuntime::apply_event(const PipelineEvent &event) {
         running_ = true;
         stopped_ = false;
         last_error_.reset();
+        // A fresh run restarts the vector clock at 0, so drop the previous run's
+        // accumulated clock display and per-link counts (they would otherwise pin the
+        // panel to the old maximum, e.g. 50, instead of the new run's counts).
+        max_provenance_.clear();
+        observed_counts_.clear();
+        link_generations_.clear();
+        latest_buffers_.clear();
         break;
     case PipelineEventKind::Stopped:
         running_ = false;

@@ -176,7 +176,14 @@ std::optional<Buffer> PipelineSession::run_sweep()
         start();
     }
     auto output = pipeline_.run_sweep();
-    state_ = PipelineSessionState::Running;
+    // Do not clobber a pause requested *during* the sweep. request_pause() flips
+    // Running -> Paused; setting Running unconditionally here would revert it, leaving
+    // the pump blocked in wait_while_paused while state still reads Running (so a
+    // single Pause press appears to do nothing and the follow-latest slider stays
+    // frozen). Only report Running when not paused.
+    if (!paused_.load()) {
+        state_ = PipelineSessionState::Running;
+    }
     return output;
 }
 
