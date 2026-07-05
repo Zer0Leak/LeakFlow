@@ -233,7 +233,7 @@ int main()
     if (!expect(descriptors[0].purpose == "Leakflow base elements", "base plugin descriptor purpose was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 4, "base element descriptor count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 5, "base element descriptor count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[0].type_name == "TorchFileSrc", "TorchFileSrc descriptor type name was wrong")) {

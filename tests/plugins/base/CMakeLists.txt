@@ -35,3 +35,13 @@ target_link_libraries(leakflow_plugins_base_torch_convert_tests
 )
 leakflow_configure_test_target(leakflow_plugins_base_torch_convert_tests)
 add_test(NAME leakflow_plugins_base_torch_convert COMMAND leakflow_plugins_base_torch_convert_tests)
+
+add_executable(leakflow_plugins_base_app_src_tests
+    app_src_test.cpp
+)
+target_link_libraries(leakflow_plugins_base_app_src_tests
+    PRIVATE
+        leakflow_plugins_base
+)
+leakflow_configure_test_target(leakflow_plugins_base_app_src_tests)
+add_test(NAME leakflow_plugins_base_app_src COMMAND leakflow_plugins_base_app_src_tests)

@@ -7,6 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(LEAKFLOW_WITH_CUDA "Build the optional CUDA smoke executable" OFF)
 option(LEAKFLOW_BUILD_EXAMPLES "Build optional LeakFlow tutorial example applications" OFF)
+option(LEAKFLOW_BUILD_REPLICATIONS "Build paper replication applications (need local trace data)" OFF)
 option(LEAKFLOW_TORCH_DEBUG "Build and link tensor debug helpers (dtv/ptv/ps) for LLDB/GDB" ON)
 
 include(CTest)
@@ -53,6 +54,10 @@ add_subdirectory(src/apps)
 
 if(LEAKFLOW_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(LEAKFLOW_BUILD_REPLICATIONS)
+    add_subdirectory(replications)
 endif()
 
 if(BUILD_TESTING)

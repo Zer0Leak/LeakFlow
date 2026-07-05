@@ -1,5 +1,6 @@
 #include "leakflow/plugins/base/descriptor_catalog.hpp"
 
+#include "leakflow/plugins/base/app_src.hpp"
 #include "leakflow/plugins/base/fake_live_src.hpp"
 #include "leakflow/plugins/base/torch_convert.hpp"
 #include "leakflow/plugins/base/torch_file_sink.hpp"
@@ -27,6 +28,7 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 TorchConvert::descriptor(),
                 TorchFileSink::descriptor(),
                 FakeLiveSrc::descriptor(),
+                AppSrc::descriptor(),
             },
         }),
     };
@@ -57,6 +59,7 @@ void register_element_factories(ElementFactoryRegistry& registry)
         {
             {"TorchFileSrc", [](std::string name) { return std::make_shared<TorchFileSrc>(std::move(name)); }},
             {"FakeLiveSrc", [](std::string name) { return std::make_shared<FakeLiveSrc>(std::move(name)); }},
+            {"AppSrc", [](std::string name) { return std::make_shared<AppSrc>(std::move(name)); }},
             {"TorchConvert", [](std::string name) { return std::make_shared<TorchConvert>(std::move(name)); }},
             {"TorchFileSink", [](std::string name) { return std::make_shared<TorchFileSink>(std::move(name)); }},
         });

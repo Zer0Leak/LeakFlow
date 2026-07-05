@@ -1,4 +1,5 @@
 add_library(leakflow_plugins_base SHARED
+    app_src.cpp
     descriptor_catalog.cpp
     fake_live_src.cpp
     torch_convert.cpp
