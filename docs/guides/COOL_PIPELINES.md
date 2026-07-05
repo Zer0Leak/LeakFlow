@@ -38,7 +38,7 @@ For the AES synchronized data, the dataset should live under:
 traces/aes/sync/
 ```
 
-The AES sync PoI demo below expects these files:
+The AES sync demos below expect these files:
 
 ```text
 traces/aes/sync/aes_sync_poi/key_01/traces.pt
@@ -46,559 +46,294 @@ traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt
 traces/aes/sync/aes_sync_poi/key_01/key.pt
 ```
 
-## AES Sync Trace Metadata Smoke
+For a quick smoke run without the downloaded dataset, replace those paths with
+the checked-in fixtures:
 
-Use this small pipeline to check the trace file and see the source metadata in
-the buffer-flow log.
-
-```bash
-leakflow --log-level info run \
-  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt){capture.source=ChipWhisperer; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453} ! FakeSink'
+```text
+tests/fixtures/aes/sync/key_01/traces_first_50.pt
+tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt
+tests/fixtures/aes/sync/key_01/key_first_50.pt
 ```
 
-`TorchFileSrc` also stamps file provenance metadata such as
-`origin.file.format=torch-tensor`, `origin.file.path`, and `origin.file.size`.
+## Plot View Set
 
-Every metadata key carries its group as the leading segment. `capture.source`,
-`capture.sample_rate_hz`, and `capture.dataset.name` are `capture`-group metadata
-that survive through downstream analysis. `payload.leakage.inverted` (declared by
-the user here) and `payload.leakage.range` describe the trace data itself, so they
-are `payload`-group: preserved on pass-through hops but dropped when an analysis
-element derives a new buffer. `TorchFileSrc` does not stamp `payload.leakage.inverted`
-itself; its `invert` property only flips the tensor (×−1). See
-`docs/design/metadata_klass_taxonomy.md`.
+The attack pipelines below keep one focused offline and one focused live example
+for CPA, then the same pair for DPA.
 
-## Checked-In Torch Caps Smoke
+CPA examples open all three attack views:
 
-Use this pipeline to see the three CLI annotation forms side by side on a small
-fixture that is checked into the repository:
+- `TracePlot`: raw traces with best-sample annotations from `AttackStats`.
+- `ScorePlot`: score and confidence curves.
+- `ScoreTablePlot`: the scoreboard, with ranked guesses per attack unit.
 
-```bash
-leakflow --log-level info run \
-  'TorchFileSrc@traces \
-      (path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) \
-      {capture.dataset.name=aes_sync_fixture; origin.role=traces}; \
-  Summary@summary(level=3); \
-  @traces.src[caps=leakflow/torch-tensor; dtype=float32; device=cpu; rank=2] ! @summary.sink'
-```
+DPA examples open the same three views plus a second `TracePlot` for
+`DpaAttack.best_difference`, the generated difference-of-means trace for the
+current best guess/channel per unit.
 
-In this command:
+All examples use `--graph` so the pipeline graph, property controls, vector-clock
+state, and plot windows are visible together.
 
-- `(path=...)` sets the `TorchFileSrc` property.
-- `{capture.dataset.name=...; origin.role=...}` stamps buffer metadata on
-  `TorchFileSrc` output.
-- `[caps=leakflow/torch-tensor; dtype=float32; device=cpu; rank=2]` annotates
-  the `traces.src` pad caps.
+## AES Sync CPA Offline - Trace, Score, Scoreboard
 
-Caps annotations are parsed and validated as CLI intent. The runtime buffer
-caps still come from the element and payload until a later caps-negotiation
-phase makes annotations mutable.
-
-## AES Sync Pearson PoIs In TracePlot
-
-This pipeline loads AES synchronized traces, computes first-round AES S-box
-Hamming-weight leakage for byte `0`, finds the top absolute Pearson-correlation
-PoIs, converts them to plot annotations, and opens TracePlot with the selected
-PoIs overlaid on the trace browser.
-
-# No metadata version
+This one-shot CPA run loads full tensors with `TorchFileSrc`, so no `Queue` or
+`Sync` is needed. It is a good final-result view: the trace plot shows the raw
+traces with best-sample markers, `ScorePlot` shows the final score/confidence
+state, and `ScoreTablePlot` shows the recovered-key scoreboard.
 
 ```bash
-leakflow --log-level info run \
-  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt); Tee@traces; TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); AesLeakage@leakage(byte_indexes=[0]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[50],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @plot.annotations'
-```
-# Metadata version
-
-```bash
-leakflow --log-level info run --graph \
+leakflow --log-level warning run --graph \
   'TorchFileSrc@traces_src \
       (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt) \
-      {capture.source=ChipWhisperer; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
-  TorchFileSrc@plain_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); \
-  TorchFileSrc@key_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
-  Tee@trace_tee; \
+      {capture.source=ChipWhisperer; capture.dataset.name=aes_sync_poi; capture.sample_rate_hz=29454545.454545453; origin.role=traces; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]}; \
+   TorchFileSrc@plain_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=plaintexts}; \
+   TorchFileSrc@key_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=key; payload.crypto.algorithm=AES-128}; \
+   Tee@trace_tee; \
       @trace_tee.src_%u{routing.branch.family=trace-fanout}; \
-      @trace_tee.src_0{routing.branch=plot-traces}; \
-      @trace_tee.src_1{routing.branch=analysis-poi}; \
-      @trace_tee.src_2{routing.branch=analysis-leakage}; \
-  AesLeakage@leakage \
-      (channels=[HW(y)],byte_indexes=[0]); \
-  PearsonCorrelator@corr; \
-  PoiSelect@poi \
-      (top_k=[50],rank_by=[abs]); \
-  CorrelationPoiToPlotAnnotations@ann \
-      (precision=3); \
-  TracePlot@plot \
-      (title="AES byte 0 PoIs",group=aes,label=traces,x_axis=sample); \
-  @traces_src ! @trace_tee; \
-                    @trace_tee.src_0 ! @plot.sink; \
-                    @trace_tee.src_1 ! @corr.features; \
-                    @trace_tee.src_2 ! @leakage.traces; \
-  @plain_src ! @leakage.plaintexts; \
-                                              @leakage ! @corr.targets; @corr ! @poi; \
-  @key_src   ! @leakage.keys; \
-  @poi ! @ann ! @plot.annotations'
-```
-
-## AES Sync CPA Best-Correlation Sample In TracePlot
-
-This pipeline runs a full Pearson CPA attack on the checked-in AES fixtures (no
-downloaded traces needed) and marks each recovered byte's best-correlation sample
-on the trace browser. It loads traces, plaintexts, and the known key; builds
-first-round `HW(y)` leakage hypotheses for every byte and every key guess;
-ranks the guesses with `CpaAttack`; derives known-key diagnostics with
-`AttackStats`; converts those into plot annotations; and prints a structured
-`Summary` of the stats.
-
-```bash
-leakflow --log-level info run --graph \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt){capture.source=ChipWhisperer; capture.sample_rate_hz=29454545.454545453; payload.leakage.range=[-0.5,0.5]}; \
-   TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); \
-   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   Tee@trace_tee; \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   CpaAttack@attack(compute_dtype=float64,correlation_mode=recompute); \
-   AttackStats@stats(top_k=2); \
+      @trace_tee.src_0{routing.branch=raw-trace-plot}; \
+      @trace_tee.src_1{routing.branch=cpa-features}; \
+   AesLeakageHypothesis@hyp \
+      (channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   CpaAttack@attack \
+      (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float64,correlation_mode=recompute,emit_correlations=false,top_k=8); \
+   AttackStats@stats \
+      (top_k=8,confidence_metrics=[relative_margin,z_score,robust_z_score]); \
    Tee@stats_tee; \
+      @stats_tee.src_%u{routing.branch.family=attack-stats}; \
+      @stats_tee.src_0{routing.branch=trace-annotations}; \
+      @stats_tee.src_1{routing.branch=score-plot}; \
+      @stats_tee.src_2{routing.branch=scoreboard}; \
    AttackStatsToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot(title="AES CPA byte 0 - best correlation sample",group=cpa,label=traces,x_axis=sample); \
-   Summary@summary(level=3); \
+   TracePlot@trace_plot \
+      (title="AES CPA - raw traces with best samples",group=cpa,label=raw-traces,x_axis=time_us,update_mode=replace,annotation_update_mode=replace,center0=true); \
+   ScorePlot@score_plot \
+      (group=cpa,title="CPA score and confidence",metrics=[score,relative_margin,true_rank],show_second_score=true,max_units=16); \
+   ScoreTablePlot@scoreboard \
+      (group=cpa,title="CPA scoreboard",sort=score,rows=8,max_history=1); \
    @traces_src ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @attack.features; \
-   @plain_src ! @hyp.plaintexts; \
-   @hyp ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @stats_tee; \
-      @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @summary'
-```
-
-Notes:
-
-- `AesLeakageHypothesis(byte_indexes=[],guess_values=[])` builds the full
-  `[U,G,N,L]` hypothesis tensor over all 16 bytes and the full `0..255` guess
-  domain; `CpaAttack` ranks guesses, and `AttackStats(top_k=2)` adds known-key
-  diagnostics (true rank, top-1/top-2 margins) using `@key_src ! @stats.truth`.
-- `AttackStatsToPlotAnnotations(precision=3)` marks each unit's best sample on the
-  trace; `@trace_tee.src_0` carries the raw traces to `TracePlot.sink` while
-  `@trace_tee.src_1` feeds `CpaAttack.features`.
-- `Tee@stats_tee` fans the stats to both the annotation converter and a `Summary`,
-  so the diagnostics print while the markers render.
-
-## AES Sync CPA Live (Synchronized Streams)
-
-The live counterpart of the CPA pipeline above. Traces and plaintexts stream
-independently through `Queue`s; `Sync(policy=zip)` pairs trace row `N` with
-plaintext row `N` before the attack, and the fixed key is loaded once by
-`TorchFileSrc`. `CpaAttack(correlation_mode=auto)` resolves to incremental under a
-live source, so the scores and the marked best-correlation sample refine as rows
-arrive. Uses the checked-in fixtures (no downloaded traces needed).
-
-```bash
-leakflow --log-level error run --graph \
-  'FakeLiveSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt,trace_rate=0){capture.source=ChipWhisperer; capture.sample_rate_hz=29454545.454545453; payload.leakage.range=[-0.5,0.5]}; \
-   Queue@traces_queue(max_size=8,drop_oldest=false); \
-   FakeLiveSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt,trace_rate=0); \
-   Queue@plain_queue(max_size=8,drop_oldest=false); \
-   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   Tee@trace_tee; \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   Sync@attack_sync(policy=zip); \
-   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
-   AttackStats@stats(top_k=3); \
-   Tee@stats_tee; \
-   AttackStatsToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot(title="AES CPA byte 0 - best correlation sample",group=cpa,label=traces,x_axis=sample); \
-   Summary@summary(level=3); \
-   @traces_src ! @traces_queue ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @attack_sync.in_0; \
-   @plain_src ! @plain_queue ! @hyp.plaintexts; \
-   @hyp ! @attack_sync.in_1; \
-   @attack_sync.out_0 ! @attack.features; \
-   @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @stats_tee; \
-      @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @summary'
-```
-
-Notes:
-
-- `Sync@attack_sync(policy=zip)` is the front door for pairing the two independent
-  live streams: it injects a common ancestor so `CpaAttack`'s join uses the default
-  barrier. `@attack_sync.out_0`/`out_1` carry the aligned trace/hypothesis pair.
-- `CpaAttack(correlation_mode=auto)` resolves to `incremental` because the inputs
-  are live-driven, so the attack accumulates statistics across streamed rows; set
-  `trace_rate` above `0` on the `FakeLiveSrc` sources to watch the convergence pace.
-- `TracePlot` is live-driven here, so its `update_mode=auto` resolves to
-  `accumulate`: the trace slider builds a scrubbable history of streamed rows.
-- `capture.source`/`capture.sample_rate_hz` are user-provided here: `FakeLiveSrc`
-  does not assert a `capture.source` (it is suggested metadata, like `TorchFileSrc`),
-  so the `{capture.source=ChipWhisperer; capture.sample_rate_hz=...}` annotation
-  supplies them. These `capture`-group facts are preserved through
-  `AesLeakageHypothesis`/`CpaAttack`/`AttackStats` to the plot (e.g.
-  `capture.sample_rate_hz` drives `TracePlot(x_axis=time_us)`).
-
-## AES Sync CPA Score Convergence (ScorePlot)
-
-`ScorePlot` (in `leakflow_plugins_crypto_plot`) consumes `AttackStats` results
-directly and accumulates them into a stacked score plot: one panel per metric
-(`score` plus the configured confidence metrics), one line per attack byte, a
-point per streamed buffer at x = observation count. Success is drawn with the
-marker shape (square = success, x = failure, circle = unknown). Under a live
-source, `CpaAttack(correlation_mode=auto)` runs incrementally, so the score and
-relative margin refine as rows arrive — the classic convergence view.
-
-```bash
-leakflow --log-level error run --graph \
-  'FakeLiveSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt,trace_rate=0); \
-   Queue@traces_queue(max_size=8,drop_oldest=false); \
-   FakeLiveSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt,trace_rate=0); \
-   Queue@plain_queue(max_size=8,drop_oldest=false); \
-   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   Sync@attack_sync(policy=zip); \
-   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
-   AttackStats@stats(top_k=3); \
-   ScorePlot@scores(group=cpa,title="CPA score convergence",metrics=[score,relative_margin]); \
-   @traces_src ! @traces_queue ! @attack_sync.in_0; \
-   @plain_src ! @plain_queue ! @hyp.plaintexts; \
-   @hyp ! @attack_sync.in_1; \
-   @attack_sync.out_0 ! @attack.features; \
-   @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @scores'
-```
-
-Notes:
-
-- `ScorePlot` reads the crypto `AttackStatsPayload` directly (no generic converter)
-  but registers a generic score snapshot into the shared plot runtime, so it reuses
-  the `group` windows and the circle/square/x markers while `leakflow_plot` stays
-  domain-free.
-- `metrics=[...]` selects the stacked panels: `score`, `relative_margin`, `margin`,
-  `z_score`, `robust_z_score`, `top_k_separation`, and `true_rank` (truth only).
-- Increase `trace_rate` on the `FakeLiveSrc` sources to watch the convergence pace;
-  drop `@key_src ! @stats.truth` to run without truth (markers become circles).
-
-## AES Sync CPA Live — TracePlot + ScorePlot + ScoreTablePlot Together
-
-The full live CPA workflow with **all three** plot views open at once: `TracePlot`
-shows the trace with each byte's best-correlation sample annotated (via
-`AttackStatsToPlotAnnotations`), `ScorePlot` shows the score / relative-margin
-convergence with the second-best score overlaid (`show_second_score=true`), and
-`ScoreTablePlot` shows the live scoreboard (units × ranked guesses). A `Tee` after
-the trace queue fans traces to the plot and the attack; a `Tee` after `AttackStats`
-fans the stats three ways — to the annotation converter, the score plot, and the
-score table. Uses the full checked-out `traces/` dataset (swap in the
-`tests/fixtures/aes/sync/key_01/*_first_50.pt` files for a quick smoke run).
-
-```bash
-leakflow --log-level warning run --graph \
-  'FakeLiveSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
-   Queue@traces_queue(max_size=8,drop_oldest=false); \
-   FakeLiveSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0); \
-   Queue@plain_queue(max_size=8,drop_oldest=false); \
-   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
-   Tee@trace_tee; \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   Sync@attack_sync(policy=zip); \
-   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
-   AttackStats@stats(top_k=3); \
-   Tee@stats_tee; \
-   AttackStatsToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot(title="AES CPA byte 0 - best correlation sample",group=cpa,label=traces,x_axis=sample); \
-   ScorePlot@scoreplot(show_second_score=true); \
-   ScoreTablePlot@scoretable(title="CPA scoreboard",sort=score,max_history=50); \
-   @traces_src ! @traces_queue ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @attack_sync.in_0; \
-   @plain_src ! @plain_queue ! @hyp.plaintexts; \
-   @hyp ! @attack_sync.in_1; \
-   @attack_sync.out_0 ! @attack.features; \
-   @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @stats_tee; \
-      @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @scoreplot; \
-      @stats_tee.src_2 ! @scoretable'
-```
-
-Notes:
-
-- All three plots are `PlotView`s sharing one window loop: `TracePlot` fills the
-  built-in `TraceView` (group `cpa`), `ScorePlot` fills a `ScoreView`, and
-  `ScoreTablePlot` fills a `TableView` (both always stacked). None special-cases
-  the runtime — see `docs/design/plotting.md` (Plot View Architecture).
-- `@stats_tee.src_2 ! @scoretable` is the third `Tee` branch — `Tee` grows a new
-  `src_%u` pad on demand, so the same `AttackStats` feeds annotations, curves, and
-  the scoreboard. `max_history=50` keeps the last 50 updates for the N-scrubber.
-- `ScorePlot@scoreplot(show_second_score=true)` also plots the second-best score
-  per byte in the score panel, same colour as the byte's line, toggled by a single
-  legend entry. It needs `AttackStats(top_k>=2)` — here `top_k=3`. The toggle is a
-  ui-control property: it flips live while Running/Idle without a rerun.
-- `AttackStatsToPlotAnnotations` marks each byte's best sample on the trace and
-  encodes known-key PASS/FAIL as the marker shape (square = success, x = failure,
-  circle = truth unknown); the same success drives the `ScorePlot` markers.
-- `FakeLiveSrc@traces_src{...}` carries `capture.source`, `payload.leakage.range`,
-  and `capture.sample_rate_hz`; the sample rate rides to `TracePlot` so you can
-  switch `x_axis=time_us`. `trace_rate=0` streams as fast as possible — raise it
-  (e.g. `trace_rate=1.0`) to watch the correlation sample lock in and the scores
-  separate row by row.
-- Drop `@key_src ! @stats.truth` to run without truth (all markers become circles,
-  and `ScorePlot` shows no "latest wrong key" lines).
-
-## AES Sync DPA Live — Bit Hypotheses + Score Views
-
-This live DPA workflow is the difference-of-means counterpart to the full CPA
-view above. `AesLeakageHypothesis(channels=[y(0),y(3),y(7)])` builds binary
-S-box-output bit hypotheses, `DpaAttack(accumulation_mode=auto)` resolves to
-incremental under the live sources, and `DpaAttack.best_difference` emits the
-current best difference-of-means trace for each attack unit. `AttackStats` feeds
-raw-trace annotations, score curves, and the live scoreboard. Uses the full
-checked-out `traces/` dataset.
-
-```bash
-leakflow --log-level warning run --graph \
-  'FakeLiveSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
-   Queue@traces_queue(max_size=8,drop_oldest=false); \
-   FakeLiveSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0); \
-   Queue@plain_queue(max_size=8,drop_oldest=false); \
-   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
-   Tee@trace_tee; \
-   AesLeakageHypothesis@hyp(channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
-   Sync@attack_sync(policy=zip); \
-   DpaAttack@attack(score_method=max_abs,compute_dtype=float32,accumulation_mode=auto); \
-   AttackStats@stats(top_k=3); \
-   Tee@stats_tee; \
-   AttackStatsToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
-   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa_diff,label=best-diff,x_axis=sample,update_mode=replace,trace_context_label=unit); \
-   ScorePlot@scoreplot(show_second_score=true); \
-   ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
-   @traces_src ! @traces_queue ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @attack_sync.in_0; \
-   @plain_src ! @plain_queue ! @hyp.plaintexts; \
-   @hyp ! @attack_sync.in_1; \
-   @attack_sync.out_0 ! @attack.features; \
-   @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack.scores ! @stats.scores; \
-   @attack.best_difference ! @diff_plot.sink; \
-   @key_src ! @stats.truth; \
-   @stats ! @stats_tee; \
-      @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @scoreplot; \
-      @stats_tee.src_2 ! @scoretable'
-```
-
-Notes:
-
-- `y(0)`, `y(3)`, and `y(7)` are S-box output bit channels; `y(0)` is the least
-  significant bit. `byte_indexes=[]` means all 16 AES state bytes, so this is a
-  heavy `16 bytes × 256 guesses × 3 bit channels × samples` live score update.
-- For a faster interactive demo, narrow the hypothesis space first, for example
-  `AesLeakageHypothesis@hyp(channels=[y(0)],byte_indexes=[0],guess_values=[])`.
-- `DpaAttack` incremental mode keeps running sums and counts, not raw traces.
-  The expensive part is still deriving and reducing the current
-  `[unit,guess,channel,sample]` difference surface after each streamed row.
-- `@attack.best_difference` emits a CPU float32 `[attack_unit,sample]` tensor:
-  each row is the current best guess/channel difference trace for that unit. The
-  `diff_plot` uses `update_mode=replace`, so it shows the latest DPA state rather
-  than appending every update as another trace row; this generated trace plot has
-  no annotation input wired.
-- `TracePlot` accumulates streamed traces in graph mode; if score convergence is
-  the focus, temporarily drop the raw trace branch and keep `ScorePlot` /
-  `ScoreTablePlot`.
-
-## AES Sync DPA Offline — Best Difference Trace + Score Views
-
-This offline DPA workflow runs the full trace/plaintext tensors in one shot with
-`TorchFileSrc`, so no `Queue` or `Sync` is needed. It builds `y(0)` bit
-hypotheses, scores them with `DpaAttack`, plots the raw traces with best-sample
-annotations, and sends `DpaAttack.best_difference` to a second `TracePlot`.
-
-```bash
-leakflow --log-level warning run --graph \
-  'TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt){capture.source=ChipWhisperer; payload.leakage.range=[-0.5,0.5]; capture.sample_rate_hz=29454545.454545453}; \
-   TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); \
-   TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
-   Tee@trace_tee; \
-   AesLeakageHypothesis@hyp(channels=[y(0)],byte_indexes=[],guess_values=[]); \
-   DpaAttack@attack(score_method=max_abs,compute_dtype=float32,accumulation_mode=auto); \
-   AttackStats@stats(top_k=10); \
-   Tee@stats_tee; \
-   AttackStatsToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot(title="AES DPA - best difference sample",group=dpa,label=traces,x_axis=sample); \
-   TracePlot@diff_plot(title="AES DPA best difference traces",group=dpa,label=best-diff,x_axis=sample,update_mode=replace); \
-   ScorePlot@scoreplot(show_second_score=true); \
-   ScoreTablePlot@scoretable(title="DPA scoreboard",sort=score,max_history=50); \
-   @traces_src ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
+      @trace_tee.src_0 ! @trace_plot.sink; \
       @trace_tee.src_1 ! @attack.features; \
    @plain_src ! @hyp.plaintexts; \
    @hyp ! @attack.hypotheses; \
    @attack.scores ! @stats.scores; \
-   @attack.best_difference ! @diff_plot.sink; \
    @key_src ! @stats.truth; \
    @stats ! @stats_tee; \
-      @stats_tee.src_0 ! @ann ! @plot.annotations; \
-      @stats_tee.src_1 ! @scoreplot; \
-      @stats_tee.src_2 ! @scoretable'
-```
-
-## AES Sync CPA Scoreboard (ScoreTablePlot)
-
-`ScoreTablePlot` (in `leakflow_plugins_crypto_plot`) reads the same `AttackStats`
-results as `ScorePlot` and renders a live **scoreboard**: attack units as columns,
-the ranked candidate guesses as rows (each cell = guess + score), sorted by score
-(default) or by guess, with the correct-key cell highlighted. It complements the
-convergence curves with an "is the key recovered, and by how much margin?" view.
-
-**Offline (one-shot final ranking).** A file source runs the attack once and the
-table holds the final result on screen after EOS — no Sync/Queue needed:
-
-```bash
-leakflow --log-level info run --graph \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); \
-   TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); \
-   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   CpaAttack@attack(compute_dtype=float64,correlation_mode=recompute); \
-   AttackStats@stats(top_k=8); \
-   ScoreTablePlot@table(title="CPA scoreboard",sort=score); \
-   @traces_src ! @attack.features; \
-   @plain_src ! @hyp.plaintexts; \
-   @hyp ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @table'
-```
-
-**Live (scoreboard refreshing, with history).** A `FakeLiveSrc` streams rows; the
-table updates each buffer and keeps the last `max_history` frames so you can scrub
-back through how the ranking settled:
-
-```bash
-leakflow --log-level warning run --graph \
-  'FakeLiveSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt,trace_rate=0); \
-   Queue@traces_queue(max_size=8,drop_oldest=false); \
-   FakeLiveSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt,trace_rate=0); \
-   Queue@plain_queue(max_size=8,drop_oldest=false); \
-   TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[],guess_values=[]); \
-   Sync@attack_sync(policy=zip); \
-   CpaAttack@attack(compute_dtype=float32,correlation_mode=auto); \
-   AttackStats@stats(top_k=8); \
-   ScoreTablePlot@table(title="CPA scoreboard",sort=score,max_history=50); \
-   @traces_src ! @traces_queue ! @attack_sync.in_0; \
-   @plain_src ! @plain_queue ! @hyp.plaintexts; \
-   @hyp ! @attack_sync.in_1; \
-   @attack_sync.out_0 ! @attack.features; \
-   @attack_sync.out_1 ! @attack.hypotheses; \
-   @attack ! @stats.scores; \
-   @key_src ! @stats.truth; \
-   @stats ! @table'
+      @stats_tee.src_0 ! @ann ! @trace_plot.annotations; \
+      @stats_tee.src_1 ! @score_plot; \
+      @stats_tee.src_2 ! @scoreboard'
 ```
 
 Notes:
 
-- Same `AttackStats` source as `ScorePlot`, so a single `AttackStats ! Tee` can
-  feed both a `ScorePlot` (curves) and a `ScoreTablePlot` (scoreboard) in one run;
-  put them in the same `group` to stack them in one window.
-- `sort=score` (default) ranks each unit's guesses best-first; `sort=guess` orders
-  each column by guess value. The correct-key cell is tinted (needs
-  `@key_src ! @stats.truth`); hover any cell for the unit's true rank / success.
-- Rows are capped at `AttackStats(top_k=…)`; set `top_k=256` for the full per-unit
-  guess table. `max_history`: `1` = replace (current only, default), `N` = keep the
-  last N frames (an N-scrubber appears), `0` = unbounded.
-- Offline (`TorchFileSrc`) and live (`FakeLiveSrc`) use the *same* element — the
-  table is just "the ranked state at the current N", so it needs no mode switch.
+- `byte_indexes=[]` and `guess_values=[]` mean all 16 AES bytes and the full
+  `0..255` guess domain.
+- `ScorePlot(show_second_score=true)` needs `AttackStats(top_k>=2)`; this command
+  uses `top_k=8`, which also controls the scoreboard row budget.
+- `TracePlot(x_axis=time_us)` reads `capture.sample_rate_hz` from the trace
+  metadata. If you remove that metadata, it falls back to sample indexes.
 
-## Live Synchronized Version
+## AES Sync CPA Live - Trace, Score, Scoreboard
 
-This version streams traces and plaintexts independently through queues, then
-uses `Sync(policy=zip)` to pair trace row `N` with plaintext row `N`. The fixed
-AES key is loaded once by `TorchFileSrc` and held by `AesLeakage` across live
-updates.
+This live CPA run streams traces and plaintexts independently, crosses a real
+`Queue` on each stream, and uses `Sync(policy=zip)` to pair trace row `N` with
+plaintext row `N`. `CpaAttack(correlation_mode=auto)` resolves to incremental
+under live inputs, so the score plot and scoreboard update as observations arrive.
 
 ```bash
-leakflow --log-level info run --graph \
+leakflow --log-level warning run --graph \
   'FakeLiveSrc@traces_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=1.0) \
-      {payload.leakage.inverted=false;payload.leakage.range=[-0.5,0.5];capture.sample_rate_hz=29454545.454545453}; \
+      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0) \
+      {capture.source=ChipWhisperer; capture.dataset.name=aes_sync_poi; capture.sample_rate_hz=29454545.454545453; origin.role=traces; payload.leakage.range=[-0.5,0.5]}; \
    Queue@traces_queue(max_size=8,drop_oldest=false); \
    FakeLiveSrc@plain_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=1.0); \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0) \
+      {capture.dataset.name=aes_sync_poi; origin.role=plaintexts}; \
    Queue@plain_queue(max_size=8,drop_oldest=false); \
    TorchFileSrc@key_src \
-      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=key; payload.crypto.algorithm=AES-128}; \
    Tee@trace_tee; \
-      @trace_tee.src_%u{routing.branch.family=trace-fanout}; \
-      @trace_tee.src_0{routing.branch=plot-traces}; \
-      @trace_tee.src_1{routing.branch=analysis-poi}; \
-      @trace_tee.src_2{routing.branch=analysis-leakage}; \
-   Sync@leakage_sync(policy=zip); \
-   AesLeakage@leakage(channels=[HW(y)],byte_indexes=[0]); \
-   PearsonCorrelator@corr; PoiSelect@poi(top_k=[50],rank_by=[abs]); \
-   CorrelationPoiToPlotAnnotations@ann(precision=3); \
-   TracePlot@plot \
-      (title="AES byte 0 PoIs",group=aes,label=traces,x_axis=sample); \
+      @trace_tee.src_%u{routing.branch.family=live-trace-fanout}; \
+      @trace_tee.src_0{routing.branch=raw-trace-plot}; \
+      @trace_tee.src_1{routing.branch=cpa-features}; \
+   AesLeakageHypothesis@hyp \
+      (channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   CpaAttack@attack \
+      (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,correlation_mode=auto,top_k=8); \
+   AttackStats@stats \
+      (top_k=8,confidence_metrics=[relative_margin,z_score,robust_z_score]); \
+   Tee@stats_tee; \
+      @stats_tee.src_%u{routing.branch.family=live-attack-stats}; \
+      @stats_tee.src_0{routing.branch=trace-annotations}; \
+      @stats_tee.src_1{routing.branch=score-plot}; \
+      @stats_tee.src_2{routing.branch=scoreboard}; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@trace_plot \
+      (title="Live AES CPA - traces and current best samples",group=cpa-live,label=streamed-traces,x_axis=time_us,update_mode=accumulate,annotation_update_mode=replace,center0=true); \
+   ScorePlot@score_plot \
+      (group=cpa-live,title="Live CPA score convergence",metrics=[score,relative_margin,true_rank],show_second_score=true,max_units=16); \
+   ScoreTablePlot@scoreboard \
+      (group=cpa-live,title="Live CPA scoreboard",sort=score,rows=8,max_history=50); \
    @traces_src ! @traces_queue ! @trace_tee; \
-      @trace_tee.src_0 ! @plot.sink; \
-      @trace_tee.src_1 ! @corr.features; \
-      @trace_tee.src_2 ! @leakage_sync.in_0; \
-   @plain_src ! @plain_queue; \
-      @plain_queue.src ! @leakage_sync.in_1; \
-   @leakage_sync.out_0 ! @leakage.traces; \
-   @leakage_sync.out_1 ! @leakage.plaintexts; \
-   @key_src ! @leakage.keys; \
-   @leakage ! @corr.targets; @corr ! @poi; \
-   @poi ! @ann ! @plot.annotations'
+      @trace_tee.src_0 ! @trace_plot.sink; \
+      @trace_tee.src_1 ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack.scores ! @stats.scores; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @trace_plot.annotations; \
+      @stats_tee.src_1 ! @score_plot; \
+      @stats_tee.src_2 ! @scoreboard'
 ```
 
 Notes:
 
-- `Tee@trace_tee` fans the trace tensor to three branches: `TracePlot.sink`
-  (plot), `PearsonCorrelator.features` (correlation), and `AesLeakage.traces`
-  (leakage alignment check).
-- `FakeLiveSrc@traces_src{...}` carries explicit user `capture` facts
-  (`capture.sample_rate_hz`) that are unioned and preserved through
-  `AesLeakage`, `PearsonCorrelator`, `PoiSelect`, and
-  `CorrelationPoiToPlotAnnotations` all the way to the plot. The trace-describing
-  `payload.leakage.inverted`/`payload.leakage.range` are `payload`-group: they ride
-  the pass-through traces→plot branch but are dropped when
-  `AesLeakage`/`PearsonCorrelator` derive new buffers.
-- The `@trace_tee.src_%u{routing.branch.family=...}` and exact
-  `@trace_tee.src_N{routing.branch=...}` annotations are `routing`-group metadata.
-  They ride each buffer to its immediate consumer (and appear in `--graph`/logs),
-  but are not forwarded onto derived buffers such as the leakage tensor or PoI
-  results.
-- File provenance (`origin.file.path`, `origin.file.size`, `origin.file.format`)
-  is `origin`-group. Pass-through hops keep it as-is, but the multi-input
-  `AesLeakage` and `PearsonCorrelator` relabel each input's origin as
-  `origin.<pad>.<key>` (for example `origin.plaintexts.file.path`,
-  `origin.keys.file.path`, `origin.features.file.path`) so the fused buffer keeps
-  unambiguous provenance.
-- `AesLeakage(channels=[HW(m)],byte_indexes=[0])` creates the `HW(m)` target
-  for AES byte `0` and stamps its own `payload.leakage.*`/`payload.crypto.*`/
-  `payload.trace.*` metadata.
-- `PearsonCorrelator` computes the correlation of every sample against each
-  target (recompute or incremental) and `PoiSelect(top_k=[50],rank_by=[abs])`
-  selects the strongest absolute correlations per target, re-owns the target
-  model's `payload.leakage.*`/`payload.crypto.*` facts, and adds `payload.poi.*`
-  results.
-- `CorrelationPoiToPlotAnnotations(precision=3)` turns those PoIs into
-  `TracePlot.annotations` markers with rounded display text.
-- Change `byte_indexes=[0]` and the `TracePlot` title together when preparing a
-  demo for other AES state bytes.
-- Metadata grouping and forwarding rules are documented in
-  `docs/design/metadata_klass_taxonomy.md`.
+- `trace_rate=0` streams as fast as possible. Use `trace_rate=1.0` to watch the
+  score separation and scoreboard evolve row by row.
+- `TracePlot(update_mode=accumulate)` keeps the streamed trace history; the
+  annotation mode is `replace`, so the markers show the current attack state.
+- Drop `@key_src ! @stats.truth` to run without known-key truth. The scoreboard
+  still ranks guesses, while truth/rank/success fields disappear.
+
+## AES Sync DPA Offline - Trace, Difference Trace, Score, Scoreboard
+
+This one-shot DPA run uses binary AES S-box bit hypotheses and
+`DpaAttack.best_difference` to show the generated difference-of-means traces.
+The raw trace plot still receives `AttackStats` annotations, while the second
+`TracePlot` shows the current best difference trace for each attack unit.
+
+```bash
+leakflow --log-level warning run --graph \
+  'TorchFileSrc@traces_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt) \
+      {capture.source=ChipWhisperer; capture.dataset.name=aes_sync_poi; capture.sample_rate_hz=29454545.454545453; origin.role=traces; payload.leakage.inverted=false; payload.leakage.range=[-0.5,0.5]}; \
+   TorchFileSrc@plain_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=plaintexts}; \
+   TorchFileSrc@key_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=key; payload.crypto.algorithm=AES-128}; \
+   Tee@trace_tee; \
+      @trace_tee.src_%u{routing.branch.family=dpa-trace-fanout}; \
+      @trace_tee.src_0{routing.branch=raw-trace-plot}; \
+      @trace_tee.src_1{routing.branch=dpa-features}; \
+   AesLeakageHypothesis@hyp \
+      (channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
+   DpaAttack@attack \
+      (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,accumulation_mode=recompute,top_k=8); \
+   AttackStats@stats \
+      (top_k=8,confidence_metrics=[relative_margin,z_score,robust_z_score]); \
+   Tee@stats_tee; \
+      @stats_tee.src_%u{routing.branch.family=dpa-attack-stats}; \
+      @stats_tee.src_0{routing.branch=trace-annotations}; \
+      @stats_tee.src_1{routing.branch=score-plot}; \
+      @stats_tee.src_2{routing.branch=scoreboard}; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@trace_plot \
+      (title="AES DPA - raw traces with best samples",group=dpa,label=raw-traces,x_axis=time_us,update_mode=replace,annotation_update_mode=replace,center0=true); \
+   TracePlot@diff_plot \
+      (title="AES DPA - best difference traces",group=dpa,label=best-difference,layout=stacked,x_axis=sample,update_mode=replace,trace_context_label=unit,center0=true); \
+   ScorePlot@score_plot \
+      (group=dpa,title="DPA score and confidence",metrics=[score,relative_margin,true_rank],show_second_score=true,max_units=16); \
+   ScoreTablePlot@scoreboard \
+      (group=dpa,title="DPA scoreboard",sort=score,rows=8,max_history=1); \
+   @traces_src ! @trace_tee; \
+      @trace_tee.src_0 ! @trace_plot.sink; \
+      @trace_tee.src_1 ! @attack.features; \
+   @plain_src ! @hyp.plaintexts; \
+   @hyp ! @attack.hypotheses; \
+   @attack.scores ! @stats.scores; \
+   @attack.best_difference ! @diff_plot.sink; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @trace_plot.annotations; \
+      @stats_tee.src_1 ! @score_plot; \
+      @stats_tee.src_2 ! @scoreboard'
+```
+
+Notes:
+
+- `y(0)`, `y(3)`, and `y(7)` are binary S-box output-bit hypotheses. Narrow to
+  `channels=[y(0)],byte_indexes=[0]` for a faster interactive demo.
+- `DpaAttack.best_difference` emits a CPU float32 `[attack_unit,sample]` tensor,
+  so `TracePlot(trace_context_label=unit)` gives the slider unit semantics.
+- The raw trace and difference trace share `group=dpa`; `layout=stacked` puts the
+  generated difference traces under the raw trace panel.
+
+## AES Sync DPA Live - Trace, Difference Trace, Score, Scoreboard
+
+This live DPA version mirrors the live CPA shape. Traces and plaintexts stream
+through queues, `Sync(policy=zip)` aligns them, and
+`DpaAttack(accumulation_mode=auto)` resolves to incremental. The extra
+`TracePlot@diff_plot` replaces its snapshot each update so it always shows the
+latest best-difference state.
+
+```bash
+leakflow --log-level warning run --graph \
+  'FakeLiveSrc@traces_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/traces.pt,trace_rate=0) \
+      {capture.source=ChipWhisperer; capture.dataset.name=aes_sync_poi; capture.sample_rate_hz=29454545.454545453; origin.role=traces; payload.leakage.range=[-0.5,0.5]}; \
+   Queue@traces_queue(max_size=8,drop_oldest=false); \
+   FakeLiveSrc@plain_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt,trace_rate=0) \
+      {capture.dataset.name=aes_sync_poi; origin.role=plaintexts}; \
+   Queue@plain_queue(max_size=8,drop_oldest=false); \
+   TorchFileSrc@key_src \
+      (path=traces/aes/sync/aes_sync_poi/key_01/key.pt) \
+      {capture.dataset.name=aes_sync_poi; origin.role=key; payload.crypto.algorithm=AES-128}; \
+   Tee@trace_tee; \
+      @trace_tee.src_%u{routing.branch.family=live-dpa-trace-fanout}; \
+      @trace_tee.src_0{routing.branch=raw-trace-plot}; \
+      @trace_tee.src_1{routing.branch=dpa-features}; \
+   AesLeakageHypothesis@hyp \
+      (channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
+   Sync@attack_sync(policy=zip); \
+   DpaAttack@attack \
+      (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,accumulation_mode=auto,top_k=8); \
+   AttackStats@stats \
+      (top_k=8,confidence_metrics=[relative_margin,z_score,robust_z_score]); \
+   Tee@stats_tee; \
+      @stats_tee.src_%u{routing.branch.family=live-dpa-attack-stats}; \
+      @stats_tee.src_0{routing.branch=trace-annotations}; \
+      @stats_tee.src_1{routing.branch=score-plot}; \
+      @stats_tee.src_2{routing.branch=scoreboard}; \
+   AttackStatsToPlotAnnotations@ann(precision=3); \
+   TracePlot@trace_plot \
+      (title="Live AES DPA - traces and current best samples",group=dpa-live,label=streamed-traces,x_axis=time_us,update_mode=accumulate,annotation_update_mode=replace,center0=true); \
+   TracePlot@diff_plot \
+      (title="Live AES DPA - current best difference traces",group=dpa-live,label=best-difference,layout=stacked,x_axis=sample,update_mode=replace,trace_context_label=unit,center0=true); \
+   ScorePlot@score_plot \
+      (group=dpa-live,title="Live DPA score convergence",metrics=[score,relative_margin,true_rank],show_second_score=true,max_units=16); \
+   ScoreTablePlot@scoreboard \
+      (group=dpa-live,title="Live DPA scoreboard",sort=score,rows=8,max_history=50); \
+   @traces_src ! @traces_queue ! @trace_tee; \
+      @trace_tee.src_0 ! @trace_plot.sink; \
+      @trace_tee.src_1 ! @attack_sync.in_0; \
+   @plain_src ! @plain_queue ! @hyp.plaintexts; \
+   @hyp ! @attack_sync.in_1; \
+   @attack_sync.out_0 ! @attack.features; \
+   @attack_sync.out_1 ! @attack.hypotheses; \
+   @attack.scores ! @stats.scores; \
+   @attack.best_difference ! @diff_plot.sink; \
+   @key_src ! @stats.truth; \
+   @stats ! @stats_tee; \
+      @stats_tee.src_0 ! @ann ! @trace_plot.annotations; \
+      @stats_tee.src_1 ! @score_plot; \
+      @stats_tee.src_2 ! @scoreboard'
+```
+
+Notes:
+
+- `DpaAttack` incremental mode keeps group sums and counts, not raw traces. The
+  best-difference plot is generated output, not a copy of the source traces.
+- `ScoreTablePlot(max_history=50)` keeps a scrub history of the live scoreboard.
+  Set it to `1` for current-only replacement.
+- The DPA examples intentionally use bit hypotheses. `DpaAttack` rejects
+  non-binary hypotheses, while CPA accepts numeric leakage hypotheses.
