@@ -238,11 +238,12 @@ void move_snapshot_before(TraceView &view, std::vector<const TracePlotSnapshot *
     }
 
     auto &trace_index = view.mutable_trace_index(snapshot.id, static_cast<int>(snapshot.initial_trace_index));
-    // An accumulate snapshot streams new traces in; while streaming, the slider rides
-    // the newest one by default. The slider widget clears follow_latest while the user
-    // holds it; once a run is held (Idle) or frozen (Paused) we stop following so the
-    // history can be scrubbed freely.
-    if (snapshot.accumulate && view.streaming() && view.mutable_trace_follow_latest(snapshot.id, true)) {
+    // An accumulate snapshot streams new traces in and the slider rides the newest by
+    // default. This is NOT gated on streaming: on Pause the in-flight fold still
+    // appends its rows after the run reports Paused, so following must snap to the
+    // *current* last row (else it freezes a fold behind). Grabbing the slider clears
+    // follow_latest (see the controls) so a held/paused run can be scrubbed freely.
+    if (snapshot.accumulate && view.mutable_trace_follow_latest(snapshot.id, true)) {
         trace_index = static_cast<int>(snapshot.trace_count() - 1);
     }
     trace_index = clamped_trace_index(snapshot, trace_index);
@@ -502,11 +503,17 @@ void draw_vertical_trace_controls(TraceView &view, std::string_view group,
             }
         }
 
-        // Accumulate plots ride the newest trace; holding the slider (or a group
-        // trace lock owning the index) pauses the follow so a past trace can be
-        // inspected. On release it resumes and snaps back to the latest.
+        // Accumulate plots ride the newest trace. While streaming, holding the slider
+        // (or a group trace lock owning the index) pauses the follow and releasing
+        // resumes it (snap back to latest). While held (Idle) or frozen (Paused) the
+        // slider stays at the true latest until the user grabs it, then follow stays
+        // off so a past trace can be scrubbed without snapping back on release.
         if (snapshot->accumulate) {
-            view.mutable_trace_follow_latest(snapshot->id, true) = !group_trace_lock && !slider_active;
+            if (view.streaming()) {
+                view.mutable_trace_follow_latest(snapshot->id, true) = !group_trace_lock && !slider_active;
+            } else if (slider_active) {
+                view.mutable_trace_follow_latest(snapshot->id, true) = false;
+            }
         }
         drew_control = true;
     }
