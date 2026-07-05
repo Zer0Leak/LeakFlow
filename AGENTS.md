@@ -26,7 +26,21 @@ When uncertain, prefer the smallest useful implementation that satisfies the cur
 
 Do not add future dependencies, abstractions, plugin families, CUDA, libtorch, AES, Kyber, YAML, GUI, or dynamic plugin loading unless required by the current phase.
 
-## Required workflow
+## Framework-oriented rule
+
+LeakFlow is a framework first. Always design and change code framework-oriented:
+generic, reusable elements, properties, and core mechanisms that any experiment
+can use — never one-off logic for a single paper or attack baked into shared code.
+
+The only place attack/paper-specific tuning or narrowing belongs is under
+`replications/` (one subdirectory per replicated paper). Those apps may hard-code
+dataset paths, pipeline expressions, property choices, and attack-specific
+parameters, because they are replication-specific.
+
+Everywhere else — `include/`, `src/`, core, and all plugins — stays generic. If a
+replication needs behavior the framework lacks, add it to the framework as a
+general capability (a property, element, or mode) and then select/tune it from the
+replication app. Do not bake the specific case into shared code.
 
 Before editing files:
 

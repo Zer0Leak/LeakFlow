@@ -40,6 +40,23 @@ constexpr auto default_trace_alpha = 1.0;
     throw std::invalid_argument("TracePlot update_mode must be auto, accumulate, or replace");
 }
 
+// annotation_update_mode resolution. auto follows the resolved trace mode (today's
+// coupled behavior); accumulate/replace override it so annotations can be pinned
+// per-trace or kept global independently of whether the traces pile up.
+[[nodiscard]] bool resolve_annotations_accumulate_for(std::string_view annotation_update_mode, bool trace_accumulate)
+{
+    if (annotation_update_mode == "accumulate") {
+        return true;
+    }
+    if (annotation_update_mode == "replace") {
+        return false;
+    }
+    if (annotation_update_mode == "auto") {
+        return trace_accumulate;
+    }
+    throw std::invalid_argument("TracePlot annotation_update_mode must be auto, accumulate, or replace");
+}
+
 [[nodiscard]] Caps trace_plot_sink_caps()
 {
     Caps caps(leakflow::base::torch_tensor_caps_type);
@@ -310,6 +327,8 @@ void assign_display_properties(const Element& element, leakflow::plot::TracePlot
     resolve_trace_context(element, buffer, snapshot);
     snapshot.annotations = snapshot_annotations(annotations);
     snapshot.accumulate = accumulate;
+    snapshot.annotations_accumulate = resolve_annotations_accumulate_for(
+        string_property_or(element, "annotation_update_mode", "auto"), accumulate);
     return snapshot;
 }
 
@@ -497,6 +516,16 @@ ElementDescriptor TracePlot::descriptor()
                              "resolved update mode currently selected by update_mode", "",
                              StringEnumConstraint{{"accumulate", "replace"}}, "", PropertyEffect{},
                              /*optional=*/false, /*writable=*/false),
+                PropertySpec("annotation_update_mode", std::string("auto"),
+                             "how annotations combine, independent of update_mode: replace keeps only the "
+                             "latest buffer's markers (global, drawn on any trace -- best for PoIs over "
+                             "accumulated traces), accumulate pins each buffer's markers to the rows it "
+                             "added (per-trace history), auto follows update_mode",
+                             "", StringEnumConstraint{{"auto", "accumulate", "replace"}}, "", display),
+                PropertySpec("active_annotation_update_mode", std::string("replace"),
+                             "resolved annotation update mode currently selected by annotation_update_mode", "",
+                             StringEnumConstraint{{"accumulate", "replace"}}, "", PropertyEffect{},
+                             /*optional=*/false, /*writable=*/false),
             },
         .keywords = {"plot", "trace", "imgui", "implot", "torch"},
         .metadata_suggestions = {
@@ -557,6 +586,10 @@ bool TracePlot::resolve_accumulate()
 {
     const auto accumulate = resolve_accumulate_for(string_property_or(*this, "update_mode", "auto"), is_live_driven());
     set_read_only_property("active_update_mode", std::string(accumulate ? "accumulate" : "replace"));
+    const auto annotations_accumulate = resolve_annotations_accumulate_for(
+        string_property_or(*this, "annotation_update_mode", "auto"), accumulate);
+    set_read_only_property("active_annotation_update_mode",
+        std::string(annotations_accumulate ? "accumulate" : "replace"));
     return accumulate;
 }
 
@@ -580,7 +613,7 @@ void TracePlot::refresh_display(bool force_y_refit)
 
 void TracePlot::property_changed(std::string_view name)
 {
-    if (name == "update_mode") {
+    if (name == "update_mode" || name == "annotation_update_mode") {
         update_active_update_mode();
     }
     // ui-control (presentation) change: apply it to the live snapshot directly so it

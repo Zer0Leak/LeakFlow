@@ -94,6 +94,13 @@ struct TracePlotSnapshot {
     // instead of replacing the element's previous snapshot in place. Driven by
     // TracePlot's update_mode (accumulate vs replace). Default replace.
     bool accumulate = false;
+    // In accumulate mode, controls annotations independently of the traces: true
+    // accumulates per-fold history (a global marker pins to the last row of the fold
+    // it arrived with -- the trace the slider follows while streaming -- and per-trace
+    // markers keep their own row); false keeps them global (trace_row -1) and replaces
+    // the set each buffer, so global markers like PoIs stay visible over the piled-up
+    // traces. Driven by TracePlot's annotation_update_mode. Unused in replace mode.
+    bool annotations_accumulate = true;
     std::optional<double> sample_rate_hz;
     std::optional<TracePlotColor> color;
     std::vector<std::int64_t> shape;

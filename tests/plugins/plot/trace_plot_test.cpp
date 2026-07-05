@@ -748,5 +748,80 @@ int main()
         }
     }
 
+    // annotation_update_mode decouples annotations from the trace update_mode. With
+    // update_mode=accumulate the traces pile up across buffers; the annotation mode
+    // decides whether markers pin per-batch (accumulate) or stay global and replace
+    // (replace) -- the latter keeps a single running set of global PoI markers over
+    // the accumulated traces.
+    {
+        const auto make_frame = [](std::int64_t sample) {
+            auto trace_payload = std::make_shared<leakflow::base::TorchTensorPayload>(
+                torch::arange(0, 6, torch::TensorOptions().dtype(torch::kFloat32)).reshape({2, 3}));
+            leakflow::Buffer trace_buffer(trace_payload->caps());
+            trace_buffer.set_payload(trace_payload);
+
+            auto ann_payload = std::make_shared<leakflow::base::PlotAnnotationPayload>(
+                std::vector<leakflow::base::PlotAnnotation>{
+                    leakflow::base::PlotAnnotation{.sample_index = sample, .kind = "poi"},
+                });
+            leakflow::Buffer ann_buffer(ann_payload->caps());
+            ann_buffer.set_payload(ann_payload);
+
+            leakflow::ElementInputs inputs;
+            inputs.emplace("sink", trace_buffer);
+            inputs.emplace("annotations", ann_buffer);
+            return inputs;
+        };
+
+        // accumulate traces + replace annotations: after two buffers the traces have
+        // piled up (4 rows) but the annotation set is the latest only (1), kept global.
+        auto replace_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
+        plot_plugin::TracePlot replace_plot(replace_runtime, "acc_replace");
+        replace_plot.set_property("update_mode", std::string("accumulate"));
+        replace_plot.set_property("annotation_update_mode", std::string("replace"));
+        (void)replace_plot.process_inputs(make_frame(1));
+        (void)replace_plot.process_inputs(make_frame(2));
+        const auto& replace_snapshot = replace_runtime->trace_view()->trace_snapshots().front();
+        if (!expect(replace_snapshot.trace_count() == 4, "accumulate should pile up traces to 4 rows")) {
+            return 1;
+        }
+        if (!expect(replace_snapshot.annotations.size() == 1,
+                    "annotation_update_mode=replace should keep only the latest marker set")) {
+            return 1;
+        }
+        if (!expect(replace_snapshot.annotations.front().sample_index == 2,
+                    "annotation_update_mode=replace should keep the latest buffer's marker")) {
+            return 1;
+        }
+        if (!expect(replace_snapshot.annotations.front().trace_row == -1,
+                    "replace-mode annotations should stay global (trace_row -1)")) {
+            return 1;
+        }
+
+        // accumulate traces + accumulate annotations: both pile up (2 markers), and
+        // each global marker pins to its fold's LAST row (batch end -- the trace the
+        // slider follows while streaming). Frames are [2,3]: fold 0 rows 0..1 (last 1),
+        // fold 1 rows 2..3 (last 3).
+        auto accumulate_runtime = std::make_shared<leakflow::plot::PlotRuntime>();
+        plot_plugin::TracePlot accumulate_plot(accumulate_runtime, "acc_acc");
+        accumulate_plot.set_property("update_mode", std::string("accumulate"));
+        accumulate_plot.set_property("annotation_update_mode", std::string("accumulate"));
+        (void)accumulate_plot.process_inputs(make_frame(1));
+        (void)accumulate_plot.process_inputs(make_frame(2));
+        const auto& accumulate_snapshot = accumulate_runtime->trace_view()->trace_snapshots().front();
+        if (!expect(accumulate_snapshot.annotations.size() == 2,
+                    "annotation_update_mode=accumulate should keep every marker set")) {
+            return 1;
+        }
+        if (!expect(accumulate_snapshot.annotations.front().trace_row == 1,
+                    "accumulate should pin fold 0's global marker to its last row (1)")) {
+            return 1;
+        }
+        if (!expect(accumulate_snapshot.annotations.back().trace_row == 3,
+                    "accumulate should pin fold 1's global marker to its last row (3)")) {
+            return 1;
+        }
+    }
+
     return 0;
 }

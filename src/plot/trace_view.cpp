@@ -1281,9 +1281,22 @@ std::uint64_t TraceView::add_trace(TracePlotSnapshot snapshot) {
             } else if (!existing.trace_context_values.empty()) {
                 existing.trace_context_values.clear();
             }
-            for (auto &annotation : snapshot.annotations) {
-                annotation.trace_row = base_row + std::max<std::int64_t>(annotation.trace_row, 0);
-                existing.annotations.push_back(std::move(annotation));
+            if (snapshot.annotations_accumulate) {
+                // Per-trace history: pin each annotation to the rows it arrived with.
+                // A global marker (trace_row < 0) has no row of its own, so it pins to
+                // the fold's last row -- the trace the slider follows while streaming,
+                // so each fold's markers are visible as it streams.
+                const auto pinned_global_row = base_row + added_rows - 1;
+                for (auto &annotation : snapshot.annotations) {
+                    annotation.trace_row =
+                        annotation.trace_row < 0 ? pinned_global_row : base_row + annotation.trace_row;
+                    existing.annotations.push_back(std::move(annotation));
+                }
+            } else {
+                // Global markers (e.g. PoIs): replace the set with this buffer's, kept
+                // at trace_row -1 so they draw on whatever trace is shown -- including
+                // the newest the slider follows -- instead of piling up per batch.
+                existing.annotations = std::move(snapshot.annotations);
             }
             // The renderer owns slider follow (it rides the newest trace only while
             // streaming, and pauses on hold / in Idle), so no index update here.
@@ -1442,11 +1455,17 @@ std::uint64_t TraceView::add_trace(TracePlotSnapshot snapshot) {
     };
     log::write(std::move(record));
 
-    // First accumulate buffer: bind its annotations to their trace rows so later
-    // appended traces do not inherit them (-1 would draw on every trace).
-    if (snapshot.accumulate) {
+    // First accumulate buffer: with per-trace annotations, bind them to their trace
+    // rows so later appended traces do not inherit them (-1 would draw on every
+    // trace). A global marker (trace_row < 0) pins to this fold's last row. Global
+    // annotations under replace mode (annotations_accumulate false) stay at -1 so they
+    // keep drawing on the displayed trace as more buffers pile in.
+    if (snapshot.accumulate && snapshot.annotations_accumulate) {
+        const auto pinned_global_row = std::max<std::int64_t>(snapshot.trace_count() - 1, 0);
         for (auto &annotation : snapshot.annotations) {
-            annotation.trace_row = std::max<std::int64_t>(annotation.trace_row, 0);
+            if (annotation.trace_row < 0) {
+                annotation.trace_row = pinned_global_row;
+            }
         }
     }
 
