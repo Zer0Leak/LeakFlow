@@ -73,6 +73,17 @@ current best guess/channel per unit.
 All examples use `--graph` so the pipeline graph, property controls, vector-clock
 state, and plot windows are visible together.
 
+To profile any of the four pipelines, add the profiling run options after `run`,
+for example:
+
+```text
+run --print-profile --profile-file build/leakflow-profile.json --graph
+```
+
+`--print-profile` prints the per-element timing table at exit, while
+`--profile-file` writes Chrome Trace Event JSON for `chrome://tracing` or
+Perfetto.
+
 ## AES Sync CPA Offline - Trace, Score, Scoreboard
 
 This one-shot CPA run loads full tensors with `TorchFileSrc`, so no `Queue` or
