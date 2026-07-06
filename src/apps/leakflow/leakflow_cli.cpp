@@ -82,8 +82,14 @@ struct PadCapsAnnotation {
 
 [[nodiscard]] ElementFactoryRegistry
 linked_element_factory_registry(std::shared_ptr<leakflow::plot::PlotRuntime> plot_runtime) {
+    // Payload codecs for BufferFileSink/BufferFileSrc, populated by the layers that
+    // own the concrete payloads and injected into the core buffer-file factories.
+    auto codecs = std::make_shared<leakflow::PayloadCodecRegistry>();
+    base::register_payload_codecs(*codecs);
+    crypto_plugin::register_payload_codecs(*codecs);
+
     ElementFactoryRegistry registry;
-    core::register_element_factories(registry);
+    core::register_element_factories(registry, std::move(codecs));
     base::register_element_factories(registry);
     extras::register_element_factories(registry);
     crypto_plugin::register_element_factories(registry);

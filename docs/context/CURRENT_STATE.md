@@ -236,6 +236,8 @@ Core:
 - `Pad`
 - `Pipeline`
 - `ElementFactoryRegistry`
+- `PayloadCodecRegistry` (payload save/load callbacks by `type_name`; drives
+  `BufferFileSink`/`BufferFileSrc`)
 - `PropertyValue` / `PropertySpec`
 - `PropertyEffect`
 - `ElementDescriptor` / `PluginDescriptor`
@@ -306,6 +308,9 @@ Core plugin elements:
 - `Queue`
 - `Sync` (generic `N→N` cross-source pairing; barrier/zip/all-required-once/held/
   latest policies)
+- `BufferFileSink` / `BufferFileSrc` (persist/reload a whole Buffer to a `.lfbuf`
+  directory: readable `manifest.txt` envelope + codec-written `payload.pt`; driven by
+  a `PayloadCodecRegistry`)
 
 Base plugin elements:
 

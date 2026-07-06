@@ -416,7 +416,7 @@ set_tests_properties(leakflow_ls_inspect_extras PROPERTIES
 
 add_test(NAME leakflow_ls_plugin_feature_count_leaf COMMAND leakflow-ls --no-colors --ascii leakflow_plugins_core)
 set_tests_properties(leakflow_ls_plugin_feature_count_leaf PROPERTIES
-    PASS_REGULAR_EXPRESSION "  `- 8 elements"
+    PASS_REGULAR_EXPRESSION "  `- 10 elements"
 )
 
 add_test(NAME leakflow_ls_inspect_element COMMAND leakflow-ls FakeSink)

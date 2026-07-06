@@ -37,3 +37,15 @@ target_link_libraries(leakflow_sync_threaded_tests
 )
 leakflow_configure_test_target(leakflow_sync_threaded_tests)
 add_test(NAME leakflow_sync_threaded COMMAND leakflow_sync_threaded_tests)
+
+add_executable(leakflow_buffer_file_tests
+    buffer_file_test.cpp
+)
+target_link_libraries(leakflow_buffer_file_tests
+    PRIVATE
+        leakflow_plugins_core
+        leakflow_plugins_base
+        leakflow_plugins_crypto
+)
+leakflow_configure_test_target(leakflow_buffer_file_tests)
+add_test(NAME leakflow_buffer_file COMMAND leakflow_buffer_file_tests)

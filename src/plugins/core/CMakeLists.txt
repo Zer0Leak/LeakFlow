@@ -1,4 +1,6 @@
 add_library(leakflow_plugins_core SHARED
+    buffer_file_sink.cpp
+    buffer_file_src.cpp
     buffer_summary.cpp
     bytes_payload.cpp
     descriptor_catalog.cpp

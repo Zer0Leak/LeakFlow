@@ -11,6 +11,7 @@ add_library(leakflow_core
     metadata_forwarding.cpp
     pad.cpp
     payload.cpp
+    payload_codec.cpp
     pipeline_observer.cpp
     pipeline_session.cpp
     property.cpp

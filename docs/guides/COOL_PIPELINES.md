@@ -348,3 +348,51 @@ Notes:
   Set it to `1` for current-only replacement.
 - The DPA examples intentionally use bit hypotheses. `DpaAttack` rejects
   non-binary hypotheses, while CPA accepts numeric leakage hypotheses.
+
+## Save An Expensive Correlation, Re-select PoIs Offline
+
+`BufferFileSink` persists a whole buffer (caps + metadata + payload) to a `.lfbuf`
+directory; `BufferFileSrc` reloads it. Because the expensive step is the
+correlation and `PoiSelect` is cheap, you can compute the correlation once, save it,
+then reload and try any `top_k`/`rank_by` **offline, with no re-streaming**.
+
+Compute and save the correlation:
+
+```bash
+leakflow --log-level warning run \
+  'TorchFileSrc@t(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); \
+   TorchFileSrc@p(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); \
+   TorchFileSrc@k(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
+   Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],byte_indexes=[0]); \
+   PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.lfbuf); \
+   @t ! @tee; @tee.src_0 ! @corr.features; @tee.src_1 ! @lk.traces; \
+   @p ! @lk.plaintexts; @k ! @lk.keys; @lk ! @corr.targets; @corr ! @save'
+```
+
+`out/aes_corr.lfbuf/manifest.txt` is human-readable (`caps.type=leakflow/correlation`,
+the leakage metadata, `payload.correlation.observation_count=50`, ...) and
+`payload.pt` holds the correlation tensor.
+
+Reload and select PoIs — instant, no traces required:
+
+```bash
+leakflow run --graph \
+  'TorchFileSrc@traces_src \
+      (path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) \
+      {capture.sample_rate_hz=29454545.454545453; origin.role=traces}; \
+   BufferFileSrc@corr_src(path=out/aes_corr.lfbuf); \
+   PoiSelect@poi(top_k=[3],rank_by=[abs]); \
+   Tee@poi_tee; \
+   CorrelationPoiToPlotAnnotations@ann(precision=3); \
+   TracePlot@plot(title="Cached Pearson PoIs",group=poi,label=traces,x_axis=time_us,annotation_update_mode=replace); \
+   Summary@summary(level=2); \
+   FakeSink@sink; \
+   @traces_src ! @plot.sink; \
+   @corr_src ! @poi ! @poi_tee; \
+      @poi_tee.src_0 ! @ann ! @plot.annotations; \
+      @poi_tee.src_1 ! @summary ! @sink'
+```
+
+Change `top_k`/`rank_by` and re-run as often as you like — the correlation is not
+recomputed. This is the cross-session complement to editing `PoiSelect` properties
+live in `--graph` (which re-selects from the cached correlation in Idle).
