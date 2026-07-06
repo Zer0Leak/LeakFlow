@@ -373,7 +373,9 @@ leakflow --log-level warning run \
 the leakage metadata, `payload.correlation.observation_count=50`, ...) and
 `payload.pt` holds the correlation tensor.
 
-Reload and select PoIs — instant, no traces required:
+Reload the correlation and plot the PoIs. The expensive correlation is **not**
+recomputed (`@corr_src ! @poi` re-selects from the cached correlation); the traces are
+reloaded only as the cheap backdrop the PoI markers are drawn on:
 
 ```bash
 leakflow run --graph \
