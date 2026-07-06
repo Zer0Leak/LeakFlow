@@ -137,32 +137,150 @@ void report_graph_run_failure(PipelineSession &session, std::string_view message
     return element.type_name + "@" + element.name;
 }
 
-[[nodiscard]] ImU32 klass_color(std::string_view klass) {
-    const auto contains = [klass](std::string_view needle) { return klass.find(needle) != std::string_view::npos; };
+struct KlassColors {
+    ImU32 fill;
+    ImU32 border;
+    ImU32 accent;
+};
 
-    if (contains("Source")) {
-        return ImGui::GetColorU32(ImVec4(0.18F, 0.58F, 0.35F, 1.0F));
+[[nodiscard]] ImU32 color_u32(float r, float g, float b, float a = 1.0F) {
+    return ImGui::GetColorU32(ImVec4(r, g, b, a));
+}
+
+[[nodiscard]] KlassColors klass_colors_from_rgb(
+    std::array<float, 3> fill,
+    std::array<float, 3> border,
+    std::array<float, 3> accent)
+{
+    return KlassColors{
+        .fill = color_u32(fill[0], fill[1], fill[2], 1.0F),
+        .border = color_u32(border[0], border[1], border[2], 0.92F),
+        .accent = color_u32(accent[0], accent[1], accent[2], 0.96F),
+    };
+}
+
+[[nodiscard]] bool klass_has_prefix(std::string_view klass, std::string_view prefix) {
+    return klass == prefix ||
+           (klass.size() > prefix.size() && klass.starts_with(prefix) && klass[prefix.size()] == '/');
+}
+
+[[nodiscard]] KlassColors klass_colors(std::string_view klass) {
+    // Match from specific roles to broad forwarding profiles. Keep this palette in
+    // sync with docs/design/metadata_klass_taxonomy.md when new klass families land.
+    const auto matches = [klass](std::string_view prefix) { return klass_has_prefix(klass, prefix); };
+
+    if (matches("Source/Live")) {
+        return klass_colors_from_rgb({0.05F, 0.23F, 0.32F}, {0.13F, 0.83F, 0.93F}, {0.38F, 0.93F, 1.00F});
     }
-    if (contains("Sink")) {
-        return ImGui::GetColorU32(ImVec4(0.68F, 0.28F, 0.30F, 1.0F));
+    if (matches("Source/App")) {
+        return klass_colors_from_rgb({0.13F, 0.18F, 0.42F}, {0.51F, 0.55F, 0.96F}, {0.64F, 0.68F, 1.00F});
     }
-    if (contains("Visualization") || contains("Plot")) {
-        return ImGui::GetColorU32(ImVec4(0.22F, 0.44F, 0.80F, 1.0F));
+    if (matches("Source/Test")) {
+        return klass_colors_from_rgb({0.17F, 0.22F, 0.30F}, {0.58F, 0.67F, 0.78F}, {0.74F, 0.82F, 0.92F});
     }
-    if (contains("Analysis") || contains("Analyze")) {
-        return ImGui::GetColorU32(ImVec4(0.82F, 0.52F, 0.20F, 1.0F));
+    if (matches("Source/File")) {
+        return klass_colors_from_rgb({0.08F, 0.20F, 0.37F}, {0.23F, 0.51F, 0.96F}, {0.38F, 0.65F, 1.00F});
     }
-    if (contains("Transform") || contains("Conversion") || contains("Convert") || contains("PassThrough")) {
-        return ImGui::GetColorU32(ImVec4(0.20F, 0.62F, 0.68F, 1.0F));
-    }
-    if (contains("Crypto")) {
-        return ImGui::GetColorU32(ImVec4(0.74F, 0.63F, 0.22F, 1.0F));
-    }
-    if (contains("Generic")) {
-        return ImGui::GetColorU32(ImVec4(0.44F, 0.38F, 0.72F, 1.0F));
+    if (matches("Source")) {
+        return klass_colors_from_rgb({0.08F, 0.22F, 0.36F}, {0.28F, 0.62F, 0.97F}, {0.56F, 0.79F, 1.00F});
     }
 
-    return ImGui::GetColorU32(ImVec4(0.32F, 0.36F, 0.42F, 1.0F));
+    if (matches("PassThrough/Flow/Sync")) {
+        return klass_colors_from_rgb({0.14F, 0.20F, 0.28F}, {0.38F, 0.65F, 0.98F}, {0.58F, 0.77F, 1.00F});
+    }
+    if (matches("PassThrough/Flow/Tee")) {
+        return klass_colors_from_rgb({0.16F, 0.19F, 0.27F}, {0.50F, 0.55F, 0.96F}, {0.68F, 0.72F, 1.00F});
+    }
+    if (matches("PassThrough/Flow")) {
+        return klass_colors_from_rgb({0.15F, 0.20F, 0.25F}, {0.58F, 0.64F, 0.72F}, {0.79F, 0.86F, 0.95F});
+    }
+    if (matches("PassThrough/Inspect")) {
+        return klass_colors_from_rgb({0.16F, 0.19F, 0.23F}, {0.80F, 0.84F, 0.88F}, {0.94F, 0.97F, 1.00F});
+    }
+    if (matches("PassThrough")) {
+        return klass_colors_from_rgb({0.14F, 0.20F, 0.24F}, {0.55F, 0.65F, 0.72F}, {0.75F, 0.86F, 0.94F});
+    }
+
+    if (matches("Convert/PlotAnnotation")) {
+        return klass_colors_from_rgb({0.07F, 0.25F, 0.21F}, {0.37F, 0.92F, 0.83F}, {0.60F, 1.00F, 0.91F});
+    }
+    if (matches("Convert/Tensor")) {
+        return klass_colors_from_rgb({0.07F, 0.24F, 0.23F}, {0.08F, 0.72F, 0.65F}, {0.28F, 0.90F, 0.82F});
+    }
+    if (matches("Convert/Signal")) {
+        return klass_colors_from_rgb({0.08F, 0.26F, 0.18F}, {0.20F, 0.83F, 0.51F}, {0.47F, 1.00F, 0.70F});
+    }
+    if (matches("Convert/Predict")) {
+        return klass_colors_from_rgb({0.11F, 0.27F, 0.17F}, {0.45F, 0.90F, 0.45F}, {0.70F, 1.00F, 0.70F});
+    }
+    if (matches("Convert")) {
+        return klass_colors_from_rgb({0.07F, 0.24F, 0.22F}, {0.18F, 0.77F, 0.69F}, {0.45F, 0.96F, 0.87F});
+    }
+
+    if (matches("Analyze/SCA/Evaluation")) {
+        return klass_colors_from_rgb({0.29F, 0.23F, 0.09F}, {0.99F, 0.90F, 0.54F}, {1.00F, 0.95F, 0.67F});
+    }
+    if (matches("Analyze/SCA/Attack")) {
+        return klass_colors_from_rgb({0.29F, 0.15F, 0.06F}, {0.98F, 0.45F, 0.09F}, {1.00F, 0.62F, 0.30F});
+    }
+    if (matches("Analyze/SCA/PoI")) {
+        return klass_colors_from_rgb({0.25F, 0.23F, 0.07F}, {0.98F, 0.80F, 0.08F}, {1.00F, 0.90F, 0.29F});
+    }
+    if (matches("Analyze/SCA/Score")) {
+        return klass_colors_from_rgb({0.29F, 0.22F, 0.05F}, {0.92F, 0.70F, 0.03F}, {0.99F, 0.84F, 0.27F});
+    }
+    if (matches("Analyze/SCA/Hypothesis")) {
+        return klass_colors_from_rgb({0.30F, 0.16F, 0.07F}, {0.92F, 0.34F, 0.05F}, {1.00F, 0.52F, 0.20F});
+    }
+    if (matches("Analyze/SCA/Leakage")) {
+        return klass_colors_from_rgb({0.29F, 0.18F, 0.04F}, {0.85F, 0.47F, 0.02F}, {0.98F, 0.64F, 0.15F});
+    }
+    if (matches("Analyze/SCA/Label")) {
+        return klass_colors_from_rgb({0.25F, 0.25F, 0.08F}, {0.84F, 0.84F, 0.23F}, {0.94F, 0.94F, 0.40F});
+    }
+    if (matches("Analyze/SCA/Model")) {
+        return klass_colors_from_rgb({0.30F, 0.19F, 0.07F}, {0.96F, 0.58F, 0.20F}, {1.00F, 0.74F, 0.40F});
+    }
+    if (matches("Analyze/SCA/Oracle")) {
+        return klass_colors_from_rgb({0.32F, 0.15F, 0.07F}, {0.96F, 0.39F, 0.20F}, {1.00F, 0.58F, 0.38F});
+    }
+    if (matches("Analyze/SCA/Solver")) {
+        return klass_colors_from_rgb({0.31F, 0.21F, 0.08F}, {0.95F, 0.62F, 0.18F}, {1.00F, 0.78F, 0.42F});
+    }
+    if (matches("Analyze")) {
+        return klass_colors_from_rgb({0.28F, 0.20F, 0.06F}, {0.92F, 0.60F, 0.16F}, {1.00F, 0.78F, 0.35F});
+    }
+
+    if (matches("Sink/Plot/AttackScoreboard")) {
+        return klass_colors_from_rgb({0.23F, 0.16F, 0.41F}, {0.77F, 0.71F, 0.99F}, {0.88F, 0.84F, 1.00F});
+    }
+    if (matches("Sink/Plot/AttackScore")) {
+        return klass_colors_from_rgb({0.20F, 0.13F, 0.37F}, {0.55F, 0.36F, 0.96F}, {0.72F, 0.56F, 1.00F});
+    }
+    if (matches("Sink/Plot")) {
+        return klass_colors_from_rgb({0.18F, 0.13F, 0.34F}, {0.65F, 0.55F, 0.98F}, {0.78F, 0.69F, 1.00F});
+    }
+    if (matches("Sink/File")) {
+        return klass_colors_from_rgb({0.16F, 0.12F, 0.30F}, {0.46F, 0.35F, 0.86F}, {0.64F, 0.55F, 0.96F});
+    }
+    if (matches("Sink/Test")) {
+        return klass_colors_from_rgb({0.19F, 0.17F, 0.27F}, {0.58F, 0.54F, 0.74F}, {0.74F, 0.70F, 0.88F});
+    }
+    if (matches("Sink/Evaluation")) {
+        return klass_colors_from_rgb({0.20F, 0.14F, 0.34F}, {0.79F, 0.70F, 0.99F}, {0.90F, 0.84F, 1.00F});
+    }
+    if (matches("Sink")) {
+        return klass_colors_from_rgb({0.18F, 0.12F, 0.31F}, {0.62F, 0.50F, 0.93F}, {0.78F, 0.68F, 1.00F});
+    }
+
+    if (matches("Control/Fault")) {
+        return klass_colors_from_rgb({0.34F, 0.10F, 0.15F}, {0.96F, 0.32F, 0.48F}, {1.00F, 0.52F, 0.64F});
+    }
+    if (matches("Control")) {
+        return klass_colors_from_rgb({0.29F, 0.11F, 0.16F}, {0.89F, 0.32F, 0.48F}, {1.00F, 0.54F, 0.66F});
+    }
+
+    return klass_colors_from_rgb({0.20F, 0.23F, 0.27F}, {0.56F, 0.62F, 0.70F}, {0.75F, 0.81F, 0.88F});
 }
 
 [[nodiscard]] ImU32 link_color(bool has_buffer) {
@@ -2156,11 +2274,13 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
         const auto max = box_max_by_name.at(element.name);
         const auto hovered = ImGui::IsMouseHoveringRect(min, max);
         const auto pinned = runtime.is_element_pinned(element.name);
-        const auto fill = klass_color(element.klass);
+        const auto colors = klass_colors(element.klass);
         const auto border = pinned ? ImGui::GetColorU32(ImVec4(1.00F, 0.82F, 0.28F, 0.98F))
                             : hovered ? ImGui::GetColorU32(ImVec4(1.00F, 1.00F, 1.00F, 0.95F))
-                                      : ImGui::GetColorU32(ImVec4(0.90F, 0.92F, 0.96F, 0.45F));
-        draw_list->AddRectFilled(min, max, fill, 6.0F);
+                                      : colors.border;
+        draw_list->AddRectFilled(min, max, colors.fill, 6.0F);
+        draw_list->AddRectFilled(min, ImVec2(min.x + 6.0F, max.y), colors.accent, 6.0F,
+                                 ImDrawFlags_RoundCornersLeft);
         draw_list->AddRect(min, max, border, 6.0F, 0, (hovered || pinned) ? 2.6F : 1.4F);
 
         const auto label = element_label(element);

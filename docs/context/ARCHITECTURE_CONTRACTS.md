@@ -110,6 +110,10 @@ token is the forwarding profile, mapped by `profile_for_klass(klass)`: `Source`,
 human-facing taxonomy (`Flow`, `Inspect`, `Score`, `PoI`, `Attack`,
 `Evaluation`, `PlotAnnotation`, ...).
 
+The graph palette is derived from the same hierarchy. New first-class `klass`
+families/roles should update both `docs/design/metadata_klass_taxonomy.md` and
+`klass_colors(...)` in `src/plot/pipeline_graph.cpp`.
+
 New-buffer-building elements call `forward_metadata(inputs, profile, output)`
 before stamping their own keys:
 

@@ -87,6 +87,42 @@ different SCA analysis slots that can be composed.
 | `Analyze` | Analyze | multi-input fusion or derivation of new knowledge |
 | *(other, e.g. `Control`)* | PassThrough | conservative default |
 
+### Graph color contract
+
+The `--graph` node palette is also derived from `klass`. It intentionally uses
+the full hierarchy, not only the leading profile token:
+
+```text
+Profile = main hue family
+Family/Role = shade inside that hue family
+```
+
+Examples:
+
+| Klass prefix | Graph color family |
+|---|---|
+| `Source/File/*` | blue |
+| `Source/Live/*` | cyan-blue |
+| `PassThrough/Flow/*` | slate/steel |
+| `PassThrough/Inspect/*` | gray-blue |
+| `Convert/Tensor/*` | teal |
+| `Convert/PlotAnnotation/*` | mint-teal |
+| `Analyze/SCA/Leakage/*` | dark gold |
+| `Analyze/SCA/Hypothesis/*` | copper |
+| `Analyze/SCA/Score/*` | gold |
+| `Analyze/SCA/PoI/*` | bright yellow-gold |
+| `Analyze/SCA/Attack/*` | orange-amber |
+| `Analyze/SCA/Evaluation/*` | pale amber |
+| `Sink/Plot/*` | violet |
+| `Sink/File/*` | deep purple |
+| `Control/Fault/*` | rose/red |
+
+When adding a new `klass` family or role, update both this document and
+`klass_colors(...)` in `src/plot/pipeline_graph.cpp`. Unknown prefixes still
+render safely using the broad profile color or neutral fallback, but newly
+introduced first-class families should get an explicit color so the graph remains
+readable.
+
 ## 4. Forwarding matrix
 
 `leakflow::forward_metadata(inputs, profile, output)` applies, before the element

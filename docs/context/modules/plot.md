@@ -161,6 +161,13 @@ window (`ScorePlot` always stacks; it never overlays). Design:
 `PipelineGraphRuntime` lives in `leakflow_plot` and consumes core
 `PipelineObserver` events.
 
+Node colors in `--graph` are derived from the element `klass` hierarchy, not just
+the first profile token: `Source/*` is blue, `PassThrough/Flow/*` is slate,
+`Convert/*` is teal, `Analyze/SCA/*` is amber/yellow with role-specific shades,
+and `Sink/Plot/*` is violet. When adding a new first-class `klass` family or
+role, update `docs/design/metadata_klass_taxonomy.md` and the local
+`klass_colors(...)` palette in `src/plot/pipeline_graph.cpp`.
+
 The graph runtime stores display copies only:
 
 - topology snapshots,
