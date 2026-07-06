@@ -55,9 +55,9 @@ int main()
     // Profile classification by leading klass token.
     expect(profile_for_klass("Source/File/Torch") == ForwardingProfile::Source, "Source klass");
     expect(profile_for_klass("Sink/Plot/Trace") == ForwardingProfile::Sink, "Sink klass");
-    expect(profile_for_klass("PassThrough/Queue") == ForwardingProfile::PassThrough, "PassThrough klass");
+    expect(profile_for_klass("PassThrough/Flow/Queue") == ForwardingProfile::PassThrough, "PassThrough klass");
     expect(profile_for_klass("Convert/Tensor/Torch") == ForwardingProfile::Reframe, "Convert klass");
-    expect(profile_for_klass("Analyze/SCA/Crypto/LeakageModel") == ForwardingProfile::Analyze, "Analyze klass");
+    expect(profile_for_klass("Analyze/SCA/Leakage/AES") == ForwardingProfile::Analyze, "Analyze klass");
     expect(profile_for_klass("Control/Fault/Voltage") == ForwardingProfile::PassThrough, "unknown klass default");
 
     // Reframe (single buffer): copy capture + origin as-is; drop payload + routing.

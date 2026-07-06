@@ -217,7 +217,7 @@ compute_leakage(const std::vector<AesLeakageChannel> &channels,
 ElementDescriptor AesLeakage::descriptor() {
   return {
       .type_name = "AesLeakage",
-      .klass = "Analyze/SCA/Crypto/LeakageModel",
+      .klass = "Analyze/SCA/Leakage/AES",
       .purpose =
           "compute AES first-round leakage targets for selected state bytes",
       .input_pads =

@@ -206,7 +206,7 @@ ElementDescriptor AttackStatsToPlotAnnotations::descriptor()
 {
     return {
         .type_name = "AttackStatsToPlotAnnotations",
-        .klass = "Convert/SCA/Plot/Annotations",
+        .klass = "Convert/PlotAnnotation/AttackStats",
         .purpose = "convert attack known-key statistics into generic plot annotations",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(attack_stats_caps_type)),

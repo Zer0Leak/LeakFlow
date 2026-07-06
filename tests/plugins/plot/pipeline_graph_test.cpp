@@ -308,7 +308,7 @@ int main() {
     readonly_topology.elements.push_back(leakflow::PipelineElementSnapshot{
         .type_name = "Queue",
         .name = "q",
-        .klass = "PassThrough/Queue",
+        .klass = "PassThrough/Flow/Queue",
         .telemetry = {
             leakflow::PipelineTelemetrySnapshot{
                 .name = "size",
@@ -330,7 +330,7 @@ int main() {
                     leakflow::PipelineEndpointSnapshot{
                         .element_type = "Queue",
                         .element_name = "q",
-                        .element_klass = "PassThrough/Queue",
+                        .element_klass = "PassThrough/Flow/Queue",
                 },
                 .telemetry_name = "size",
                 .value_type = "integer",
@@ -369,7 +369,7 @@ int main() {
                     leakflow::PipelineEndpointSnapshot{
                         .element_type = "Queue",
                         .element_name = "q",
-                        .element_klass = "PassThrough/Queue",
+                        .element_klass = "PassThrough/Flow/Queue",
                 },
                 .telemetry_name = "size",
                 .value_type = "integer",

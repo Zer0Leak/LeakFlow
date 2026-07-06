@@ -217,7 +217,7 @@ ElementDescriptor CorrelationPoiToPlotAnnotations::descriptor()
 {
     return {
         .type_name = "CorrelationPoiToPlotAnnotations",
-        .klass = "Convert/SCA/Plot/Annotations",
+        .klass = "Convert/PlotAnnotation/PoI",
         .purpose = "convert correlation PoI selections into generic plot annotations",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(correlation_poi_caps_type)),

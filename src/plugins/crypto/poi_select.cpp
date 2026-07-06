@@ -203,7 +203,7 @@ ElementDescriptor PoiSelect::descriptor()
 {
     return {
         .type_name = "PoiSelect",
-        .klass = "Analyze/SCA/Statistics/PoI",
+        .klass = "Analyze/SCA/PoI/Select",
         .purpose = "select top-k points of interest per (byte, channel) from a correlation buffer",
         .input_pads = {
             Pad("correlation", PadDirection::Input, Caps(correlation_caps_type)),

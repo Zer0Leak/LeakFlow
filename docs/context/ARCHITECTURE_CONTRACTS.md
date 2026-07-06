@@ -104,9 +104,11 @@ Every stamped metadata key carries its group as the leading segment;
   unknown keys also resolve here, so `leakflow_core` stays domain-free.
 - `routing.*` — `routing.element` and `routing.branch.*`; never forwarded.
 
-Element `klass` is `<Profile>/<Domain>[/<Specific>]`. The leading token is the
-forwarding profile, mapped by `profile_for_klass(klass)`: `Source`, `Sink`,
-`PassThrough`, `Convert` (Reframe), `Analyze`.
+Element `klass` is `<Profile>/<Family>[/<Role>[/<Variant>...]]`. The leading
+token is the forwarding profile, mapped by `profile_for_klass(klass)`: `Source`,
+`Sink`, `PassThrough`, `Convert` (Reframe), `Analyze`. Later tokens are the
+human-facing taxonomy (`Flow`, `Inspect`, `Score`, `PoI`, `Attack`,
+`Evaluation`, `PlotAnnotation`, ...).
 
 New-buffer-building elements call `forward_metadata(inputs, profile, output)`
 before stamping their own keys:

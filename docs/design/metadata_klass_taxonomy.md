@@ -65,9 +65,16 @@ payload.
 
 ## 3. Klass scheme and forwarding profiles
 
-Element `klass` is `<Profile>/<Domain>[/<Specific>]`. The **leading token is the
-forwarding profile** (a refinement of GStreamer's Source/Sink/Filter split); the
-remaining tokens are descriptive.
+Element `klass` is `<Profile>/<Family>[/<Role>[/<Variant>...]]`. The **leading
+token is the forwarding profile** (a refinement of GStreamer's Source/Sink/Filter
+split); the remaining tokens are the human-facing taxonomy used by `leakflow-ls`,
+the graph, docs, and examples.
+
+The rule of thumb is: profile says *how metadata flows*; family says *what slot
+the element occupies*. For example, `PassThrough/Flow/Queue` and
+`PassThrough/Flow/Sync` have the same forwarding profile but different flow
+roles, while `Analyze/SCA/Score/Correlation` and `Analyze/SCA/PoI/Select` are
+different SCA analysis slots that can be composed.
 
 `leakflow::profile_for_klass(klass)` maps the leading token:
 
@@ -173,34 +180,64 @@ variants.
 
 | Slot (Klass family) | Profile | Representative bricks |
 |---|---|---|
-| `Source/Acquire/*` | Source | trace/known-data/dataset/simulated sources |
+| `Source/File/*` | Source | file-backed buffers, tensors, models, datasets |
+| `Source/Live/*` | Source | live or live-like trace/data sources |
+| `Source/App/*` | Source | application-pushed frames |
+| `Source/Test/*` | Source | fixtures and synthetic source blocks |
 | `Source/AttackInput/*` | Source | chosen-ciphertext crafting for PC-oracle attacks |
+| `PassThrough/Flow/*` | PassThrough | Tee, Queue, Sync, future flow-control bricks |
+| `PassThrough/Inspect/*` | PassThrough | Summary and other buffer-inspection pass-throughs |
+| `Convert/Tensor/*` | Reframe | dtype/device/backend tensor representation changes |
 | `Convert/Signal/*` | Reframe | Align, Resample, Filter, Trim, Standardize, Segment, ShareCombine, Average (distinct small bricks) |
-| `Analyze/Leakage/*` | Analyze | leakage models (HW/HD/ID) per target op (S-box, NTT, message-decode, unpacking, modular reduction, CDT) |
-| `Analyze/Label/*` | Analyze | labelers, cluster/MC labeling, blind labeling |
-| `Analyze/Poi/*` | Analyze | Pearson, SNR, TVLA/t-test, higher-order PoI finders |
-| `Analyze/Model/*` (train) + `Convert/Predict/*`→Analyze | Analyze | template/CNN/MLP/GNN/LR/RL/LLM distinguishers |
-| `Analyze/Oracle/*` | Analyze | PC (binary), MV-PC, decryption-failure, re-encryption oracles |
-| `Analyze/Solver/*` | Analyze | linear-system, lattice reduction, belief propagation, ILP, key enumeration, residual-opt |
-| `Sink/Eval/*` | Sink | success rate, guessing entropy, key rank, accuracy/F1 |
+| `Convert/PlotAnnotation/*` | Reframe | convert analysis payloads into generic plot annotations |
+| `Convert/Predict/*` | Reframe | apply trained model payloads to tensors, then feed analysis blocks |
+| `Analyze/SCA/Leakage/*` | Analyze | leakage models (HW/HD/ID) per target op (S-box, NTT, message-decode, unpacking, modular reduction, CDT) |
+| `Analyze/SCA/Hypothesis/*` | Analyze | guess-domain leakage hypotheses |
+| `Analyze/SCA/Score/*` | Analyze | score/statistic curves such as correlation, SNR, NICV, t-test |
+| `Analyze/SCA/PoI/*` | Analyze | PoI selection over score curves: fixed top-k, threshold, outlier, FDR, spacing |
+| `Analyze/SCA/Label/*` | Analyze | labelers, cluster/MC labeling, blind labeling |
+| `Analyze/SCA/Model/*` | Analyze | template/CNN/MLP/GNN/LR/RL/LLM distinguishers and trainers |
+| `Analyze/SCA/Attack/*` | Analyze | attack/ranking blocks such as CPA, DPA, template attack |
+| `Analyze/SCA/Evaluation/*` | Analyze | derived diagnostics such as known-key ranks, margins, confidence metrics |
+| `Analyze/SCA/Oracle/*` | Analyze | PC (binary), MV-PC, decryption-failure, re-encryption oracles |
+| `Analyze/SCA/Solver/*` | Analyze | linear-system, lattice reduction, belief propagation, ILP, key enumeration, residual-opt |
+| `Sink/Evaluation/*` | Sink | terminal success rate, guessing entropy, key rank, accuracy/F1 reports |
 | `Sink/Plot/*` | Sink | TracePlot, correlation plot, PoI overlay, GE curve |
 | `Control/Fault/*` | (future) | voltage-glitch injector and other active perturbation |
 | `*/Design/*` | (future) | pre-silicon RTL leakage localization (e.g. GNN on CDFG) |
 
-Models exist as **both** a live `Analyze/Model/*` element emitting an `sca-model`
+Models exist as **both** a live `Analyze/SCA/Model/*` element emitting an `sca-model`
 payload and a `Source/File/Model` (`ModelFileSrc`) / `Sink/File/Model` loader,
 feeding a `Predict` brick.
 
 ## 8. Current element klasses
 
-| Element | Klass | Profile |
+| Element | Klass | Slot |
 |---|---|---|
-| FakeSrc / FileSrc / NumpySrc / TorchFileSrc | `Source/Fake`, `Source/File`, `Source/File/Numpy`, `Source/File/Torch` | Source |
-| FakeSink / FileSink / TorchFileSink / TracePlot | `Sink/Fake`, `Sink/File`, `Sink/File/Torch`, `Sink/Plot/Trace` | Sink |
-| Tee / Queue / Summary | `PassThrough/Branch`, `PassThrough/Queue`, `PassThrough/Summary` | PassThrough |
-| TorchConvert / NumpyToTorch | `Convert/Tensor/Torch`, `Convert/Tensor/NumpyToTorch` | Reframe |
-| CorrelationPoiToPlotAnnotations | `Convert/SCA/Plot/Annotations` | Reframe |
-| AesLeakage / PearsonCorrelator / PoiSelect | `Analyze/SCA/Crypto/LeakageModel`, `Analyze/SCA/Statistics/Correlation`, `Analyze/SCA/Statistics/PoI` | Analyze |
+| `FileSrc` / `FileSink` | `Source/File/Bytes`, `Sink/File/Bytes` | raw byte file I/O |
+| `BufferFileSrc` / `BufferFileSink` | `Source/File/Buffer`, `Sink/File/Buffer` | persisted full-buffer I/O |
+| `TorchFileSrc` / `TorchFileSink` | `Source/File/Torch`, `Sink/File/Torch` | Torch tensor file I/O |
+| `NumpySrc` | `Source/File/Numpy` | NumPy array file source |
+| `FakeSrc` / `FakeSink` | `Source/Test/Fake`, `Sink/Test/Fake` | test/smoke fixtures |
+| `FakeLiveSrc` | `Source/Live/Torch` | deterministic live-like Torch source |
+| `AppSrc` | `Source/App/Torch` | application-pushed Torch frames |
+| `Tee` | `PassThrough/Flow/Tee` | branch/fan-out flow control |
+| `Queue` | `PassThrough/Flow/Queue` | thread/rate-decoupling flow control |
+| `Sync` | `PassThrough/Flow/Sync` | cross-source pairing / common-ancestor injection |
+| `Summary` | `PassThrough/Inspect/Summary` | buffer inspection without changing data |
+| `TorchConvert` | `Convert/Tensor/Torch` | Torch dtype/device reframe |
+| `NumpyToTorch` | `Convert/Tensor/NumpyToTorch` | NumPy payload to Torch tensor reframe |
+| `CorrelationPoiToPlotAnnotations` | `Convert/PlotAnnotation/PoI` | PoI-to-plot marker conversion |
+| `AttackStatsToPlotAnnotations` | `Convert/PlotAnnotation/AttackStats` | attack-stats-to-plot marker conversion |
+| `AesLeakage` | `Analyze/SCA/Leakage/AES` | AES leakage target generation |
+| `AesLeakageHypothesis` | `Analyze/SCA/Hypothesis/AES` | AES guess-domain hypothesis generation |
+| `PearsonCorrelator` | `Analyze/SCA/Score/Correlation` | correlation scoring |
+| `PoiSelect` | `Analyze/SCA/PoI/Select` | PoI selection from scores |
+| `CpaAttack` / `DpaAttack` | `Analyze/SCA/Attack/CPA`, `Analyze/SCA/Attack/DPA` | attack/ranking blocks |
+| `AttackStats` | `Analyze/SCA/Evaluation/AttackStats` | known-key diagnostics and confidence metrics |
+| `TracePlot` | `Sink/Plot/Trace` | trace visualization |
+| `ScorePlot` | `Sink/Plot/AttackScore` | attack score/confidence visualization |
+| `ScoreTablePlot` | `Sink/Plot/AttackScoreboard` | ranked attack scoreboard |
 
 ## 9. Deferred work
 

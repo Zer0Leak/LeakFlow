@@ -9,7 +9,7 @@ ElementDescriptor Tee::descriptor()
 {
     return {
         .type_name = "Tee",
-        .klass = "PassThrough/Branch",
+        .klass = "PassThrough/Flow/Tee",
         .purpose = "fork one input buffer to multiple output branches",
         .pad_templates = {
             Pad("sink", PadDirection::Input, Caps(any_caps_type)),

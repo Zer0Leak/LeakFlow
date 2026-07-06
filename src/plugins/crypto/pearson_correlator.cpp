@@ -281,7 +281,7 @@ ElementDescriptor PearsonCorrelator::descriptor()
 {
     return {
         .type_name = "PearsonCorrelator",
-        .klass = "Analyze/SCA/Statistics/Correlation",
+        .klass = "Analyze/SCA/Score/Correlation",
         .purpose = "compute the Pearson correlation of features against target models (recompute or incremental)",
         .input_pads = {
             Pad(

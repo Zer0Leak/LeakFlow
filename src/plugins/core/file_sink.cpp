@@ -33,7 +33,7 @@ ElementDescriptor FileSink::descriptor()
 {
     return {
         .type_name = "FileSink",
-        .klass = "Sink/File",
+        .klass = "Sink/File/Bytes",
         .purpose = "write raw byte payloads to a file",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(core_pad_caps_type)),

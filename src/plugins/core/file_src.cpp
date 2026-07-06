@@ -37,7 +37,7 @@ ElementDescriptor FileSrc::descriptor()
 {
     return {
         .type_name = "FileSrc",
-        .klass = "Source/File",
+        .klass = "Source/File/Bytes",
         .purpose = "read one file as raw byte payload",
         .input_pads = {},
         .output_pads = {

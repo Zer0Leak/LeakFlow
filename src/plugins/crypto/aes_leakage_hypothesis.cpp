@@ -282,7 +282,7 @@ process_plaintexts(AesLeakageHypothesis &element, const Buffer &input,
 ElementDescriptor AesLeakageHypothesis::descriptor() {
   return {
       .type_name = "AesLeakageHypothesis",
-      .klass = "Analyze/SCA/Crypto/Hypothesis",
+      .klass = "Analyze/SCA/Hypothesis/AES",
       .purpose = "compute AES predicted leakage for every selected key guess",
       .input_pads =
           {

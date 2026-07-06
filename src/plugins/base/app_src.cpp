@@ -14,7 +14,7 @@ ElementDescriptor AppSrc::descriptor()
         .type_name = "AppSrc",
         .long_name = "Application Source",
         .rank = ElementRank::Primary,
-        .klass = "Source/App",
+        .klass = "Source/App/Torch",
         .purpose = "emit application-pushed Torch tensor frames (one frame = aligned buffers on src_0..src_N)",
         .pad_templates =
             {

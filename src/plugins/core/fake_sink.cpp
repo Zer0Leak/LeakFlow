@@ -10,7 +10,7 @@ ElementDescriptor FakeSink::descriptor()
 {
     return {
         .type_name = "FakeSink",
-        .klass = "Sink/Fake",
+        .klass = "Sink/Test/Fake",
         .purpose = "consume buffers for validation",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(core_pad_caps_type)),

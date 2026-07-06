@@ -215,7 +215,7 @@ ElementDescriptor ScoreTablePlot::descriptor()
     };
     return {
         .type_name = "ScoreTablePlot",
-        .klass = "Sink/Plot/Score",
+        .klass = "Sink/Plot/AttackScoreboard",
         .purpose = "render attack scores as a ranked candidate table (units as columns, guesses as rows)",
         .input_pads =
             {

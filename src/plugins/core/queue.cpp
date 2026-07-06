@@ -71,7 +71,7 @@ ElementDescriptor Queue::descriptor()
 {
     return {
         .type_name = "Queue",
-        .klass = "PassThrough/Queue",
+        .klass = "PassThrough/Flow/Queue",
         .purpose = "store buffers synchronously between linked elements",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(core_pad_caps_type)),

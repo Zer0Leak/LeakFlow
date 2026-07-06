@@ -39,14 +39,14 @@ CLI/inspect files if affected:
 
 ## Current Elements
 
-- `AesLeakage` (`Analyze/SCA/Crypto/LeakageModel`): computes AES first-round S-box
+- `AesLeakage` (`Analyze/SCA/Leakage/AES`): computes AES first-round S-box
   leakage targets. Required `traces` and `plaintexts` sink pads, an optional
   `keys` sink pad (required at runtime for `HW(m xor k)`/`HW(y)`/`y(n)`). Output
   is a Torch `uint8` `[B,N,C]` leakage tensor. Properties: `byte_indexes` (default
   all 16), `channels` (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and
   `y(0)` through `y(7)`; default `[HW(y)]`; `payload-output`, downstream
   invalidation on `leakage`).
-- `AesLeakageHypothesis` (`Analyze/SCA/Crypto/Hypothesis`): computes AES
+- `AesLeakageHypothesis` (`Analyze/SCA/Hypothesis/AES`): computes AES
   first-round predicted leakage hypotheses for every selected byte and guess.
   Required `plaintexts` sink pad. Output is a Torch `uint8` `[U,G,N,L]`
   hypothesis tensor. Properties: `byte_indexes` (default all 16), `channels`
@@ -77,7 +77,7 @@ CLI/inspect files if affected:
   `accumulation_mode=auto|recompute|incremental`, read-only
   `active_accumulation_mode`, `compute_dtype=input|float32|float64`, and `top_k`.
   In incremental active mode, `can_replay()` is false.
-- `AttackStats` (`Analyze/SCA/Attack/Stats`): known-key diagnostics for an attack
+- `AttackStats` (`Analyze/SCA/Evaluation/AttackStats`): known-key diagnostics for an attack
   score result. Inputs: `scores` (`leakflow/attack-scores`) and an **optional**
   `truth` Torch tensor (`[U]`, `[1,U]`, `[16]`, or AES key-like `[N,16]`). Without
   `truth`, the GE/PGE-style fields (`true_rank`, `true_guess`, `true_score`,
@@ -94,7 +94,7 @@ CLI/inspect files if affected:
   `top_k` (default 5) and `confidence_metrics` (default
   `[relative_margin,z_score,robust_z_score]`; allowed values are `margin`,
   `relative_margin`, `z_score`, `robust_z_score`, and `top_k_separation`).
-- `AttackStatsToPlotAnnotations` (`Convert/SCA/Plot/Annotations`): converts
+- `AttackStatsToPlotAnnotations` (`Convert/PlotAnnotation/AttackStats`): converts
   `AttackStatsPayload` into generic `PlotAnnotationPayload` markers at each
   unit's best sample. Required input is `sink` (`leakflow/attack-stats`).
   Annotations include `success`, `true rank`, `true guess`, `true score`, top-1
@@ -105,19 +105,19 @@ CLI/inspect files if affected:
   fields and `correct key` are omitted, `norm_value` stays positive, and
   `payload.annotation.success_source=none`. Useful as
   `@attack ! @stats.scores; @key ! @stats.truth; @stats ! @ann ! @plot.annotations`.
-- `PearsonCorrelator` (`Analyze/SCA/Statistics/Correlation`): joins the trace branch
+- `PearsonCorrelator` (`Analyze/SCA/Score/Correlation`): joins the trace branch
   (`features`) and the leakage branch (`targets`) and emits the Pearson correlation of
   every sample against each target as a `CorrelationPayload` (`leakflow/correlation`).
   Properties: `correlation_mode` (auto/recompute/incremental), `compute_dtype`, `epsilon`.
   **Stateful** in incremental mode (`can_replay()==false`); accumulation-property changes
   need a restart. Re-owns the target model's `payload.leakage.*`/`payload.crypto.*` facts.
-- `PoiSelect` (`Analyze/SCA/Statistics/PoI`): selects the top-k PoI sample indexes per
+- `PoiSelect` (`Analyze/SCA/PoI/Select`): selects the top-k PoI sample indexes per
   (byte, channel) from a `CorrelationPayload` and emits a `CorrelationPoiPayload`.
   Properties: `top_k`, `rank_by`. **Stateless** (`can_replay()==true`), so changing
   `top_k`/`rank_by` in Idle re-selects from the cached correlation without re-streaming.
   Stamps `payload.poi.*` metadata. (`PearsonCorrelator` + `PoiSelect` are the split of
   the former `PearsonPoiFinder`.)
-- `CorrelationPoiToPlotAnnotations` (`Convert/SCA/Plot/Annotations`): converts a
+- `CorrelationPoiToPlotAnnotations` (`Convert/PlotAnnotation/PoI`): converts a
   `CorrelationPoiPayload` into a generic `PlotAnnotationPayload` for
   `TracePlot.annotations`. Property `precision` (0–12, default 3).
 

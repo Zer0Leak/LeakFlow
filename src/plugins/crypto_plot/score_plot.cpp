@@ -271,7 +271,7 @@ ElementDescriptor ScorePlot::descriptor()
     };
     return {
         .type_name = "ScorePlot",
-        .klass = "Sink/Plot/Score",
+        .klass = "Sink/Plot/AttackScore",
         .purpose = "accumulate attack scores/stats into a stacked score plot (score + confidence panels)",
         .input_pads =
             {

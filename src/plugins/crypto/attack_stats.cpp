@@ -261,7 +261,7 @@ ElementDescriptor AttackStats::descriptor()
 {
     return {
         .type_name = "AttackStats",
-        .klass = "Analyze/SCA/Attack/Stats",
+        .klass = "Analyze/SCA/Evaluation/AttackStats",
         .purpose = "compute known-key rank and score statistics for an attack score result",
         .input_pads = {
             Pad("scores", PadDirection::Input, Caps(attack_scores_caps_type)),

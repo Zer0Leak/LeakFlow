@@ -11,7 +11,7 @@ ElementDescriptor FakeSrc::descriptor()
 {
     return {
         .type_name = "FakeSrc",
-        .klass = "Source/Fake",
+        .klass = "Source/Test/Fake",
         .purpose = "produce simple test buffers",
         .input_pads = {},
         .output_pads = {

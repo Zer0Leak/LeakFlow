@@ -13,7 +13,7 @@ ElementDescriptor Summary::descriptor()
 {
     return {
         .type_name = "Summary",
-        .klass = "PassThrough/Summary",
+        .klass = "PassThrough/Inspect/Summary",
         .purpose = "render a structured description of the current buffer",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(core_pad_caps_type)),

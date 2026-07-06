@@ -10,7 +10,7 @@ ElementDescriptor Sync::descriptor()
 {
     return {
         .type_name = "Sync",
-        .klass = "Sync/Branch",
+        .klass = "PassThrough/Flow/Sync",
         .purpose = "synchronize N independent input streams into N aligned outputs by injecting a common ancestor",
         .pad_templates =
             {

@@ -136,7 +136,7 @@ support:
   `-DLEAKFLOW_BUILD_EXAMPLES=ON`.
 - Metadata forwarding is policy-driven: a four-group taxonomy
   (`capture`/`origin`/`payload`/`routing`) plus per-element forwarding profiles
-  derived from the `<Profile>/<Domain>[/<Specific>]` klass scheme. See
+  derived from the `<Profile>/<Family>[/<Role>[/<Variant>...]]` klass scheme. See
   `docs/design/metadata_klass_taxonomy.md`.
 
 Phase 25 (control/session layer) is implemented. The full AES PoI plotting

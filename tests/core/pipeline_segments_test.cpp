@@ -90,7 +90,7 @@ public:
     {
         leakflow::ElementDescriptor descriptor;
         descriptor.type_name = "TestQueue";
-        descriptor.klass = "PassThrough/Queue";
+        descriptor.klass = "PassThrough/Flow/Queue";
         descriptor.input_pads = {leakflow::Pad("sink", leakflow::PadDirection::Input, generic())};
         descriptor.output_pads = {leakflow::Pad("src", leakflow::PadDirection::Output, generic())};
         descriptor.thread_boundary = true;
