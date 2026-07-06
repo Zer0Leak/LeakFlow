@@ -363,7 +363,7 @@ leakflow --log-level warning run \
   'TorchFileSrc@t(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); \
    TorchFileSrc@p(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); \
    TorchFileSrc@k(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); \
-   Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],byte_indexes=[0]); \
+   Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],byte_indexes=[]); \
    PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.lfbuf); \
    @t ! @tee; @tee.src_0 ! @corr.features; @tee.src_1 ! @lk.traces; \
    @p ! @lk.plaintexts; @k ! @lk.keys; @lk ! @corr.targets; @corr ! @save'

@@ -98,18 +98,27 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
     return folders;
 }
 
-// The analysis core is identical in both modes. With plotting on (--graph) a third
+// The analysis core is identical in every mode. With plotting on (--graph) a third
 // Tee branch feeds traces to a TracePlot and the PoI is converted to annotation
-// markers overlaid on it; headless ends at @poi so run() returns the PoI buffer for
-// the text summary.
-[[nodiscard]] std::string pipeline_expression(bool with_plot)
+// markers overlaid on it. With --save-correlation, a Tee forks @corr to a
+// BufferFileSink so each fold's (and thus the final aggregate) correlation is
+// persisted. PoiSelect@poi is declared last so it stays the terminal whose PoI
+// run() returns for the headless summary.
+[[nodiscard]] std::string pipeline_expression(bool with_plot, bool with_save)
 {
     std::string expression =
         "AppSrc@src; "
         "Tee@trace_tee; "
-        "AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); "
-        "PearsonCorrelator@corr; "                 // stateful: accumulates the correlation
-        "PoiSelect@poi(top_k=[50],rank_by=[abs]); ";  // stateless: selects top-k PoIs
+        "AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); "  // all 16 bytes, HW(m) & HW(y)
+        "PearsonCorrelator@corr; ";  // stateful: accumulates the correlation
+
+    if (with_save) {
+        expression +=
+            "Tee@corr_tee; "                 // fork the correlation to the sink + selector
+            "BufferFileSink@save; ";  // persists the aggregate correlation (path set after build)
+    }
+
+    expression += "PoiSelect@poi(top_k=[50],rank_by=[abs]); ";  // stateless: selects top-k PoIs
 
     if (with_plot) {
         expression +=
@@ -124,8 +133,13 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
         "@trace_tee.src_1 ! @leakage.traces; "
         "@src.src_1 ! @leakage.plaintexts; "
         "@src.src_2 ! @leakage.keys; "
-        "@leakage ! @corr.targets; "
-        "@corr ! @poi";
+        "@leakage ! @corr.targets; ";
+
+    if (with_save) {
+        expression += "@corr ! @corr_tee; @corr_tee.src_0 ! @poi; @corr_tee.src_1 ! @save";
+    } else {
+        expression += "@corr ! @poi";
+    }
 
     if (with_plot) {
         expression +=
@@ -165,6 +179,7 @@ int main(int argc, char** argv)
 
         bool graph = false;
         bool auto_start = false;
+        std::optional<std::string> save_correlation_path;
         fs::path root = default_root;
         for (int index = 1; index < argc; ++index) {
             const std::string arg = argv[index];
@@ -172,12 +187,20 @@ int main(int argc, char** argv)
                 graph = true;
             } else if (arg == "--auto-start") {
                 auto_start = true;
+            } else if (arg == "--save-correlation") {
+                if (index + 1 >= argc) {
+                    throw std::runtime_error("--save-correlation needs a PATH argument");
+                }
+                save_correlation_path = argv[++index];
             } else if (arg == "--help" || arg == "-h") {
-                std::cout << "usage: leakflow_rezaeezade_poi_finder [--graph] [--auto-start] [ROOT_DIR]\n"
-                          << "  --graph       open the live pipeline graph window (player controls),\n"
-                          << "                just like 'leakflow run --graph'\n"
-                          << "  --auto-start  with --graph, begin running on open (else opens Stopped)\n"
-                          << "  ROOT_DIR      default: " << default_root << " (key_* dirs with "
+                std::cout << "usage: leakflow_rezaeezade_poi_finder [--graph] [--auto-start]\n"
+                          << "                                      [--save-correlation PATH] [ROOT_DIR]\n"
+                          << "  --graph              open the live pipeline graph window (player controls),\n"
+                          << "                       just like 'leakflow run --graph'\n"
+                          << "  --auto-start         with --graph, begin running on open (else Stopped)\n"
+                          << "  --save-correlation P  persist the aggregate correlation to the .lfbuf dir P\n"
+                          << "                       (reload later with BufferFileSrc to re-select PoIs offline)\n"
+                          << "  ROOT_DIR             default: " << default_root << " (key_* dirs with "
                           << traces_file << ", " << plaintexts_file << ", " << key_file << ")\n";
                 return 0;
             } else {
@@ -192,11 +215,17 @@ int main(int argc, char** argv)
         log_info("aggregating PoI over capture folders",
                  {{"folders", std::to_string(folders.size())}, {"root", root.string()}});
 
-        auto built = leakflow::cli::build_builtin_pipeline_from_expression(pipeline_expression(graph));
+        auto built = leakflow::cli::build_builtin_pipeline_from_expression(
+            pipeline_expression(graph, save_correlation_path.has_value()));
         auto source_element = built.pipeline.element("src");
         auto* app_src = dynamic_cast<leakflow::plugins::base::AppSrc*>(source_element.get());
         if (app_src == nullptr) {
             throw std::runtime_error("expected element 'src' to be an AppSrc");
+        }
+
+        if (save_correlation_path) {
+            built.pipeline.element("save")->set_property("path", *save_correlation_path);
+            log_info("saving aggregate correlation", {{"path", *save_correlation_path}});
         }
 
         // Lazy pull: the source asks for folder `index` when the pump needs it, so

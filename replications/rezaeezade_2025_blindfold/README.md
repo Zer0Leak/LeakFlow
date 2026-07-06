@@ -78,6 +78,24 @@ cmake --build build --target leakflow_rezaeezade_poi_finder -j
 
 `ROOT_DIR` defaults to `traces/aes/sync/aes_sync_poi`. Pass `--help` for usage.
 
+### Save the aggregate correlation once, tune PoIs offline
+
+Streaming all folders is the expensive step; `PoiSelect` is cheap. `--save-correlation`
+forks the correlation to a `BufferFileSink`, persisting the full aggregate
+(all 16 bytes, `HW(m)` and `HW(y)`) to a `.lfbuf` directory:
+
+```bash
+# compute + save the aggregate correlation (one expensive pass)
+./build/leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.lfbuf traces/aes/sync/aes_sync_poi
+```
+
+Then reload and re-select PoIs with any `top_k`/`rank_by` **instantly, offline, no
+re-streaming** (and plot them — see `docs/guides/COOL_PIPELINES.md`):
+
+```bash
+leakflow run 'BufferFileSrc(path=out/aes_corr.lfbuf) ! PoiSelect(top_k=[5],rank_by=[abs]) ! Summary ! FakeSink'
+```
+
 ## Notes / current limitations
 
 - Folders are pulled **lazily**: `AppSrc` asks the app for the next folder when the
