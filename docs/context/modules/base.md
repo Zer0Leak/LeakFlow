@@ -39,6 +39,11 @@ Tests:
 - `TorchTensorPayload`: wraps one dense strided `torch::Tensor`.
 - `TorchTensorBundlePayload`: deterministic named map of
   `shared_ptr<TorchTensorPayload>`.
+- `statistics.hpp`: `pearson_correlation` and the stateful
+  `InteractivePearsonCorrelation` accumulator.
+Note: GMM/EM (`gaussian_mixture.hpp`), entropic-OT Sinkhorn (`sinkhorn.hpp`), and
+clustering evaluation (`clustering_metrics.hpp`) now live in the **`leakflow_ml`**
+library — see `docs/context/modules/ml.md`.
 
 ## Contracts
 
