@@ -1,4 +1,5 @@
 #include "leakflow/core/element.hpp"
+#include "leakflow/core/progress_sink.hpp"
 
 #include <iostream>
 #include <optional>
@@ -46,10 +47,30 @@ public:
         stopped = true;
     }
 
+    // report_progress is protected; expose it so the progress-sink test can drive it.
+    void emit_progress(double fraction, std::string message)
+    {
+        report_progress(fraction, std::move(message));
+    }
+
     bool started = false;
     bool processed = false;
     bool saw_input = false;
     bool stopped = false;
+};
+
+class CapturingProgressSink final : public leakflow::ProgressSink {
+public:
+    void report(leakflow::Element& element, const leakflow::ElementProgress& progress) override
+    {
+        ++count;
+        last_element = element.name();
+        last = progress;
+    }
+
+    int count = 0;
+    std::string last_element;
+    leakflow::ElementProgress last;
 };
 
 } // namespace
@@ -83,6 +104,29 @@ int main()
 
     element.stop();
     if (!expect(element.stopped, "stop override was not called")) {
+        return 1;
+    }
+
+    // Progress: no sink -> report_progress is a silent no-op (must not crash).
+    element.emit_progress(0.5, "ignored");
+
+    // With a sink, the first report forwards; an immediate second is coalesced (< ~30 Hz); a
+    // completion (fraction 1.0) always flushes regardless of the throttle window.
+    CapturingProgressSink sink;
+    element.set_progress_sink(&sink);
+    element.emit_progress(0.5, "half");
+    if (!expect(sink.count == 1 && sink.last_element == "probe", "first progress report did not forward")) {
+        return 1;
+    }
+    if (!expect(sink.last.fraction == 0.5 && sink.last.message == "half", "progress payload wrong")) {
+        return 1;
+    }
+    element.emit_progress(0.6, "coalesced");
+    if (!expect(sink.count == 1, "immediate second report should be coalesced")) {
+        return 1;
+    }
+    element.emit_progress(1.0, "done");
+    if (!expect(sink.count == 2 && sink.last.fraction == 1.0, "completion should always flush")) {
         return 1;
     }
 

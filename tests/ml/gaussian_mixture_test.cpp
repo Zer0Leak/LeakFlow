@@ -301,6 +301,63 @@ int main()
         }
     }
 
+    // --- Progress callback: fit reports non-decreasing progress and can cancel early ---
+    {
+        leakflow::ml::GaussianMixtureOptions options;
+        options.n_components = k;
+        options.covariance_type = leakflow::ml::GmmCovarianceType::Diagonal;
+        options.n_init = 1;
+        options.max_iter = 50;
+        options.tol = 0.0; // never satisfy convergence, so every iteration reports
+        options.seed = 3;
+
+        std::vector<leakflow::ml::GmmProgress> reports;
+        leakflow::ml::GaussianMixture model(options);
+        const auto fit = model.fit(data.x, [&](const leakflow::ml::GmmProgress& progress) {
+            reports.push_back(progress);
+            return true;
+        });
+        if (!expect(!reports.empty(), "progress: callback never called")) {
+            return 1;
+        }
+        if (!expect(reports.front().stage == "em", "progress: first stage should be em")) {
+            return 1;
+        }
+        auto non_decreasing = true;
+        for (std::size_t index = 1; index < reports.size(); ++index) {
+            if (reports[index].fraction < reports[index - 1].fraction - 1.0e-9) {
+                non_decreasing = false;
+            }
+        }
+        if (!expect(non_decreasing, "progress: fraction should be non-decreasing")) {
+            return 1;
+        }
+        if (!expect(reports.back().iter == 50 && reports.back().max_iter == 50,
+                    "progress: tol=0 should run all 50 EM iterations")) {
+            return 1;
+        }
+        if (!expect(std::abs(reports.back().fraction - 1.0) < 1.0e-9, "progress: final fraction should be 1.0")) {
+            return 1;
+        }
+        if (!expect(fit.labels.sizes() == torch::IntArrayRef({u, t}), "progress: fit still valid")) {
+            return 1;
+        }
+
+        // Returning false cancels: the fit stops after the first report but still returns a fit.
+        auto calls = 0;
+        leakflow::ml::GaussianMixture cancel_model(options);
+        const auto cancelled = cancel_model.fit(data.x, [&](const leakflow::ml::GmmProgress&) {
+            ++calls;
+            return false;
+        });
+        if (!expect(calls == 1, "progress: cancel should stop after the first report")) {
+            return 1;
+        }
+        if (!expect(cancelled.labels.sizes() == torch::IntArrayRef({u, t}), "progress: cancelled fit still valid")) {
+            return 1;
+        }
+    }
+
     std::cout << "gaussian_mixture tests passed\n";
     return 0;
 }

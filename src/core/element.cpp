@@ -1,5 +1,7 @@
 #include "leakflow/core/element.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -389,6 +391,34 @@ void Element::set_trace_sink(TelemetryTraceSink* sink)
 TelemetryTraceSink* Element::trace_sink() const
 {
     return trace_sink_;
+}
+
+void Element::set_progress_sink(ProgressSink* sink)
+{
+    progress_sink_ = sink;
+}
+
+void Element::report_progress(double fraction, std::string message, std::uint64_t index, std::uint64_t total)
+{
+    if (progress_sink_ == nullptr) {
+        return;
+    }
+    const auto clamped = std::clamp(fraction, 0.0, 1.0);
+    const auto complete = clamped >= 1.0;
+    // Coalesce to ~30 Hz so a tight inner loop can call every iteration; always flush completion.
+    const auto now = std::chrono::steady_clock::now();
+    if (!complete && progress_reported_ && now - last_progress_report_ < std::chrono::milliseconds(33)) {
+        return;
+    }
+    last_progress_report_ = now;
+    progress_reported_ = true;
+    progress_sink_->report(*this,
+        ElementProgress{
+            .fraction = clamped,
+            .message = std::move(message),
+            .index = index,
+            .total = total,
+        });
 }
 
 RuntimeTelemetryDurationStat& Element::ensure_duration_stat(const std::string& name)

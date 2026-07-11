@@ -79,6 +79,10 @@ public:
     }
 
     std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer> input) override {
+        // Exercise the progress channel: the pipeline injects a sink at start_all(), so these
+        // surface as ProgressReported events. 0.5 passes the throttle; 1.0 always flushes.
+        report_progress(0.5, "halfway");
+        report_progress(1.0, "done");
         if (input) {
             input->set_metadata("transform", "visited");
         }
@@ -178,6 +182,28 @@ int main() {
         if (event.kind == leakflow::PipelineEventKind::BufferObserved && event.buffer) {
             buffers.emplace(event.buffer->link_id, *event.buffer);
         }
+    }
+
+    // Progress reports pushed from process() reach the observer as ProgressReported events,
+    // tagged with the reporting element (Pipeline injects the sink at start_all()).
+    bool saw_progress_half = false;
+    bool saw_progress_done = false;
+    for (const auto &event : observer->events) {
+        if (event.kind != leakflow::PipelineEventKind::ProgressReported || !event.progress) {
+            continue;
+        }
+        if (!expect(event.progress->element.element_name == "transform", "progress event from wrong element")) {
+            return 1;
+        }
+        if (event.progress->fraction == 0.5 && event.progress->message == "halfway") {
+            saw_progress_half = true;
+        }
+        if (event.progress->fraction == 1.0 && event.progress->message == "done") {
+            saw_progress_done = true;
+        }
+    }
+    if (!expect(saw_progress_half && saw_progress_done, "observer did not receive progress reports")) {
+        return 1;
     }
 
     if (!expect(saw_topology, "observer did not receive topology snapshot")) {

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -123,6 +124,11 @@ ElementDescriptor GaussianMixtureElement::descriptor()
                     .scope = PropertyInvalidationScope::Downstream,
                     .output_pads = {"labels"},
                 }),
+            // UX-only: how often the fit pushes a progress report to the --graph bar. Does not
+            // affect the labels, so it carries no invalidation effect.
+            PropertySpec("progress_every", std::int64_t{10},
+                "report fit progress every N EM iterations (0 disables progress reports)",
+                "", IntRangeConstraint{0, 100000}, "", PropertyEffect{}),
         },
         .keywords = {"gmm", "gaussian", "mixture", "cluster", "em", "ml"},
         .metadata_set_by_element = {
@@ -159,7 +165,33 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
 
     const auto options = options_from(*this);
     leakflow::ml::GaussianMixture model(options);
-    const auto fit = model.fit(payload->tensor());
+
+    // Bridge the ml-lib progress callback to the framework progress bar. We gate on
+    // progress_every here (restart boundaries, stage changes, and the final iteration always
+    // pass); report_progress further coalesces to ~30 Hz. Returning false cancels the fit, which
+    // we wire to the element's stop token so Ctrl+C / window-close interrupts a long fit.
+    const auto progress_every = int_property_or(*this, "progress_every", 10);
+    const auto on_progress = [this, progress_every](const leakflow::ml::GmmProgress& p) -> bool {
+        const auto report = progress_every > 0
+            && (p.iter <= 1 || p.iter == p.max_iter || (p.iter % progress_every) == 0);
+        if (report) {
+            std::ostringstream message;
+            if (p.stage == "constrained") {
+                message << "sinkhorn " << p.iter << "/" << p.max_iter;
+            } else {
+                if (p.restarts > 1) {
+                    message << "restart " << (p.restart + 1) << "/" << p.restarts << " - ";
+                }
+                message << "iter " << p.iter << "/" << p.max_iter;
+            }
+            report_progress(p.fraction, message.str(), static_cast<std::uint64_t>(p.iter),
+                static_cast<std::uint64_t>(p.max_iter));
+        }
+        return !stop_token().stop_requested();
+    };
+
+    const auto fit = model.fit(payload->tensor(), on_progress);
+    report_progress(1.0, "done"); // flush the bar to 100% (EM may have converged before max_iter)
     const auto labels = fit.labels.to(torch::kInt64).contiguous();
     const bool converged = fit.converged.all().item<bool>();
 

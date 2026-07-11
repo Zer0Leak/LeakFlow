@@ -303,7 +303,10 @@ struct ConstrainedOutcome {
     const torch::Tensor& target_sizes,
     const GaussianMixtureOptions& options,
     GmmCovarianceType cov_type,
-    double reg)
+    double reg,
+    const GmmProgressCallback& on_progress,
+    double frac_base,
+    double frac_span)
 {
     const auto u = x.size(0);
     const auto t = x.size(1);
@@ -334,7 +337,23 @@ struct ConstrainedOutcome {
 
         n_iter = torch::where(newly, torch::full_like(n_iter, outer), n_iter);
         converged = torch::logical_or(converged, newly);
-        if (converged.all().item<bool>()) {
+
+        auto cancelled = false;
+        if (on_progress) {
+            const auto fraction = frac_base
+                + frac_span * static_cast<double>(outer) / static_cast<double>(options.constrained_max_iter);
+            cancelled = !on_progress(GmmProgress{
+                .stage = "constrained",
+                .restart = 0,
+                .restarts = 1,
+                .iter = outer,
+                .max_iter = options.constrained_max_iter,
+                .lower_bound = 0.0,
+                .delta = 0.0,
+                .fraction = fraction,
+            });
+        }
+        if (cancelled || converged.all().item<bool>()) {
             break;
         }
     }
@@ -389,7 +408,7 @@ GaussianMixture::GaussianMixture(GaussianMixtureOptions options)
     }
 }
 
-GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in)
+GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProgressCallback& on_progress)
 {
     const auto prepared = prepare_input(x_in);
     const auto& x = prepared.x; // [U, T, N]
@@ -399,6 +418,11 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in)
     if (t < k) {
         throw std::invalid_argument("GaussianMixture needs at least n_components samples per unit");
     }
+
+    // The plain EM restarts take the first `em_span` of the reported progress; the constrained
+    // (Sinkhorn) refinement, when configured, takes the rest. Cancellation is cooperative.
+    const auto em_span = options_.target_sizes ? 0.6 : 1.0;
+    auto cancelled = false;
 
     auto generator = torch::make_generator<torch::CPUGeneratorImpl>();
     if (options_.seed) {
@@ -433,7 +457,23 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in)
             const auto newly = torch::logical_and(torch::logical_not(converged), change < options_.tol);
             n_iter = torch::where(newly, torch::full_like(n_iter, iteration), n_iter);
             converged = torch::logical_or(converged, newly);
-            if (iteration > 1 && converged.all().item<bool>()) {
+
+            if (on_progress) {
+                const auto fraction = em_span
+                    * (static_cast<double>(init) + static_cast<double>(iteration) / static_cast<double>(options_.max_iter))
+                    / static_cast<double>(options_.n_init);
+                cancelled = !on_progress(GmmProgress{
+                    .stage = "em",
+                    .restart = init,
+                    .restarts = options_.n_init,
+                    .iter = iteration,
+                    .max_iter = options_.max_iter,
+                    .lower_bound = lower_bound.mean().item<double>(),
+                    .delta = change.mean().item<double>(),
+                    .fraction = fraction,
+                });
+            }
+            if (cancelled || (iteration > 1 && converged.all().item<bool>())) {
                 break;
             }
         }
@@ -460,6 +500,10 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in)
             best_converged = torch::where(better, converged, best_converged);
             best_n_iter = torch::where(better, n_iter, best_n_iter);
         }
+
+        if (cancelled) {
+            break; // caller cancelled during this restart; keep the best fit so far
+        }
     }
 
     weights_ = best_weights.contiguous();
@@ -470,12 +514,13 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in)
 
     // Size-constrained refinement (Genevay et al. 2019): the plain EM above is the warm start;
     // now bind the sizes and refine with the Sinkhorn-constrained E-step.
-    if (options_.target_sizes) {
+    if (options_.target_sizes && !cancelled) {
         const auto& sizes = *options_.target_sizes;
         if (sizes.size(-1) != k) {
             throw std::invalid_argument("GaussianMixture target_sizes last dimension must equal n_components");
         }
-        const auto outcome = run_constrained_em(x, weights_, means_, covariances_, sizes, options_, cov_type, reg);
+        const auto outcome = run_constrained_em(
+            x, weights_, means_, covariances_, sizes, options_, cov_type, reg, on_progress, em_span, 1.0 - em_span);
         weights_ = weights_.contiguous();
         means_ = means_.contiguous();
         covariances_ = covariances_.contiguous();

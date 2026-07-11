@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -30,6 +31,17 @@ namespace leakflow::plot {
 
 class PipelineGraphRuntime final : public PipelineObserver {
 public:
+    // Latest estimated progress of a long-running element (from ProgressReported events). Kept
+    // per element name; the draw code shows a node bar + a summary panel and fades a completed
+    // entry out shortly after it reaches 1.0. UI-thread-only (written while draining events).
+    struct ElementProgressState {
+        double fraction = 0.0;
+        std::string message;
+        std::uint64_t index = 0;
+        std::uint64_t total = 0;
+        std::chrono::steady_clock::time_point updated{};
+    };
+
     void observe(const PipelineEvent &event) override;
     void drain_events();
     void clear();
@@ -42,6 +54,7 @@ public:
     [[nodiscard]] std::uint64_t observed_count(std::string_view link_id) const;
     [[nodiscard]] const std::optional<std::string> &last_error() const;
     [[nodiscard]] const std::vector<PipelineEvent> &recent_events() const;
+    [[nodiscard]] const std::map<std::string, ElementProgressState> &element_progress() const;
 
     // Vector-clock provenance (Phase 27): the running component-wise max over all
     // observed buffers, i.e. the current production count per slot index.
@@ -84,6 +97,7 @@ private:
     std::map<std::string, bool> section_open_;
     std::optional<std::string> last_error_;
     std::vector<PipelineEvent> recent_events_;
+    std::map<std::string, ElementProgressState> element_progress_;
 };
 
 struct PipelineControlChange {

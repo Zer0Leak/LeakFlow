@@ -3,10 +3,12 @@
 #include "leakflow/core/buffer.hpp"
 #include "leakflow/core/descriptor.hpp"
 #include "leakflow/core/pad.hpp"
+#include "leakflow/core/progress_sink.hpp"
 #include "leakflow/core/property.hpp"
 #include "leakflow/core/telemetry_trace.hpp"
 #include "leakflow/log/logger.hpp"
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <optional>
@@ -87,6 +89,10 @@ public:
     // Mirrored from the pipeline; not owned.
     void set_trace_sink(TelemetryTraceSink* sink);
 
+    // Progress sink for estimated-progress reports (see report_progress). The Pipeline injects
+    // one so long-running elements surface a live progress bar on the observer bus; not owned.
+    void set_progress_sink(ProgressSink* sink);
+
     // Aggregate timing of every duration channel this element accumulated in the
     // current run (the built-in "process" timer plus any declared op scopes).
     // Read after the run (or after threads join); the table renders these rows.
@@ -160,6 +166,13 @@ protected:
     // cheap. Example: auto scope = profile_scope("hamming_weight");
     [[nodiscard]] RuntimeTelemetryScopedTimer profile_scope(std::string_view name);
 
+    // Report estimated progress of a long-running process() call (fraction in [0, 1] plus a
+    // human-readable message). A cheap no-op when no progress sink is injected, and coalesced to
+    // ~30 Hz so a tight inner loop may call it every iteration without flooding the bus (a
+    // fraction of 1.0 always flushes). index/total are optional extra step counters for the UI.
+    void report_progress(double fraction, std::string message, std::uint64_t index = 0,
+        std::uint64_t total = 0);
+
 private:
     friend class Pipeline;
 
@@ -191,6 +204,9 @@ private:
     RuntimeTelemetrySwitch runtime_telemetry_;
     RuntimeTelemetrySwitch profiling_;
     TelemetryTraceSink* trace_sink_ = nullptr;
+    ProgressSink* progress_sink_ = nullptr;
+    std::chrono::steady_clock::time_point last_progress_report_{};
+    bool progress_reported_ = false;
     std::map<std::string, std::unique_ptr<RuntimeTelemetryDurationStat>> duration_stats_;
     RuntimeTelemetryDurationStat* process_stat_ = nullptr;
     std::stop_token stop_token_;

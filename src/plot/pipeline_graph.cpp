@@ -122,6 +122,8 @@ void report_graph_run_failure(PipelineSession &session, std::string_view message
         return "property";
     case PipelineEventKind::TelemetryChanged:
         return "telemetry";
+    case PipelineEventKind::ProgressReported:
+        return "progress";
     case PipelineEventKind::CommandAccepted:
         return "command-accepted";
     case PipelineEventKind::CommandRejected:
@@ -1348,6 +1350,7 @@ void PipelineGraphRuntime::clear() {
     pinned_links_.clear();
     last_error_.reset();
     recent_events_.clear();
+    element_progress_.clear();
 }
 
 bool PipelineGraphRuntime::has_topology() const { return has_topology_; }
@@ -1374,6 +1377,11 @@ std::uint64_t PipelineGraphRuntime::observed_count(std::string_view link_id) con
 const std::optional<std::string> &PipelineGraphRuntime::last_error() const { return last_error_; }
 
 const std::vector<PipelineEvent> &PipelineGraphRuntime::recent_events() const { return recent_events_; }
+
+const std::map<std::string, PipelineGraphRuntime::ElementProgressState> &
+PipelineGraphRuntime::element_progress() const {
+    return element_progress_;
+}
 
 const std::vector<std::uint32_t> &PipelineGraphRuntime::max_provenance() const { return max_provenance_; }
 
@@ -1440,6 +1448,7 @@ void PipelineGraphRuntime::apply_event(const PipelineEvent &event) {
         observed_counts_.clear();
         link_generations_.clear();
         latest_buffers_.clear();
+        element_progress_.clear();
         break;
     case PipelineEventKind::Stopped:
         running_ = false;
@@ -1486,6 +1495,17 @@ void PipelineGraphRuntime::apply_event(const PipelineEvent &event) {
     case PipelineEventKind::TelemetryChanged:
         if (event.telemetry_change && has_topology_) {
             apply_telemetry_change_to_topology(topology_, *event.telemetry_change);
+        }
+        break;
+    case PipelineEventKind::ProgressReported:
+        if (event.progress) {
+            element_progress_[event.progress->element.element_name] = ElementProgressState{
+                .fraction = event.progress->fraction,
+                .message = event.progress->message,
+                .index = event.progress->index,
+                .total = event.progress->total,
+                .updated = std::chrono::steady_clock::now(),
+            };
         }
         break;
     case PipelineEventKind::CommandAccepted:
@@ -2075,6 +2095,109 @@ void draw_arrowhead(ImDrawList *draw_list, ImVec2 tip, ImU32 color) {
     draw_list->AddTriangleFilled(ImVec2(tip.x - length, tip.y - half), ImVec2(tip.x - length, tip.y + half), tip, color);
 }
 
+// Progress display gate + fade: a bar shows while a fit is in flight, then lingers ~1.5 s after
+// it completes (fraction == 1) and fades out, so a finished element does not vanish instantly.
+struct ProgressDisplay {
+    bool show = false;
+    float alpha = 1.0F;
+};
+
+[[nodiscard]] ProgressDisplay progress_display(const PipelineGraphRuntime::ElementProgressState &state) {
+    if (state.fraction < 1.0) {
+        return {true, 1.0F};
+    }
+    static constexpr auto linger = 1.5F;
+    const auto age = std::chrono::duration<float>(std::chrono::steady_clock::now() - state.updated).count();
+    if (age >= linger) {
+        return {false, 0.0F};
+    }
+    return {true, 1.0F - age / linger};
+}
+
+// Percentage overlay like "52%".
+[[nodiscard]] std::string progress_percent(double fraction) {
+    return std::to_string(static_cast<int>(std::clamp(fraction, 0.0, 1.0) * 100.0 + 0.5)) + "%";
+}
+
+// Draw a progress bar (track + fill) shared by the node and the panel. While `running`, a soft
+// highlight band sweeps left->right across the filled portion each ~1.1 s to signal live activity;
+// `alpha` fades the whole bar out once complete. Uses ImGui::GetTime(), which advances every frame
+// (the plot loop renders continuously), so the sweep is smooth.
+void draw_progress_bar(ImDrawList *draw_list, ImVec2 min, ImVec2 max, double fraction, float alpha, bool running) {
+    const auto rounding = std::min(2.0F, (max.y - min.y) * 0.5F);
+    const auto track = ImGui::GetColorU32(ImVec4(0.14F, 0.16F, 0.20F, 0.85F * alpha));
+    const auto fill = ImGui::GetColorU32(ImVec4(0.36F, 0.72F, 0.42F, 0.96F * alpha));
+    draw_list->AddRectFilled(min, max, track, rounding);
+
+    const auto frac = static_cast<float>(std::clamp(fraction, 0.0, 1.0));
+    const auto fill_x = min.x + (max.x - min.x) * frac;
+    if (fill_x <= min.x + 0.5F) {
+        return;
+    }
+    const ImVec2 fill_max(fill_x, max.y);
+    draw_list->AddRectFilled(min, fill_max, fill, rounding);
+    if (!running) {
+        return;
+    }
+
+    // Sweeping highlight, clipped to the filled region: a band that fades in and out at its edges.
+    draw_list->PushClipRect(min, fill_max, true);
+    const auto fill_width = fill_x - min.x;
+    static constexpr auto period = 1.1F; // seconds per sweep
+    const auto phase = static_cast<float>(std::fmod(ImGui::GetTime(), static_cast<double>(period))) / period;
+    const auto band = std::max(9.0F, fill_width * 0.20F);
+    const auto center = min.x - band + (fill_width + 2.0F * band) * phase;
+    const auto transparent = ImGui::GetColorU32(ImVec4(0.85F, 1.0F, 0.88F, 0.0F));
+    const auto bright = ImGui::GetColorU32(ImVec4(0.90F, 1.0F, 0.92F, 0.38F * alpha));
+    draw_list->AddRectFilledMultiColor(ImVec2(center - band, min.y), ImVec2(center, max.y),
+                                       transparent, bright, bright, transparent);
+    draw_list->AddRectFilledMultiColor(ImVec2(center, min.y), ImVec2(center + band, max.y),
+                                       bright, transparent, transparent, bright);
+    draw_list->PopClipRect();
+}
+
+// Floating summary window listing every element currently (or just-recently) reporting progress,
+// each with a labelled bar and its message. Only appears while something is in flight.
+void draw_progress_panel(const PipelineGraphRuntime &runtime) {
+    std::vector<std::pair<const std::string *, const PipelineGraphRuntime::ElementProgressState *>> active;
+    for (const auto &[name, state] : runtime.element_progress()) {
+        if (progress_display(state).show) {
+            active.emplace_back(&name, &state);
+        }
+    }
+    if (active.empty()) {
+        return;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(320.0F, 0.0F), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Progress")) {
+        auto *draw_list = ImGui::GetWindowDrawList();
+        for (const auto &[name, state] : active) {
+            const auto display = progress_display(*state);
+            const auto running = state->fraction < 1.0;
+            ImGui::TextUnformatted(name->c_str());
+
+            // Full-width animated bar with the percentage centered over it.
+            const auto width = ImGui::GetContentRegionAvail().x;
+            const auto height = ImGui::GetTextLineHeight() + 5.0F;
+            const auto origin = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(width, height));
+            const ImVec2 bar_min(origin.x, origin.y);
+            const ImVec2 bar_max(origin.x + width, origin.y + height);
+            draw_progress_bar(draw_list, bar_min, bar_max, state->fraction, display.alpha, running);
+            const auto percent = progress_percent(state->fraction);
+            const auto text_size = ImGui::CalcTextSize(percent.c_str());
+            draw_list->AddText(ImVec2(bar_min.x + (width - text_size.x) * 0.5F, bar_min.y + (height - text_size.y) * 0.5F),
+                               ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 0.95F * display.alpha)), percent.c_str());
+
+            if (!state->message.empty()) {
+                ImGui::TextDisabled("%s", state->message.c_str());
+            }
+        }
+    }
+    ImGui::End();
+}
+
 } // namespace
 
 void draw_pipeline_graph(PipelineGraphRuntime &runtime) { draw_pipeline_graph(runtime, nullptr); }
@@ -2295,6 +2418,18 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
         draw_list->AddText(ImVec2(min.x + std::max(8.0F, (box_width - klass_size.x) * 0.5F), min.y + 36.0F),
                            ImGui::GetColorU32(ImVec4(0.88F, 0.92F, 0.98F, 0.86F)), klass.c_str());
 
+        // Live progress (long-running elements such as GaussianMixture): a thin bar along the
+        // node's bottom edge, faded once complete. The message shows only in the Progress panel.
+        if (const auto progress_it = runtime.element_progress().find(element.name);
+            progress_it != runtime.element_progress().end()) {
+            const auto &state = progress_it->second;
+            const auto display = progress_display(state);
+            if (display.show) {
+                draw_progress_bar(draw_list, ImVec2(min.x + 8.0F, max.y - 7.0F), ImVec2(max.x - 8.0F, max.y - 3.0F),
+                                  state.fraction, display.alpha, state.fraction < 1.0);
+            }
+        }
+
         bool gear_hovered = false;
         if (control_runtime != nullptr && control_runtime->has_element(element.name)) {
             const auto gear_center = ImVec2(max.x - 15.0F, min.y + 15.0F);
@@ -2336,6 +2471,9 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
 
     // Pinned, collapsible info windows the user opened by clicking a node/link.
     draw_pinned_info_windows(runtime);
+
+    // Floating summary of every element currently reporting progress (auto-hides when idle).
+    draw_progress_panel(runtime);
 
     if (control_runtime != nullptr) {
         draw_open_element_control_windows(*control_runtime);

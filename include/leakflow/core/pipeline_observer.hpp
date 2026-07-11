@@ -120,6 +120,18 @@ struct PipelineTelemetryChangeObservation {
     TelemetryKind kind = TelemetryKind::Size;
 };
 
+// Estimated-progress report from a long-running element (e.g. GaussianMixture fitting).
+// Pushed from inside process() on the worker thread via Element::report_progress, carried on
+// the same observer bus the graph and any app subscribe to. Purely informational: it never
+// changes payload data, replay, or provenance.
+struct PipelineProgressObservation {
+    PipelineEndpointSnapshot element;
+    double fraction = 0.0;   // estimated completion in [0, 1]
+    std::string message;     // human-readable stage, e.g. "restart 2/3 - iter 40/100"
+    std::uint64_t index = 0; // optional current step (0 when unused)
+    std::uint64_t total = 0; // optional total steps (0 when unused)
+};
+
 // Copied, SCA-safe result of a control-plane command (Phase 25). Carries no
 // mutable handles and no payload data.
 enum class PipelineCommandStatus {
@@ -152,6 +164,7 @@ enum class PipelineEventKind {
     BufferObserved,
     PropertyChanged,
     TelemetryChanged,
+    ProgressReported,
     CommandAccepted,
     CommandRejected,
     CommandApplied,
@@ -164,6 +177,7 @@ struct PipelineEvent {
     std::optional<PipelineBufferObservation> buffer;
     std::optional<PipelinePropertyChangeObservation> property_change;
     std::optional<PipelineTelemetryChangeObservation> telemetry_change;
+    std::optional<PipelineProgressObservation> progress;
     std::optional<PipelineCommandObservation> command;
     std::string element_name;
     std::string message;

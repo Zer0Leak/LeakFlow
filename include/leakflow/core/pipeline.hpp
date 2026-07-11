@@ -143,6 +143,7 @@ public:
 
 private:
     class PipelineRuntimeContext;
+    class ProgressEventSink;
 
     [[nodiscard]] std::vector<std::shared_ptr<Element>> linked_execution_order() const;
     [[nodiscard]] std::vector<PadLink> incoming_links_for(const std::shared_ptr<Element> &element) const;
@@ -220,6 +221,13 @@ private:
     std::vector<PadLink> links_;
     std::vector<OutputMetadataAnnotation> output_metadata_annotations_;
     std::shared_ptr<PipelineObserver> observer_;
+    // emit() serializes observer dispatch on this mutex so progress reports pushed from a worker
+    // thread (Element::report_progress) cannot race the buffer/telemetry events. Held via
+    // unique_ptr because Pipeline is a movable value type (a bare std::mutex would not move).
+    std::unique_ptr<std::mutex> emit_mutex_ = std::make_unique<std::mutex>();
+    // Progress channel injected into every element at start_all() (when `this` is stationary),
+    // dispatching ProgressReported events; owned here so it outlives the run.
+    std::unique_ptr<ProgressSink> progress_sink_;
     std::uint64_t next_event_sequence_ = 1;
     std::uint64_t next_buffer_sequence_ = 1;
     bool caching_enabled_ = true;

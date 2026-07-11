@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <torch/torch.h>
@@ -74,13 +75,33 @@ struct GaussianMixtureFit {
     bool batched = true;            // false when the caller passed [T, N] (U axis dropped)
 };
 
+// Progress of a fit() call, for an optional caller-supplied callback. Framework-agnostic: pure
+// values, no LeakFlow types. fit() batches over units, so the meaningful axes are the restart
+// (n_init) and the EM / constrained iteration -- not a per-unit index. `fraction` is an overall
+// estimate in [0, 1] (fit() weights the EM and Sinkhorn phases). The callback returns false to
+// request early cancellation (fit() finishes the current step and returns the best fit so far).
+struct GmmProgress {
+    std::string_view stage;      // "em" or "constrained"
+    std::int64_t restart = 0;    // current restart (0-based); always 0 in the constrained phase
+    std::int64_t restarts = 1;   // n_init
+    std::int64_t iter = 0;       // current iteration within this phase (1-based)
+    std::int64_t max_iter = 0;   // iteration budget for this phase
+    double lower_bound = 0.0;    // mean log-likelihood so far (EM phase; 0 in constrained)
+    double delta = 0.0;          // last change in lower_bound (EM phase; 0 in constrained)
+    double fraction = 0.0;       // overall estimated completion in [0, 1]
+};
+
+using GmmProgressCallback = std::function<bool(const GmmProgress&)>;
+
 class GaussianMixture {
 public:
     explicit GaussianMixture(GaussianMixtureOptions options);
 
     // Fit per unit. x is [T, N] (single unit) or [U, T, N]. Returns the fit and stores
-    // the parameters so predict/predict_proba/score_samples can run on new data.
-    GaussianMixtureFit fit(const torch::Tensor& x);
+    // the parameters so predict/predict_proba/score_samples can run on new data. When
+    // on_progress is set, it is called each EM / constrained iteration with a progress estimate;
+    // returning false cancels early (the best fit so far is finalized and returned).
+    GaussianMixtureFit fit(const torch::Tensor& x, const GmmProgressCallback& on_progress = {});
 
     // Apply the fitted model to new data (same N; [T, N] or [U, T, N]).
     [[nodiscard]] torch::Tensor predict(const torch::Tensor& x) const;       // labels

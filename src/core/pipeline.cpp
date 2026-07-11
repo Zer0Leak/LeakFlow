@@ -1122,8 +1122,36 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
     return last_terminal_output;
 }
 
+// Progress push channel (see progress_sink.hpp): forwards Element::report_progress to the
+// observer bus as a ProgressReported event. Created at start_all() when `this` is stationary
+// (Pipeline is a movable value type, so a back-pointer must not be captured before the move).
+class Pipeline::ProgressEventSink final : public ProgressSink {
+public:
+    explicit ProgressEventSink(Pipeline &pipeline) : pipeline_(pipeline) {}
+
+    void report(Element &element, const ElementProgress &progress) override {
+        pipeline_.emit(PipelineEvent{
+            .kind = PipelineEventKind::ProgressReported,
+            .progress =
+                PipelineProgressObservation{
+                    .element = endpoint_snapshot(element, std::string_view{}),
+                    .fraction = progress.fraction,
+                    .message = progress.message,
+                    .index = progress.index,
+                    .total = progress.total,
+                },
+        });
+    }
+
+private:
+    Pipeline &pipeline_;
+};
+
 void Pipeline::start_all() {
     started_count_ = 0;
+    // (Re)create the progress channel now that `this` is stationary and hand it to every element
+    // alongside the stop token, so a long process() can push a live progress bar to observers.
+    progress_sink_ = std::make_unique<ProgressEventSink>(*this);
     // A run starts fresh: reset the vector-clock production counters so each run's
     // provenance begins at 0 (a Stop -> Start cycle restarts the clocks rather than
     // continuing from the previous run). Slot allocation (element_base_/next_slot_)
@@ -1151,6 +1179,7 @@ void Pipeline::start_all() {
     for (const auto &element : elements_) {
         log::write(element->make_log_record(log::LogLevel::Debug, "pipeline", "starting element"));
         element->set_stop_token(stop_token_);
+        element->set_progress_sink(progress_sink_.get());
         element->start();
         emit(PipelineEvent{
             .kind = PipelineEventKind::ElementStarted,
@@ -2456,8 +2485,12 @@ void Pipeline::emit(PipelineEvent event) noexcept {
         return;
     }
 
-    event.sequence = next_event_sequence_++;
+    // Serialize dispatch: progress reports are pushed from the worker thread mid-process(), so
+    // they must not race the buffer/telemetry events. The lock is the innermost in every path
+    // (callers may already hold the segment `shared` mutex), so it cannot deadlock.
     try {
+        const std::lock_guard<std::mutex> lock(*emit_mutex_);
+        event.sequence = next_event_sequence_++;
         observer_->observe(event);
     } catch (...) {
     }
