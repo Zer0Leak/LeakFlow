@@ -24,10 +24,16 @@ namespace leakflow {
 class Element;
 class Pipeline;
 class PipelineSession;
+enum class PipelineSessionState;
 
 } // namespace leakflow
 
 namespace leakflow::plot {
+
+// Progress motion follows the authoritative player state. Idle is a held,
+// inspectable state (not an active run), so it is deliberately static along
+// with Paused and Stopped.
+[[nodiscard]] bool progress_animation_enabled(PipelineSessionState state) noexcept;
 
 class PipelineGraphRuntime final : public PipelineObserver {
 public:

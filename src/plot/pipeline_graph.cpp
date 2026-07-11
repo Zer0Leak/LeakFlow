@@ -30,6 +30,11 @@
 #include <vector>
 
 namespace leakflow::plot {
+
+bool progress_animation_enabled(PipelineSessionState state) noexcept {
+    return state == PipelineSessionState::Running;
+}
+
 namespace {
 
 constexpr auto max_recent_events = std::size_t{80};
@@ -2165,7 +2170,7 @@ void draw_progress_bar(ImDrawList *draw_list, ImVec2 min, ImVec2 max, double fra
 
 // Floating summary window listing every element currently (or just-recently) reporting progress,
 // each with a labelled bar and its message. Only appears while something is in flight.
-void draw_progress_panel(const PipelineGraphRuntime &runtime) {
+void draw_progress_panel(const PipelineGraphRuntime &runtime, bool animate_progress) {
     std::vector<std::pair<const std::string *, const PipelineGraphRuntime::ElementProgressState *>> active;
     for (const auto &[name, state] : runtime.element_progress()) {
         if (progress_display(state).show) {
@@ -2181,7 +2186,7 @@ void draw_progress_panel(const PipelineGraphRuntime &runtime) {
         auto *draw_list = ImGui::GetWindowDrawList();
         for (const auto &[name, state] : active) {
             const auto display = progress_display(*state);
-            const auto running = state->fraction < 1.0;
+            const auto running = animate_progress && state->fraction < 1.0;
             ImGui::TextUnformatted(name->c_str());
 
             // Full-width animated bar with the percentage centered over it.
@@ -2211,6 +2216,14 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime) { draw_pipeline_graph(ru
 
 void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *control_runtime) {
     runtime.drain_events();
+    // PipelineGraphRuntime's Started/Stopped events do not encode Paused or the
+    // held Idle state. When a session is bound, use its authoritative lifecycle
+    // state so progress motion freezes immediately outside Running. Keep the
+    // event-derived fallback for callers that draw a graph without a session.
+    const auto animate_progress =
+        control_runtime != nullptr && control_runtime->session() != nullptr
+            ? progress_animation_enabled(control_runtime->session()->state())
+            : runtime.running();
     if (control_runtime != nullptr) {
         control_runtime->set_edits_enabled(!runtime.running());
     }
@@ -2438,7 +2451,8 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
             const auto display = progress_display(state);
             if (display.show) {
                 draw_progress_bar(draw_list, ImVec2(min.x + 8.0F, max.y - 7.0F), ImVec2(max.x - 8.0F, max.y - 3.0F),
-                                  state.fraction, display.alpha, state.fraction < 1.0);
+                                  state.fraction, display.alpha,
+                                  animate_progress && state.fraction < 1.0);
             }
         }
 
@@ -2485,7 +2499,7 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
     draw_pinned_info_windows(runtime);
 
     // Floating summary of every element currently reporting progress (auto-hides when idle).
-    draw_progress_panel(runtime);
+    draw_progress_panel(runtime, animate_progress);
 
     if (control_runtime != nullptr) {
         draw_open_element_control_windows(*control_runtime);

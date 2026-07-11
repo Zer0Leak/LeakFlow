@@ -304,6 +304,9 @@ Pass `--auto-start` to begin Running on open; a finite live stream reaching EOS
 lands in **Idle** (held, inspectable). See `docs/design/dataflow_sync_model.md`
 §13.
 
+The progress-bar activity sweep animates only while the session is **Running**;
+the sweep is suppressed while **Paused**, **Idle**, or **Stopped**.
+
 Example of a downstream-only rerun:
 
 ```text

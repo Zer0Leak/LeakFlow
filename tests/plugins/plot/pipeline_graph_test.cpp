@@ -1,5 +1,6 @@
 #include "leakflow/core/element.hpp"
 #include "leakflow/core/pipeline.hpp"
+#include "leakflow/core/pipeline_session.hpp"
 #include "leakflow/plot/pipeline_graph.hpp"
 
 #include <cstdint>
@@ -59,6 +60,17 @@ public:
 } // namespace
 
 int main() {
+    if (!expect(leakflow::plot::progress_animation_enabled(leakflow::PipelineSessionState::Running),
+                "running session did not enable progress animation")) {
+        return 1;
+    }
+    if (!expect(!leakflow::plot::progress_animation_enabled(leakflow::PipelineSessionState::Paused)
+                    && !leakflow::plot::progress_animation_enabled(leakflow::PipelineSessionState::Idle)
+                    && !leakflow::plot::progress_animation_enabled(leakflow::PipelineSessionState::Stopped),
+                "inactive session state enabled progress animation")) {
+        return 1;
+    }
+
     leakflow::plot::PipelineGraphRuntime runtime;
 
     leakflow::PipelineTopologySnapshot topology;

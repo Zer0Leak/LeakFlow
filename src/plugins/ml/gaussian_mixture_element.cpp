@@ -190,6 +190,10 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
         return !stop_token().stop_requested();
     };
 
+    // Initialisation happens before the ML callback's first EM iteration and can take long
+    // enough to be visible. Publish 0% immediately so observers can show the progress bar while
+    // it runs; report_progress keeps its normal throttling for the callbacks that follow.
+    report_progress(0.0, "starting", 0, static_cast<std::uint64_t>(options.max_iter));
     const auto fit = model.fit(payload->tensor(), on_progress);
     report_progress(1.0, "done"); // flush the bar to 100% (EM may have converged before max_iter)
     const auto labels = fit.labels.to(torch::kInt64).contiguous();

@@ -2,6 +2,7 @@
 
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/buffer.hpp"
+#include "leakflow/core/progress_sink.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -26,6 +27,16 @@ leakflow::Buffer torch_buffer(torch::Tensor tensor)
     return buffer;
 }
 
+class CapturingProgressSink final : public leakflow::ProgressSink {
+public:
+    void report(leakflow::Element&, const leakflow::ElementProgress& progress) override
+    {
+        reports.push_back(progress);
+    }
+
+    std::vector<leakflow::ElementProgress> reports;
+};
+
 } // namespace
 
 int main()
@@ -46,6 +57,8 @@ int main()
     element.set_property("covariance_type", std::string("diagonal"));
     element.set_property("n_init", std::int64_t{3});
     element.set_property("seed", std::int64_t{7});
+    CapturingProgressSink progress;
+    element.set_progress_sink(&progress);
 
     const auto output = element.process(torch_buffer(features));
     if (!expect(output.has_value(), "element produced no output")) {
@@ -89,6 +102,17 @@ int main()
         return 1;
     }
     if (!expect(output->metadata_or("payload.cluster.converged", "") == "true", "converged metadata wrong")) {
+        return 1;
+    }
+    if (!expect(progress.reports.size() >= 2, "fit did not report progress start and completion")) {
+        return 1;
+    }
+    if (!expect(progress.reports.front().fraction == 0.0 && progress.reports.front().message == "starting",
+            "first fit progress report was not the initial 0% state")) {
+        return 1;
+    }
+    if (!expect(progress.reports.back().fraction == 1.0 && progress.reports.back().message == "done",
+            "last fit progress report was not completion")) {
         return 1;
     }
 
