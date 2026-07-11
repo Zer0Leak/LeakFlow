@@ -1,5 +1,6 @@
 add_library(leakflow_plugins_crypto_plot SHARED
     descriptor_catalog.cpp
+    poi_table_plot.cpp
     score_plot.cpp
     score_table_plot.cpp
 )

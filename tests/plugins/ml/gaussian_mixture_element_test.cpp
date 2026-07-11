@@ -1,0 +1,97 @@
+#include "leakflow/plugins/ml/gaussian_mixture_element.hpp"
+
+#include "leakflow/base/torch_tensor_payload.hpp"
+#include "leakflow/core/buffer.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <torch/torch.h>
+#include <vector>
+
+namespace {
+
+bool expect(bool condition, const char* message)
+{
+    if (!condition) {
+        std::cerr << message << '\n';
+    }
+    return condition;
+}
+
+leakflow::Buffer torch_buffer(torch::Tensor tensor)
+{
+    auto payload = leakflow::base::TorchTensorPayload(std::move(tensor));
+    leakflow::Buffer buffer{payload.caps()};
+    buffer.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+    return buffer;
+}
+
+} // namespace
+
+int main()
+{
+    torch::manual_seed(20);
+    constexpr std::int64_t k = 3;
+    constexpr std::int64_t n = 4;
+    constexpr std::int64_t per = 60;
+    std::vector<torch::Tensor> parts;
+    for (std::int64_t c = 0; c < k; ++c) {
+        const auto centre = torch::full({n}, static_cast<double>(c) * 20.0, torch::kFloat64);
+        parts.push_back(centre.to(torch::kFloat32) + torch::randn({per, n}));
+    }
+    const auto features = torch::cat(parts, 0); // [180, 4], well separated
+
+    leakflow::plugins::ml::GaussianMixtureElement element;
+    element.set_property("n_components", std::int64_t{k});
+    element.set_property("covariance_type", std::string("diagonal"));
+    element.set_property("n_init", std::int64_t{3});
+    element.set_property("seed", std::int64_t{7});
+
+    const auto output = element.process(torch_buffer(features));
+    if (!expect(output.has_value(), "element produced no output")) {
+        return 1;
+    }
+    const auto payload = output->payload_as<leakflow::base::TorchTensorPayload>();
+    if (!expect(payload != nullptr, "output is not a TorchTensorPayload")) {
+        return 1;
+    }
+    const auto labels = payload->tensor();
+    if (!expect(labels.scalar_type() == torch::kLong, "labels are not int64")) {
+        return 1;
+    }
+    if (!expect(labels.sizes() == torch::IntArrayRef({k * per}), "labels shape wrong")) {
+        return 1;
+    }
+
+    // Well-separated data: each true block gets one label, and the three are distinct.
+    const auto cpu = labels.to(torch::kCPU).contiguous();
+    const auto acc = cpu.accessor<std::int64_t, 1>();
+    std::vector<std::int64_t> block_label(k);
+    for (std::int64_t c = 0; c < k; ++c) {
+        const auto first = acc[c * per];
+        block_label[static_cast<std::size_t>(c)] = first;
+        for (std::int64_t i = 0; i < per; ++i) {
+            if (!expect(acc[c * per + i] == first, "a true cluster was split across labels")) {
+                return 1;
+            }
+        }
+    }
+    if (!expect(block_label[0] != block_label[1] && block_label[1] != block_label[2]
+                    && block_label[0] != block_label[2],
+                "true clusters were merged into one label")) {
+        return 1;
+    }
+
+    if (!expect(output->metadata_or("payload.cluster.method", "") == "gaussian-mixture", "method metadata wrong")) {
+        return 1;
+    }
+    if (!expect(output->metadata_or("payload.cluster.n_components", "") == "3", "n_components metadata wrong")) {
+        return 1;
+    }
+    if (!expect(output->metadata_or("payload.cluster.converged", "") == "true", "converged metadata wrong")) {
+        return 1;
+    }
+
+    std::cout << "gaussian_mixture_element tests passed\n";
+    return 0;
+}

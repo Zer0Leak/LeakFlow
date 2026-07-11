@@ -171,7 +171,7 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
         }
 
         results.push_back(CorrelationPoiResult{
-            .target_byte_index = byte_indexes.at(static_cast<std::size_t>(byte_offset)),
+            .unit = byte_indexes.at(static_cast<std::size_t>(byte_offset)),
             .result = torch::stack(channel_results, 0).contiguous(),
         });
     }

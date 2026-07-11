@@ -12,8 +12,11 @@ namespace leakflow::plugins::crypto {
 
 inline constexpr auto correlation_poi_caps_type = "leakflow/correlation-poi";
 
+// One attack unit's selected PoIs. `unit` is the generic unit identifier (an AES key byte, a
+// Kyber coefficient, ...). `result` is a `[channel, poi, 2]` tensor where the last axis is the
+// (sample_index, correlation) pair -- see the `payload.poi.dims` metadata producers set.
 struct CorrelationPoiResult {
-    std::uint16_t target_byte_index = 0;
+    std::uint16_t unit = 0;
     torch::Tensor result;
 };
 

@@ -25,8 +25,15 @@ Tests:
 ## Targets
 
 - `leakflow_plot`: ImGui/ImPlot runtime and backend support; owns `PlotView` and
-  the registry (`ScoreView` lives here — display data only, domain-free).
-- `leakflow_plugins_plot`: plot plugin family with `TracePlot`.
+  the registry (`ScoreView` and `HeatmapView` live here — display data only,
+  domain-free).
+- `leakflow_plugins_plot`: plot plugin family with `TracePlot` and `HeatmapPlot`
+  (`Plot/Heatmap`): renders any `[R,C]`/`[U,R,C]` matrix as an ImPlot `PlotHeatmap`
+  (Viridis colormap + colorbar); props `normalize` (none/row/col), `unit`
+  (-1 = sum over units), `title`/`row_label`/`col_label`. A sink; fills a
+  `HeatmapView` via the shared-view factory pattern. Motivating use: a
+  `ClusteringStats` reordered-confusion matrix, row-normalised into a per-class
+  recall heatmap.
 - `leakflow_plugins_crypto_plot`: crypto→plot bridge; `ScorePlot` fills a
   `ScoreView` and `ScoreTablePlot` fills a `TableView`, both from
   `AttackStatsPayload`. Depends on `leakflow_plugins_crypto` + `leakflow_plot`.

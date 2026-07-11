@@ -21,7 +21,7 @@ namespace {
 
 [[nodiscard]] std::string byte_result_summary(const CorrelationPoiResult& result)
 {
-    return "(byte_index: " + std::to_string(result.target_byte_index)
+    return "(unit: " + std::to_string(result.unit)
         + ", shape: " + shape_to_string(result.result.sizes()) + ")";
 }
 
@@ -33,8 +33,10 @@ void validate_result(const CorrelationPoiResult& result)
     if (result.result.layout() != torch::kStrided) {
         throw std::invalid_argument("CorrelationPoiPayload result tensor must use strided layout");
     }
-    if (result.result.dim() != 3 || result.result.size(2) != 2) {
-        throw std::invalid_argument("CorrelationPoiPayload result tensor must have shape [C,K,2]");
+    if (result.result.dim() != 3 || (result.result.size(2) != 2 && result.result.size(2) != 1)) {
+        // Last axis is (sample_index, score); [C,K,1] carries just the score (e.g. best-correlation
+        // comparisons where there is no sample position).
+        throw std::invalid_argument("CorrelationPoiPayload result tensor must have shape [C,K,2] or [C,K,1]");
     }
     if (!c10::isFloatingType(result.result.scalar_type())) {
         throw std::invalid_argument("CorrelationPoiPayload result tensor must be floating-point");
@@ -76,8 +78,8 @@ void CorrelationPoiPayload::describe(SummarySection& section, std::int64_t summa
             auto& field = section.add_field("result", byte_result_summary(result), SummaryValueRole::Size);
             if (summary_level >= 2) {
                 field.add_child(
-                    "byte_index",
-                    summary_integer(static_cast<std::int64_t>(result.target_byte_index)),
+                    "unit",
+                    summary_integer(static_cast<std::int64_t>(result.unit)),
                     SummaryValueRole::Number);
                 field.add_child(
                     "dtype", leakflow::base::torch_dtype_name(result.result.scalar_type()), SummaryValueRole::TypeName);

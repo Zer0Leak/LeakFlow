@@ -63,10 +63,12 @@ set_target_properties(leakflow_implot PROPERTIES
 )
 
 add_library(leakflow_plot
+    heatmap_view.cpp
     imgui_plot_loop.cpp
     pipeline_graph.cpp
     plot_render_util.cpp
     plot_runtime.cpp
+    poi_table_view.cpp
     score_view.cpp
     table_view.cpp
     trace_view.cpp

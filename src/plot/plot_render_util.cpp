@@ -5,6 +5,22 @@
 #include <cstddef>
 
 namespace leakflow::plot {
+
+int draw_index_slider(const char *id, const char *label_format, int &value, int count) {
+    if (count <= 0) {
+        return 0;
+    }
+    if (value >= count) {
+        value = 0;
+    }
+    if (count > 1) {
+        ImGui::SetNextItemWidth(-1.0F);
+        ImGui::SliderInt(id, &value, 0, count - 1, label_format);
+        value = std::clamp(value, 0, count - 1);
+    }
+    return value;
+}
+
 namespace {
 
 [[nodiscard]] bool colors_are_close(ImVec4 left, ImVec4 right) {

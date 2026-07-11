@@ -11,6 +11,7 @@ target_link_libraries(leakflow_cli
         leakflow_log
         leakflow_plugins_core
         leakflow_plugins_base
+        leakflow_plugins_ml
         leakflow_plugins_extras
         leakflow_plugins_crypto
         leakflow_plugins_plot
@@ -57,6 +58,7 @@ target_link_libraries(leakflow-ls
         leakflow_render
         leakflow_plugins_core
         leakflow_plugins_base
+        leakflow_plugins_ml
         leakflow_plugins_extras
         leakflow_plugins_crypto
         leakflow_plugins_plot

@@ -15,6 +15,10 @@ namespace leakflow::plot {
 
 [[nodiscard]] ImVec4 im_color(const TracePlotColor &color, float alpha);
 [[nodiscard]] float squared_distance(ImVec2 left, ImVec2 right);
+// Full-width "<label> N" integer selector bound to value, clamped to [0, count-1]; drawn only
+// when count > 1. Shared by views with a per-unit / per-channel slider (HeatmapView,
+// PoiTableView). Returns the clamped value.
+int draw_index_slider(const char *id, const char *label_format, int &value, int count);
 void draw_annotation_number_label(ImDrawList &draw_list, ImVec2 marker, const std::string &text);
 void draw_annotation_marker(ImDrawList &draw_list, ImVec2 marker, float marker_radius,
                             const std::vector<ImVec4> &colors, TracePlotAnnotationMarker shape);

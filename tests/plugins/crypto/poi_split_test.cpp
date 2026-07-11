@@ -181,7 +181,7 @@ int main()
     if (!expect(payload->score_name() == "correlation", "per-target score name was wrong")) {
         return 1;
     }
-    if (!expect(payload->result(0).target_byte_index == 0, "first generic target byte index was wrong")) {
+    if (!expect(payload->result(0).unit == 0, "first generic target byte index was wrong")) {
         return 1;
     }
     if (!expect_near(payload->result(0).result[0][0][0].item<double>(), 0.0, "first target selected wrong feature")) {
@@ -362,7 +362,7 @@ int main()
     {
         auto exact = crypto_plugin::CorrelationPoiPayload(
             std::vector<crypto_plugin::CorrelationPoiResult>{crypto_plugin::CorrelationPoiResult{
-                .target_byte_index = 0,
+                .unit = 0,
                 .result = torch::tensor({{{7.0, 0.625}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             }},
             "custom-score");
@@ -379,7 +379,7 @@ int main()
 
         auto bad = crypto_plugin::CorrelationPoiPayload(
             std::vector<crypto_plugin::CorrelationPoiResult>{crypto_plugin::CorrelationPoiResult{
-                .target_byte_index = 0,
+                .unit = 0,
                 .result = torch::tensor({{{7.0, 1.25}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             }},
             "correlation");
@@ -435,7 +435,7 @@ int main()
             "AES byte-group count was wrong")) {
         return 1;
     }
-    if (!expect(aes_payload->result(0).target_byte_index == 3 && aes_payload->result(1).target_byte_index == 5,
+    if (!expect(aes_payload->result(0).unit == 3 && aes_payload->result(1).unit == 5,
             "AES byte indexes were wrong")) {
         return 1;
     }
@@ -450,10 +450,10 @@ int main()
     bool saw_byte_3 = false;
     bool saw_byte_5 = false;
     for (const auto& field : aes_payload_summary.fields) {
-        if (field.label == "result" && field.value.text == "(byte_index: 3, shape: [2, 1, 2])") {
+        if (field.label == "result" && field.value.text == "(unit: 3, shape: [2, 1, 2])") {
             saw_byte_3 = true;
         }
-        if (field.label == "result" && field.value.text == "(byte_index: 5, shape: [2, 1, 2])") {
+        if (field.label == "result" && field.value.text == "(unit: 5, shape: [2, 1, 2])") {
             saw_byte_5 = true;
         }
     }
@@ -474,7 +474,7 @@ int main()
             "annotation count was wrong")) {
         return 1;
     }
-    if (!expect(annotations->annotation(0).label == "byte_3.HW(m)", "did not use target label metadata")) {
+    if (!expect(annotations->annotation(0).label == "unit_3.HW(m)", "did not use target label metadata")) {
         return 1;
     }
     if (!expect(annotations->annotation(0).norm_value && *annotations->annotation(0).norm_value == 1.0,
@@ -539,7 +539,7 @@ int main()
     if (!expect(descriptors.size() == 1, "crypto plugin descriptor count changed")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 9, "crypto plugin element count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 12, "crypto plugin element count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[6].type_name == "PearsonCorrelator"

@@ -373,6 +373,36 @@ leakflow --log-level warning run \
 the leakage metadata, `payload.correlation.observation_count=50`, ...) and
 `payload.pt` holds the correlation tensor.
 
+### Streaming a whole profiling set (a folder of keys)
+
+The save command above reads a single `.pt` file. Real PoI profiling uses **many
+traces across several keys** -- e.g. `traces/aes/sync/aes_sync_poi` holds 50 `key_*`
+folders (each with `traces.pt` / `plain_texts.pt` / `key.pt`), 100 000 traces in all.
+Loading all of that into one buffer is wasteful, so the replication app streams it:
+
+```bash
+leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.lfbuf --graph \
+  traces/aes/sync/aes_sync_poi
+```
+
+It walks each `key_*` folder in turn, feeding that folder's traces/plaintexts/keys
+through the same `AesLeakage -> PearsonCorrelator` chain and **accumulating** the
+Pearson correlation over every key and trace -- an `AppSrc` pulls one folder at a time,
+so only ~one folder is ever resident in memory. `--graph` opens the live pipeline graph
+(same controls as `leakflow run --graph`) so you watch the aggregate correlation and its
+PoIs build up as folders stream in; drop `--graph` for a headless run, add `--auto-start`
+to begin on open. `--save-correlation PATH` writes the **same** `out/aes_corr.lfbuf` the
+reload-and-plot command below consumes -- so a folder-scale, multi-key correlation drops
+straight into the offline PoI-selection workflow.
+
+You can get an identical result from the plain `leakflow run` save pipeline above by
+first **merging** the folder into single `traces.pt` / `plain_texts.pt` / `key.pt`
+tensors -- concatenate every `key_*` folder, expanding each folder's `[16]` key to one
+row per trace so the keys stay per-trace -- and pointing the three `TorchFileSrc`s at
+them. That swaps the app's streaming for a one-shot load of the whole set (fine for a
+subset, heavy for all 100 000 traces), which is exactly why the folder-walking app
+exists.
+
 Reload the correlation and plot the PoIs. The expensive correlation is **not**
 recomputed (`@corr_src ! @poi` re-selects from the cached correlation); the traces are
 reloaded only as the cheap backdrop the PoI markers are drawn on:
@@ -398,3 +428,60 @@ leakflow run --graph \
 Change `top_k`/`rank_by` and re-run as often as you like — the correlation is not
 recomputed. This is the cross-session complement to editing `PoiSelect` properties
 live in `--graph` (which re-selects from the cached correlation in Idle).
+
+## How Good Are The Profiling PoIs On Attack Traces?
+
+PoIs are leakage *locations* — the sample offsets where the implementation leaks —
+so they are selected once during profiling (the correlation saved to
+`out/aes_corr.lfbuf` above) and then reused against a fresh capture. This pipeline
+asks whether that reuse is justified: it re-runs the Pearson correlation **only at
+the saved PoI columns** on new traces (`PoiCorrelation`), then lays the attack
+scores next to the profiling scores in a comparison table (`PoiTablePlot`) with a
+line under it per phase. Strong transfer keeps the `attack` row tracking the
+`profiling` row; desync, jitter, or a different device shows up as the attack line
+collapsing.
+
+```bash
+leakflow run --graph \
+  'BufferFileSrc@corr_src(path=out/aes_corr.lfbuf); \
+   PoiSelect@poi(top_k=[20],rank_by=[abs]); \
+   Tee@poi_tee; \
+   TorchFileSrc@attack_traces(path=traces/aes/sync/aes_sync_poi/key_01/traces.pt); \
+   TorchFileSrc@attack_plain(path=traces/aes/sync/aes_sync_poi/key_01/plain_texts.pt); \
+   TorchFileSrc@attack_key(path=traces/aes/sync/aes_sync_poi/key_01/key.pt); \
+   Tee@trace_tee; \
+   AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); \
+   PoiCorrelation@poicorr; \
+   PoiTablePlot@tbl \
+      (title="Profiling vs attack PoIs",reference_label=profiling,current_label=attack,precision=3); \
+   @corr_src ! @poi ! @poi_tee; \
+      @poi_tee.src_0 ! @tbl.reference; \
+      @poi_tee.src_1 ! @poicorr.poi; \
+   @attack_traces ! @trace_tee; \
+      @trace_tee.src_0 ! @poicorr.traces; \
+      @trace_tee.src_1 ! @leakage.traces; \
+   @attack_plain ! @leakage.plaintexts; \
+   @attack_key ! @leakage.keys; \
+   @leakage ! @poicorr.targets; \
+   @poicorr ! @tbl.current'
+```
+
+Notes:
+
+- The comparison window (titled *Profiling vs attack PoIs*) has `unit` and
+  `channel` sliders, a `metric` toggle (`value` vs `|value|`), and a `sort`
+  selector (`sample` index — the default — or by `profiling` / `attack` score).
+  Each column highlights the phase with the larger score (`profiling` blue,
+  `attack` orange), and the line under the table redraws to match the metric and
+  sort.
+- To actually measure *transfer*, point the three `@attack_*` sources at a capture
+  **other** than the one the correlation was profiled on — a different `key_*`
+  folder under `aes_sync_poi`, a resynchronized set, or another device. Pointing
+  them at the profiling key (as above) is the sanity baseline where both rows
+  should agree.
+- `PoiCorrelation` recomputes correlation over every unit at each PoI column, so it
+  scales with trace count. `key_01` (2 000 traces) is interactive; for a larger
+  attack set, re-score a subset first, or narrow with `AesLeakage(byte_indexes=[0])`
+  and a smaller `top_k`.
+- Both table inputs are optional — feed only `@tbl.reference` (or only
+  `@tbl.current`) to inspect one PoI set on its own; the missing row shows `-`.

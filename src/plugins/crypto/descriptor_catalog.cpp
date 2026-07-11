@@ -9,6 +9,9 @@
 #include "leakflow/plugins/crypto/attack_stats_to_plot_annotations.hpp"
 #include "leakflow/plugins/crypto/correlation_payload.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
+#include "leakflow/plugins/crypto/correlation_poi_to_indexes.hpp"
+#include "leakflow/plugins/crypto/hw_class.hpp"
+#include "leakflow/plugins/crypto/poi_correlation.hpp"
 #include "leakflow/plugins/crypto/pearson_correlator.hpp"
 #include "leakflow/plugins/crypto/poi_select.hpp"
 #include "crypto_plugin_constants.hpp"
@@ -46,6 +49,9 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 PearsonCorrelator::descriptor(),
                 PoiSelect::descriptor(),
                 CorrelationPoiToPlotAnnotations::descriptor(),
+                CorrelationPoiToIndexes::descriptor(),
+                HwClass::descriptor(),
+                PoiCorrelation::descriptor(),
             },
         }),
     };
@@ -100,6 +106,15 @@ void register_element_factories(ElementFactoryRegistry& registry)
              }},
             {"CorrelationPoiToPlotAnnotations", [](std::string name) {
                  return std::make_shared<CorrelationPoiToPlotAnnotations>(std::move(name));
+             }},
+            {"CorrelationPoiToIndexes", [](std::string name) {
+                 return std::make_shared<CorrelationPoiToIndexes>(std::move(name));
+             }},
+            {"HwClass", [](std::string name) {
+                 return std::make_shared<HwClass>(std::move(name));
+             }},
+            {"PoiCorrelation", [](std::string name) {
+                 return std::make_shared<PoiCorrelation>(std::move(name));
              }},
         });
 }
@@ -202,7 +217,7 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                     c10::List<torch::Tensor> result_tensors;
                     byte_indexes.reserve(poi->result_count());
                     for (const auto& result : poi->results()) {
-                        byte_indexes.push_back(result.target_byte_index);
+                        byte_indexes.push_back(result.unit);
                         result_tensors.push_back(result.result);
                     }
                     auto tuple = c10::ivalue::Tuple::create({
@@ -222,7 +237,7 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                     results.reserve(byte_indexes.size());
                     for (std::size_t index = 0; index < byte_indexes.size(); ++index) {
                         results.push_back(CorrelationPoiResult{
-                            .target_byte_index = byte_indexes[index],
+                            .unit = byte_indexes[index],
                             .result = result_tensors.get(index),
                         });
                     }

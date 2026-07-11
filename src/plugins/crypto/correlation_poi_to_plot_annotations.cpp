@@ -133,25 +133,25 @@ namespace {
     return fallback_channel_label(channel_index);
 }
 
-[[nodiscard]] std::string annotation_label_for(std::uint16_t byte_index, std::string_view channel)
+[[nodiscard]] std::string annotation_label_for(std::uint16_t unit, std::string_view channel)
 {
-    return "byte_" + std::to_string(byte_index) + "." + std::string(channel);
+    return "unit_" + std::to_string(unit) + "." + std::string(channel);
 }
 
-[[nodiscard]] std::string annotation_field_label_for(std::uint16_t byte_index, std::string_view channel)
+[[nodiscard]] std::string annotation_field_label_for(std::uint16_t unit, std::string_view channel)
 {
-    return std::string(channel) + "[" + std::to_string(byte_index) + "]";
+    return std::string(channel) + "[" + std::to_string(unit) + "]";
 }
 
 [[nodiscard]] leakflow::base::PlotAnnotationFields annotation_fields_for(
-    std::uint16_t byte_index,
+    std::uint16_t unit,
     std::string_view channel,
     std::string_view score_name,
     std::string_view value_text)
 {
     leakflow::base::PlotAnnotationFields fields;
-    fields.emplace_back("label", annotation_field_label_for(byte_index, channel));
-    fields.emplace_back("key byte", std::to_string(byte_index));
+    fields.emplace_back("label", annotation_field_label_for(unit, channel));
+    fields.emplace_back("unit", std::to_string(unit));
     fields.emplace_back("target", std::string(channel));
     fields.emplace_back(std::string(score_name), std::string(value_text));
     return fields;
@@ -184,7 +184,7 @@ namespace {
 
         for (auto channel_index = std::int64_t{0}; channel_index < channel_count; ++channel_index) {
             const auto channel = channel_label_for(channels, channel_index);
-            const auto label = annotation_label_for(result.target_byte_index, channel);
+            const auto label = annotation_label_for(result.unit, channel);
             const auto target_index =
                 static_cast<std::int64_t>(group_ordinal) * channel_count + channel_index;
             for (auto row = std::int64_t{0}; row < rows; ++row) {
@@ -195,7 +195,7 @@ namespace {
                     .sample_index = sample_index,
                     .norm_value = normalized_score_for(input, value),
                     .fields = annotation_fields_for(
-                        result.target_byte_index,
+                        result.unit,
                         channel,
                         payload.score_name(),
                         value_text),

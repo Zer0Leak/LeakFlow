@@ -256,7 +256,7 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
         return false;
     }
     const auto& result = poi_payload->result(0);
-    if (!expect(result.target_byte_index == byte_index, label + ": PoiSelect reported wrong byte index")) {
+    if (!expect(result.unit == byte_index, label + ": PoiSelect reported wrong byte index")) {
         return false;
     }
     // result tensor is [channel, top_k, 2]: pair is (sample_index, correlation).
@@ -305,7 +305,7 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
             label + ": annotation norm_value did not match the PoI correlation")) {
         return false;
     }
-    const auto expected_label = "byte_" + std::to_string(byte_index) + "." + crypto_plugin::aes_leakage_channel_hw_y;
+    const auto expected_label = "unit_" + std::to_string(byte_index) + "." + crypto_plugin::aes_leakage_channel_hw_y;
     if (!expect(annotation.label == expected_label, label + ": annotation label was wrong")) {
         return false;
     }

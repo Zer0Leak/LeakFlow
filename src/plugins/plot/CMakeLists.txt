@@ -1,5 +1,6 @@
 add_library(leakflow_plugins_plot SHARED
     descriptor_catalog.cpp
+    heatmap_plot.cpp
     trace_plot.cpp
 )
 target_compile_features(leakflow_plugins_plot PUBLIC cxx_std_23)

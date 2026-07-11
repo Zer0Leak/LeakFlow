@@ -4,13 +4,16 @@ add_library(leakflow_plugins_crypto SHARED
     correlation_payload.cpp
     correlation_poi_to_plot_annotations.cpp
     correlation_poi_payload.cpp
+    correlation_poi_to_indexes.cpp
     cpa_attack.cpp
     dpa_attack.cpp
     attack_payload.cpp
     attack_stats.cpp
     attack_stats_to_plot_annotations.cpp
     descriptor_catalog.cpp
+    hw_class.cpp
     pearson_correlator.cpp
+    poi_correlation.cpp
     poi_select.cpp
 )
 target_compile_features(leakflow_plugins_crypto PUBLIC cxx_std_23)

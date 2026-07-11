@@ -447,7 +447,7 @@ int main()
     if (!expect(descriptors[0].name == "leakflow_plugins_plot", "plot plugin descriptor name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 1, "plot element descriptor count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 2, "plot element descriptor count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[0].type_name == "TracePlot", "TracePlot descriptor type name was wrong")) {

@@ -73,3 +73,34 @@ target_compile_definitions(leakflow_plugins_crypto_aes_poi_correctness_tests
 )
 leakflow_configure_test_target(leakflow_plugins_crypto_aes_poi_correctness_tests)
 add_test(NAME leakflow_plugins_crypto_aes_poi_correctness COMMAND leakflow_plugins_crypto_aes_poi_correctness_tests)
+
+add_executable(leakflow_plugins_crypto_hw_class_tests
+    hw_class_test.cpp
+)
+target_link_libraries(leakflow_plugins_crypto_hw_class_tests
+    PRIVATE
+        leakflow_plugins_crypto
+)
+leakflow_configure_test_target(leakflow_plugins_crypto_hw_class_tests)
+add_test(NAME leakflow_plugins_crypto_hw_class COMMAND leakflow_plugins_crypto_hw_class_tests)
+
+add_executable(leakflow_plugins_crypto_correlation_poi_to_indexes_tests
+    correlation_poi_to_indexes_test.cpp
+)
+target_link_libraries(leakflow_plugins_crypto_correlation_poi_to_indexes_tests
+    PRIVATE
+        leakflow_plugins_crypto
+)
+leakflow_configure_test_target(leakflow_plugins_crypto_correlation_poi_to_indexes_tests)
+add_test(NAME leakflow_plugins_crypto_correlation_poi_to_indexes
+    COMMAND leakflow_plugins_crypto_correlation_poi_to_indexes_tests)
+
+add_executable(leakflow_plugins_crypto_poi_correlation_tests
+    poi_correlation_test.cpp
+)
+target_link_libraries(leakflow_plugins_crypto_poi_correlation_tests
+    PRIVATE
+        leakflow_plugins_crypto
+)
+leakflow_configure_test_target(leakflow_plugins_crypto_poi_correlation_tests)
+add_test(NAME leakflow_plugins_crypto_poi_correlation COMMAND leakflow_plugins_crypto_poi_correlation_tests)

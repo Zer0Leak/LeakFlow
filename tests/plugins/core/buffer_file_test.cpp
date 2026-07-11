@@ -105,11 +105,11 @@ int main()
     {
         auto results = std::vector<crypto_plugin::CorrelationPoiResult>{
             crypto_plugin::CorrelationPoiResult{
-                .target_byte_index = 3,
+                .unit = 3,
                 .result = torch::tensor({{{7.0, 0.625}, {2.0, -0.5}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             },
             crypto_plugin::CorrelationPoiResult{
-                .target_byte_index = 5,
+                .unit = 5,
                 .result = torch::tensor({{{1.0, 0.9}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             },
         };
@@ -132,8 +132,8 @@ int main()
                 "PoI payload result count did not round-trip")) {
             return 1;
         }
-        if (!expect(loaded_payload->result(0).target_byte_index == 3
-                    && loaded_payload->result(1).target_byte_index == 5,
+        if (!expect(loaded_payload->result(0).unit == 3
+                    && loaded_payload->result(1).unit == 5,
                 "PoI byte indexes did not round-trip")) {
             fail();
         }

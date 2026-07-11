@@ -1,8 +1,10 @@
 #include "leakflow/plugins/crypto_plot/descriptor_catalog.hpp"
 
 #include "leakflow/plot/plot_runtime.hpp"
+#include "leakflow/plot/poi_table_view.hpp"
 #include "leakflow/plot/score_view.hpp"
 #include "leakflow/plot/table_view.hpp"
+#include "leakflow/plugins/crypto_plot/poi_table_plot.hpp"
 #include "leakflow/plugins/crypto_plot/score_plot.hpp"
 #include "leakflow/plugins/crypto_plot/score_table_plot.hpp"
 #include "crypto_plot_plugin_constants.hpp"
@@ -27,6 +29,7 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 {
                     ScorePlot::descriptor(),
                     ScoreTablePlot::descriptor(),
+                    PoiTablePlot::descriptor(),
                 },
         }),
     };
@@ -64,6 +67,8 @@ void register_element_factories(
     runtime->add_view(score_view);
     auto table_view = std::make_shared<leakflow::plot::TableView>();
     runtime->add_view(table_view);
+    auto poi_table_view = std::make_shared<leakflow::plot::PoiTableView>();
+    runtime->add_view(poi_table_view);
 
     registry.register_plugin(
         plugin_descriptors().front(),
@@ -73,6 +78,9 @@ void register_element_factories(
              }},
             {"ScoreTablePlot", [view = std::move(table_view)](std::string name) {
                  return std::make_shared<ScoreTablePlot>(view, std::move(name));
+             }},
+            {"PoiTablePlot", [view = std::move(poi_table_view)](std::string name) {
+                 return std::make_shared<PoiTablePlot>(view, std::move(name));
              }},
         });
 }
