@@ -105,6 +105,7 @@ struct GlfwWindow {
     GlfwWindow(int width, int height, const std::string &title) {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+        glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE); // start maximized (width/height are the restored size)
 
         window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
         if (window == nullptr) {

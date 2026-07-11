@@ -2268,6 +2268,11 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
 
     ImGui::BeginChild("pipeline_graph_canvas", ImVec2(0.0F, canvas_height), true, ImGuiWindowFlags_HorizontalScrollbar);
 
+    // Node/link hover uses IsMouseHoveringRect, which ignores window z-order; gate it on the
+    // canvas actually being the hovered window so clicks/tooltips do not pass through a plot
+    // window sitting on top of the graph.
+    const bool canvas_hovered = ImGui::IsWindowHovered();
+
     auto *draw_list = ImGui::GetWindowDrawList();
     const auto origin = ImGui::GetCursorScreenPos();
     const auto total_rows_height = span_size(layout.max_rows, box_height, v_gap);
@@ -2364,7 +2369,7 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
         for (std::size_t s = 0; s + 1 < path.size(); ++s) {
             min_distance = std::min(min_distance, distance_to_segment(mouse, path[s], path[s + 1]));
         }
-        const auto hovered = min_distance <= 6.0F;
+        const auto hovered = canvas_hovered && min_distance <= 6.0F;
 
         const auto thickness = hovered ? 3.6F : 2.4F;
         draw_list->AddPolyline(path.data(), static_cast<int>(path.size()), color, ImDrawFlags_None, thickness);
@@ -2395,7 +2400,7 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
     for (const auto &element : topology.elements) {
         const auto min = box_min_by_name.at(element.name);
         const auto max = box_max_by_name.at(element.name);
-        const auto hovered = ImGui::IsMouseHoveringRect(min, max);
+        const auto hovered = canvas_hovered && ImGui::IsMouseHoveringRect(min, max);
         const auto pinned = runtime.is_element_pinned(element.name);
         const auto colors = klass_colors(element.klass);
         const auto border = pinned ? ImGui::GetColorU32(ImVec4(1.00F, 0.82F, 0.28F, 0.98F))
