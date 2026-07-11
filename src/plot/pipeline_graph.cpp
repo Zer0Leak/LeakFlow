@@ -2131,29 +2131,36 @@ void draw_progress_bar(ImDrawList *draw_list, ImVec2 min, ImVec2 max, double fra
 
     const auto frac = static_cast<float>(std::clamp(fraction, 0.0, 1.0));
     const auto fill_x = min.x + (max.x - min.x) * frac;
-    if (fill_x <= min.x + 0.5F) {
-        return;
+    if (fill_x > min.x + 0.5F) {
+        draw_list->AddRectFilled(min, ImVec2(fill_x, max.y), fill, rounding);
     }
-    const ImVec2 fill_max(fill_x, max.y);
-    draw_list->AddRectFilled(min, fill_max, fill, rounding);
     if (!running) {
         return;
     }
 
-    // Sweeping highlight, clipped to the filled region: a band that fades in and out at its edges.
-    draw_list->PushClipRect(min, fill_max, true);
-    const auto fill_width = fill_x - min.x;
+    // A highlight band sweeps across the WHOLE bar so the animation stays visible even at ~1%:
+    // brighter over the filled portion, a faint glow over the (dark) track. One moving band drawn
+    // in two clipped passes; each half of the band fades to transparent at its outer edge.
+    const auto bar_width = max.x - min.x;
     static constexpr auto period = 1.1F; // seconds per sweep
     const auto phase = static_cast<float>(std::fmod(ImGui::GetTime(), static_cast<double>(period))) / period;
-    const auto band = std::max(9.0F, fill_width * 0.20F);
-    const auto center = min.x - band + (fill_width + 2.0F * band) * phase;
-    const auto transparent = ImGui::GetColorU32(ImVec4(0.85F, 1.0F, 0.88F, 0.0F));
-    const auto bright = ImGui::GetColorU32(ImVec4(0.90F, 1.0F, 0.92F, 0.38F * alpha));
-    draw_list->AddRectFilledMultiColor(ImVec2(center - band, min.y), ImVec2(center, max.y),
-                                       transparent, bright, bright, transparent);
-    draw_list->AddRectFilledMultiColor(ImVec2(center, min.y), ImVec2(center + band, max.y),
-                                       bright, transparent, transparent, bright);
-    draw_list->PopClipRect();
+    const auto band = std::max(9.0F, bar_width * 0.14F);
+    const auto center = min.x - band + (bar_width + 2.0F * band) * phase;
+    const auto transparent = ImGui::GetColorU32(ImVec4(0.92F, 1.0F, 0.94F, 0.0F));
+    const auto sweep = [&](ImVec2 clip_min, ImVec2 clip_max, float strength) {
+        if (clip_max.x <= clip_min.x + 0.5F) {
+            return;
+        }
+        const auto bright = ImGui::GetColorU32(ImVec4(0.92F, 1.0F, 0.94F, strength * alpha));
+        draw_list->PushClipRect(clip_min, clip_max, true);
+        draw_list->AddRectFilledMultiColor(ImVec2(center - band, min.y), ImVec2(center, max.y),
+                                           transparent, bright, bright, transparent);
+        draw_list->AddRectFilledMultiColor(ImVec2(center, min.y), ImVec2(center + band, max.y),
+                                           bright, transparent, transparent, bright);
+        draw_list->PopClipRect();
+    };
+    sweep(ImVec2(fill_x, min.y), max, 0.14F);        // faint glow over the empty track
+    sweep(min, ImVec2(fill_x, max.y), 0.42F);        // brighter over the filled portion
 }
 
 // Floating summary window listing every element currently (or just-recently) reporting progress,
