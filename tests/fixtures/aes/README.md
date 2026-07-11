@@ -79,45 +79,78 @@ cw.program_target(scope, prog, "../../../firmware/mcu/simpleserial-aes/simpleser
 
 ## Dataset Layout
 
-Two datasets are generated beside the notebook:
+The current LeakFlow SCA storage layout uses one HDF5 file per AES key:
 
 ```text
 aes_sync_poi/
-  key_01/
-    key.pt
-    plain_texts.pt
-    traces.pt
+  key_01.h5
   ...
-  key_50/
-    key.pt
-    plain_texts.pt
-    traces.pt
+  key_50.h5
 
 aes_sync_attack/
-  key_01/
-    key.pt
-    plain_texts.pt
-    traces.pt
+  key_01.h5
   ...
-  key_30/
-    key.pt
-    plain_texts.pt
-    traces.pt
+  key_30.h5
 ```
+
+The original `key_NN/` folders containing `key.pt`, `plain_texts.pt`, and
+`traces.pt` are retained temporarily. They are the identical conversion inputs
+for the current HDF5 files and a future Zarr conversion/benchmark.
 
 Dataset sizes:
 
 - `aes_sync_poi`: 50 independent AES keys, 2,000 traces per key, 100,000 traces total.
 - `aes_sync_attack`: 30 independent AES keys, 10,000 traces per key, 300,000 traces total.
 
-Tensor formats:
+HDF5 arrays:
 
-- `key.pt`: Torch `uint8`, shape `(16,)`.
-- `plain_texts.pt`: Torch `uint8`, shape `(traces_per_key, 16)`.
-- `traces.pt`: Torch `float32`, shape `(traces_per_key, num_samples)`.
-- In this capture configuration, completed trace files were observed with `num_samples = 5000`.
+- `/keys`: `uint8 [16]`, one fixed AES key for the file.
+- `/plaintexts`: `uint8 [traces_per_key,16]`.
+- `/traces`: `float32 [traces_per_key,num_samples]`.
+- `/ciphertexts`: `uint8 [traces_per_key,16]`, derived as AES-128 encryption of
+  each stored plaintext under the stored key.
+- In this capture configuration, `num_samples = 5000`.
 
-Each `key_XX` folder contains one fixed AES key. Every trace in that folder was captured with that same key and a newly generated plaintext.
+Each numeric array records `tensor.axes`, a SHA-256 over its logical
+uncompressed bytes, logical byte count, row-alignment, and
+`origin.storage.*` settings.
+Chunked arrays default to about 1 MiB chunks with gzip level 1, byte shuffle,
+and Fletcher32; the 16-byte key remains contiguous and uncompressed.
+
+The HDF5 root attributes are `leakflow.schema=leakflow.sca.tensor-dataset` and
+`leakflow.schema.version=1`. The `/metadata` group records capture and
+provenance attributes, including:
+
+```text
+capture.source=ChipWhisperer
+capture.scope.model=ChipWhisperer-Husky
+capture.scope.gain.mode=high
+capture.scope.gain.setting=22
+capture.scope.gain.db=25.091743119266056
+capture.clock.generator.frequency_hz=7363636.363636363
+capture.sample_rate_hz=29454545.454545453
+capture.target.platform=CWHUSKY
+capture.target.crypto.algorithm=aes-128
+capture.target.crypto.implementation=TINYAES128C
+```
+
+Role-specific payload facts live on their respective arrays:
+
+```text
+/traces:      payload.leakage.inverted=false
+/keys:        payload.crypto.key.scope=fixed-per-file
+/ciphertexts: payload.crypto.ciphertext.provenance=derived
+/ciphertexts: payload.crypto.ciphertext.derivation=aes-128-encrypt(plaintext,key)
+```
+
+Source-file SHA-256 values, capture software versions/commits, key/plaintext
+generation method, missing random seed, converter/library versions, chunking,
+compression, checksum, and conversion timestamp are also recorded. The
+ciphertext provenance and derivation make explicit that this useful derived
+array is not the captured target `textout`, which was not stored.
+
+Each HDF5 file therefore contains one fixed AES key. Every trace in that file
+was captured with that same key and a newly generated plaintext.
 
 ## Randomness Of Keys And Plaintexts
 
@@ -150,7 +183,8 @@ if INVERT_TRACES:
     wave = -wave
 ```
 
-This means the saved `traces.pt` files contain `-trace.wave`, not the raw ChipWhisperer waveform.
+This means `/traces` in each HDF5 file (and `traces.pt` in the retained source
+folder) contains `-trace.wave`, not the raw ChipWhisperer waveform.
 
 Important details:
 
@@ -260,7 +294,27 @@ trace_array = np.load(poi_dir / "key_01" / "traces.pt", mmap_mode="r")
 textin_array = np.load(poi_dir / "key_01" / "plain_texts.pt", mmap_mode="r")
 ```
 
-THEN CONVERTED TO PT (TORCH LATER)
+The capture cell above documents the original acquisition. The arrays were
+later converted to Torch `.pt` source folders, then to verified sibling HDF5
+files with:
+
+```bash
+python3 -m pip install numpy torch h5py cryptography
+```
+
+```bash
+python3 traces/aes/convert_to_hdf5.py \
+  traces/aes/sync/aes_sync_poi \
+  traces/aes/sync/aes_sync_attack \
+  traces/aes/jitter/aes_jitter_poi \
+  traces/aes/jitter/aes_jitter_attack
+```
+
+The converter preserves every source folder, writes each `key_NN.h5` through a
+temporary sibling followed by atomic replacement, and reopens/verifies shapes,
+dtypes, metadata, hashes, AES ciphertexts, jitter labels, filters, and chunk
+layout before accepting the result. Use `--dry-run` to inspect the discovered
+mapping and `--overwrite` to replace already validated destination files.
 
 ## Target Firmware Source
 

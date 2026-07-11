@@ -7,7 +7,8 @@ This document defines validation expectations for LeakFlow. Phase 0 contains doc
 Use Clang as the default compiler for build and test validation. Select it explicitly during CMake configure with `CXX=clang++`.
 
 LibTorch is required from Phase 15 onward. Phase 16 fetches `cnpy++` and
-requires Boost filesystem/iostreams for `leakflow_extras`. Phase 18 fetches
+requires Boost filesystem/iostreams for `leakflow_extras`; current dataset I/O
+also requires the HDF5 development library (Ubuntu package `libhdf5-dev`). Phase 18 fetches
 `fmt` for shared terminal formatting and colors. If CMake cannot find LibTorch
 automatically, pass its installation prefix with `CMAKE_PREFIX_PATH`. The
 devcontainer installs LibTorch at `/opt/libtorch` and exports
@@ -51,7 +52,7 @@ export PATH="$PATH:/home/enagl/Documents/CISSA/Repository/LeakFlow/build"
 Common Pipelines
 
 ```bash
-leakflow run 'TorchSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
 ```
 
 If VS Code shows stale red diagnostics after a successful command-line build, reload the window or restart the language server.
@@ -81,7 +82,9 @@ Tests are grouped by the project area they validate:
 - `tests/apps/` contains CLI and application behavior tests.
 - `tests/plugins/core/` contains tests for `leakflow_plugins_core`.
 - `tests/plugins/extras/` contains tests for `leakflow_plugins_extras`.
-- `tests/fixtures/aes/` contains tiny checked-in `.pt` fixtures used by AES and Torch pipeline tests.
+- `tests/fixtures/aes/` contains a tiny checked-in `.h5` fixture used by current
+  AES dataset pipelines. Focused Torch file-I/O tests may retain their `.pt`
+  fixtures.
 
 The top-level `tests/CMakeLists.txt` delegates to those groups. Individual test
 targets should remain close to the CMake file for their group, while CTest names

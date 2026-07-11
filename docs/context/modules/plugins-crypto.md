@@ -147,7 +147,7 @@ core, base, or the generic plugin families.
 
 ## Correctness
 
-The AES PoI pipeline (`TorchFileSrc` ×3 → `Tee` → `AesLeakage` →
+The current AES PoI pipeline (`Hdf5FileSrc` named pads → `Tee`/`AesLeakage` →
 `PearsonCorrelator` → `PoiSelect` → `CorrelationPoiToPlotAnnotations` → `TracePlot`) is validated
 numerically over the checked-in `key_01`/`key_02` fixtures by
 `tests/plugins/crypto/aes_poi_correctness_test.cpp` (Phase 26), not just for

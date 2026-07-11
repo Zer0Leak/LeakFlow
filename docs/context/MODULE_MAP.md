@@ -21,7 +21,7 @@ leakflow_core
 
 leakflow_core
   -> leakflow_base
-  -> leakflow_extras
+  -> leakflow_extras (HDF5 + NumPy)
   -> leakflow_plugins_extras
 
 leakflow_log + leakflow_core + leakflow_base
@@ -47,7 +47,7 @@ leakflow_render + plugin descriptor catalogs
 ```
 
 `leakflow_log` is the lowest infrastructure layer. `leakflow_core` must remain
-free of Torch, NumPy, AES, Kyber, plotting, GUI, YAML, and dynamic plugin
+free of Torch, NumPy, HDF5, AES, Kyber, plotting, GUI, YAML, and dynamic plugin
 loading.
 
 `ElementFactoryRegistry` lives in `leakflow_core` because it only stores
@@ -111,14 +111,15 @@ Keep target configuration target-based.
 - `tests/render`: terminal/summary rendering.
 - `tests/base`: Torch tensor payloads.
 - `tests/crypto`: Hamming weight/distance and AES leakage helpers.
-- `tests/extras`: NumPy payload/loading.
+- `tests/extras`: HDF5 tensor-dataset reading and NumPy payload/loading.
 - `tests/apps`: CLI parser, expression-builder helper, CLI runner, and inspect
   tool behavior.
 - `tests/plugins/core`: generic core plugin elements (incl. `Sync`, threaded).
 - `tests/plugins/base`: Torch-backed base plugin elements (incl. `FakeLiveSrc`).
-- `tests/plugins/extras`: extras plugin elements.
+- `tests/plugins/extras`: HDF5 and NumPy extras plugin elements.
 - `tests/plugins/crypto`: AES leakage, Pearson PoI, annotation conversion, and the
   Phase 26 AES PoI numeric correctness test.
 - Plot GUI/window behavior is manual-only; `tests/plugins/plot` covers
   non-visual snapshot, graph-runtime, and descriptor behavior.
-- `tests/fixtures/aes`: deterministic AES `.pt` fixtures.
+- `tests/fixtures/aes`: deterministic AES `.h5` dataset fixture plus focused
+  legacy `.pt` fixtures.

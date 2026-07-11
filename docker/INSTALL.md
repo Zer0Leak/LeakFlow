@@ -115,9 +115,11 @@ xhost -SI:localuser:$(id -un)
 
 Inside the container, build and test the source code. Phase 15 and later require
 LibTorch; Phase 16 also requires Boost filesystem/iostreams for the cnpy++-backed
-extras layer. The LeakFlow devcontainer image installs CPU LibTorch at
-`/opt/libtorch` and exports `CMAKE_PREFIX_PATH=/opt/libtorch`, so no extra
-prefix argument is needed. It also sets quiet LeakFlow logging defaults:
+extras layer, and current tensor-dataset I/O requires the HDF5 development
+package (`libhdf5-dev`). The LeakFlow devcontainer image installs these
+dependencies and CPU LibTorch at `/opt/libtorch` and exports
+`CMAKE_PREFIX_PATH=/opt/libtorch`, so no extra prefix argument is needed. It
+also sets quiet LeakFlow logging defaults:
 
 ```bash
 LEAKFLOW_LOG_LEVEL=warning

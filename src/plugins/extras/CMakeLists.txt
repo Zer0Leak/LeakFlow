@@ -1,5 +1,8 @@
 add_library(leakflow_plugins_extras SHARED
     descriptor_catalog.cpp
+    fake_live_hdf5_src.cpp
+    hdf5_file_src.cpp
+    hdf5_source_common.cpp
     numpy_to_torch.cpp
     numpy_src.cpp
 )

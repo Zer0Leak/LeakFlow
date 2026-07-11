@@ -188,13 +188,13 @@ LeakFlow profile (wall time)
 ELEMENT             OP                   CALLS    TOTAL ms      AVG us      MAX us
 aesleakage0         leakage_compute          1      11.842     11842.0     11842.0
 aesleakage0         process                  1      12.310     12310.0     12310.0
-torchfilesrc0       process                  1       3.108      3108.0      3108.0
+hdf5filesrc0        process                  1       3.108      3108.0      3108.0
 ```
 
 Example trace export:
 
 ```bash
-leakflow run --profile-file /tmp/run.json 'TorchFileSrc(...) ! AesLeakage ! FakeSink'
+leakflow run --profile-file /tmp/run.json 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0]); FakeSink@sink; @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @sink'
 # then open /tmp/run.json in chrome://tracing or https://ui.perfetto.dev
 ```
 

@@ -28,12 +28,22 @@ support:
   plugins are split into separate source directories and CMake targets.
 - Structured buffer/payload summaries and terminal rendering are implemented.
 - `NumpySrc` exists and can load `.npy` files into a `NumpyPayload`.
+- A format-neutral `TensorDatasetReader` contract and the
+  `Hdf5TensorDatasetReader` backend exist in `leakflow_extras`. HDF5 arrays are
+  discovered with their attributes and loaded into preallocated Torch tensors
+  through row hyperslabs with logical-byte progress.
 - A direct application-callable NumPy-to-Torch conversion API exists in
   `leakflow_extras`.
 - `NumpyToTorch` exists and exposes the NumPy-to-Torch conversion through the
   extras plugin.
 - `TorchFileSrc` and `TorchFileSink` exist and load/save single Torch tensor `.pt`
   files through the base plugin.
+- `Hdf5FileSrc` exists in the extras plugin. It exposes optional named
+  `traces`, `plaintexts`, `keys`, `ciphertexts`, and `countermeasures` outputs,
+  internally reads in hyperslab batches with progress, and emits complete Torch
+  tensors/bundles.
+- `FakeLiveHdf5Src` replays aligned HDF5 row batches at an optional trace rate
+  and reports determinate trace-count progress.
 - `leakflow_log` exists and wraps spdlog behind a LeakFlow-owned logging API.
 - `leakflow_plot` exists and provides the ImGui/ImPlot plot runtime.
 - `leakflow_crypto` exists and provides Hamming weight/distance helpers plus
@@ -140,7 +150,7 @@ support:
   `docs/design/metadata_klass_taxonomy.md`.
 
 Phase 25 (control/session layer) is implemented. The full AES PoI plotting
-pipeline (`TorchFileSrc` ×3 → `Tee` → `AesLeakage` → `PearsonCorrelator` → `PoiSelect` →
+pipeline (`Hdf5FileSrc` → `Tee`/`AesLeakage` → `PearsonCorrelator` → `PoiSelect` →
 `CorrelationPoiToPlotAnnotations` → `TracePlot`) is built and runs end to end:
 manually validated in `leakflow run --graph`, with headless CLI smoke tests in
 `tests/apps` (`leakflow_cli_run_aes_leakage`, `leakflow_cli_run_pearson_poi_finder`,
@@ -188,7 +198,9 @@ Delivered: `FakeLiveSrc` (reads a Torch `.pt`, emits one `Buffer` per axis-0 row
 real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative stop,
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
-state machine), and §14 (CLI cookbook). No next default phase is set.
+state machine), and §14 (CLI cookbook). The discussed next task is a Zarr
+backend/converter and fair HDF5/Zarr comparison over the shared schema; it still
+requires an explicit request before implementation.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -200,12 +212,13 @@ remain deferred as low-priority future infrastructure.
 - `leakflow_render`: terminal styling and summary rendering.
 - `leakflow_base`: LibTorch-backed tensor payload layer.
 - `leakflow_crypto`: LibTorch-backed crypto/SCA leakage helper layer.
-- `leakflow_extras`: cnpy++-backed NumPy payload/loading layer.
+- `leakflow_extras`: format-neutral tensor-dataset reader with an HDF5 backend,
+  plus NumPy payload/loading and NumPy-to-Torch conversion.
 - `leakflow_plot`: ImGui/ImPlot plotting runtime and sessions.
 - `leakflow_plugins_core`: linked shared plugin with generic elements.
 - `leakflow_plugins_base`: linked shared plugin with Torch-backed elements.
-- `leakflow_plugins_extras`: linked shared plugin with `NumpySrc` and
-  `NumpyToTorch`.
+- `leakflow_plugins_extras`: linked shared plugin with `Hdf5FileSrc`,
+  `FakeLiveHdf5Src`, `NumpySrc`, and `NumpyToTorch`.
 - `leakflow_plugins_crypto`: linked shared plugin with `AesLeakage`,
   `AesLeakageHypothesis`, `CpaAttack`, `DpaAttack`, `AttackStats`,
   `AttackStatsToPlotAnnotations`, `PearsonCorrelator`, `PoiSelect`, and
@@ -285,6 +298,8 @@ Base:
 
 Extras:
 
+- `TensorDatasetReader` / `TensorDatasetDescriptor`
+- `Hdf5TensorDatasetReader`
 - `NumpyPayload`
 - `load_npy(path)`
 - `convert_numpy_to_torch(...)`
@@ -322,6 +337,8 @@ Base plugin elements:
 
 Extras plugin elements:
 
+- `Hdf5FileSrc`
+- `FakeLiveHdf5Src`
 - `NumpySrc`
 - `NumpyToTorch`
 
@@ -353,11 +370,13 @@ Logging:
 
 ## Not Implemented Yet
 
+- Zarr tensor-dataset reader/source/converter and the HDF5/Zarr benchmark.
 - Pipeline `Convert` element.
 - Conversion registry.
 - Dynamic pads.
 - Dynamic plugin loading.
-- Torch bundle `.pt` / `.pth` I/O.
+- Torch bundle `.pt` / `.pth` I/O (HDF5 dataset bundles are supported through
+  named source pads).
 - TorchScript module I/O elements such as future `TorchScriptSrc` and
   `TorchScriptSink`.
 - Kyber helpers or Kyber plugins.
@@ -385,11 +404,19 @@ Logging:
 - Dear ImGui and ImPlot are fetched by CMake for plotting.
 - GLFW, OpenGL, and zlib development files are required for plotting.
 - Boost filesystem/iostreams are required by `cnpy++`.
+- HDF5 is required by the extras tensor-dataset backend.
 - CUDA is optional and gated by `LEAKFLOW_WITH_CUDA`.
 
 ## Test Fixtures
 
-Tiny checked-in AES Torch fixtures live under `tests/fixtures/aes/sync/`:
+The current checked-in AES dataset fixture is:
+
+- `tests/fixtures/aes/sync/key_01.h5`, with `/traces` (`float32 [50,5000]`),
+  `/plaintexts` (`uint8 [50,16]`), `/keys` (`uint8 [16]`), and
+  `/ciphertexts` (`uint8 [50,16]`).
+
+Focused Torch file-I/O and Phase 26 correctness tests retain the original tiny
+Torch fixtures under `tests/fixtures/aes/sync/`:
 
 - `key_01/traces_first_50.pt`: `float32`, shape `(50, 5000)`.
 - `key_01/plain_texts_first_50.pt`: `uint8`, shape `(50, 16)`.
@@ -417,9 +444,9 @@ Useful CLI smoke commands:
 ./build/leakflow --no-summaries run 'FakeSrc ! Summary(always_print=true)'
 ./build/leakflow run 'FakeSrc ! Summary'
 ./build/leakflow run --graph 'FakeSrc ! Tee@t; @t.src_0 ! Summary; @t.src_1 ! FakeSink'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
 ./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchFileSink(path=/tmp/traces_first_50_roundtrip.pt)'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="AES traces",group=aes,label=trace)'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES traces",group=aes,label=trace)'
 ./build/leakflow-ls
 ./build/leakflow-ls TracePlot
 ```

@@ -75,7 +75,10 @@ increment.
 
 ## 2. Flagship — the AES PoI diamond (offline): common-origin barrier + partial rerun
 
-This is the real pipeline. It proves the default barrier and partial rerun.
+This is the original three-`TorchFileSrc` topology, retained because its three
+independent source slots make the default-barrier and partial-rerun mechanics
+explicit. Current runnable AES dataset workflows use one `Hdf5FileSrc` with
+named `traces`/`plaintexts`/`keys` pads; those pads share one producer clock.
 
 ```
 TorchFileSrc(traces)     [slot 1] ─► Tee [0 slots] ┬─► TracePlot.sink   [0 slots, sink]

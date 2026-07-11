@@ -80,14 +80,22 @@ public:
 
     std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer> input) override {
         // Exercise the progress channel: the pipeline injects a sink at start_all(), so these
-        // surface as ProgressReported events. 0.5 passes the throttle; 1.0 always flushes.
-        report_progress(0.5, "halfway");
+        // surface as ProgressReported events. A second run begins immediately after the first
+        // completion; its 0.0 must pass because start_all() resets the per-run throttle state.
+        if (process_count++ == 0) {
+            report_progress(0.5, "halfway");
+        } else {
+            report_progress(0.0, "starting again");
+        }
         report_progress(1.0, "done");
         if (input) {
             input->set_metadata("transform", "visited");
         }
         return input;
     }
+
+private:
+    std::size_t process_count = 0;
 };
 
 class SinkElement final : public leakflow::Element {
@@ -159,6 +167,7 @@ int main() {
     auto observer = std::make_shared<RecordingObserver>();
     pipeline.set_observer(observer);
     (void)pipeline.run();
+    (void)pipeline.run();
 
     bool saw_topology = false;
     bool saw_started = false;
@@ -188,6 +197,8 @@ int main() {
     // tagged with the reporting element (Pipeline injects the sink at start_all()).
     bool saw_progress_half = false;
     bool saw_progress_done = false;
+    bool saw_second_run_reset = false;
+    bool saw_first_completion = false;
     for (const auto &event : observer->events) {
         if (event.kind != leakflow::PipelineEventKind::ProgressReported || !event.progress) {
             continue;
@@ -200,9 +211,18 @@ int main() {
         }
         if (event.progress->fraction == 1.0 && event.progress->message == "done") {
             saw_progress_done = true;
+            saw_first_completion = true;
+        }
+        if (saw_first_completion && event.progress->fraction == 0.0 &&
+            event.progress->message == "starting again") {
+            saw_second_run_reset = true;
         }
     }
     if (!expect(saw_progress_half && saw_progress_done, "observer did not receive progress reports")) {
+        return 1;
+    }
+    if (!expect(saw_second_run_reset,
+                "new run did not reset progress to 0.0 immediately after completion")) {
         return 1;
     }
 

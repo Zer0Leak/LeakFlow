@@ -53,9 +53,8 @@ void print_help() {
     std::cout << "  leakflow run 'FakeSrc ! Tee@t; @t.src_0 ! Summary; @t.src_1 "
                  "! FakeSink'\n";
     std::cout << "  leakflow run "
-                 "'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/"
-                 "traces_first_50.pt) ! TracePlot(title=\"AES "
-                 "traces\")'\n";
+                 "'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); "
+                 "@data.traces ! TracePlot(title=\"AES traces\")'\n";
     std::cout << '\n';
     std::cout << "Phase 12 compatibility presets:\n";
     std::cout << "  fake-src-summary\n";

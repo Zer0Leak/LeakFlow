@@ -398,6 +398,12 @@ void Element::set_progress_sink(ProgressSink* sink)
     progress_sink_ = sink;
 }
 
+void Element::reset_progress_reporting()
+{
+    last_progress_report_ = {};
+    progress_reported_ = false;
+}
+
 void Element::report_progress(double fraction, std::string message, std::uint64_t index, std::uint64_t total)
 {
     if (progress_sink_ == nullptr) {

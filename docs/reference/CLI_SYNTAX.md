@@ -621,6 +621,36 @@ Raw byte copy with declaration statements:
 leakflow run "FileSrc@reader(path=$HOME/input.bin); FileSink@writer(path=$HOME/output.bin); @reader ! @writer"
 ```
 
+## HDF5 Dataset Pipelines
+
+`Hdf5FileSrc` loads one LeakFlow tensor-dataset file and exposes the arrays that
+are present as named Torch output pads. Because it has multiple outputs, name
+the element and link the pad you need explicitly:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
+```
+
+Multi-input AES elements can consume several pads from the same source:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0]); Summary@summary; @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
+```
+
+A jitter file exposes all nested countermeasure arrays through one tensor-bundle
+pad. The current bundle entry is `jitter.parameters.loop_iterations`:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=traces/aes/jitter/aes_jitter_poi/key_01.h5); @data.countermeasures ! Summary ! FakeSink'
+```
+
+The fake-live equivalent emits aligned row batches and reports determinate
+progress because the selected trace count is known:
+
+```bash
+leakflow run --graph 'FakeLiveHdf5Src@data(path=tests/fixtures/aes/sync/key_01.h5,batch_size=1,trace_rate=10.0); @data.traces ! TracePlot(title="AES live replay",update_mode=accumulate)'
+```
+
 ## Torch Tensor Pipelines
 
 Load one `.pt` tensor file as a `TorchTensorPayload` and summarize it:

@@ -83,6 +83,12 @@ imgui.ini
 #
 
 traces
+!traces/
+traces/*
+!traces/aes/
+traces/aes/*
+!traces/aes/convert_to_hdf5.py
+!traces/aes/TENSOR_DATASET_SCHEMA.md
 papers
 project_size_report.md
 reports

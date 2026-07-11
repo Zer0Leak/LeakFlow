@@ -1,5 +1,7 @@
 include(FetchContent)
 
+find_package(HDF5 REQUIRED COMPONENTS C)
+
 if(POLICY CMP0167)
     set(CMAKE_POLICY_DEFAULT_CMP0167 NEW)
 endif()
@@ -17,8 +19,10 @@ set_target_properties(cnpy++ PROPERTIES
 )
 
 add_library(leakflow_extras
+    hdf5_tensor_dataset_reader.cpp
     numpy_payload.cpp
     numpy_to_torch.cpp
+    tensor_dataset_reader.cpp
 )
 target_compile_features(leakflow_extras PUBLIC cxx_std_23)
 target_include_directories(leakflow_extras
@@ -29,6 +33,8 @@ target_link_libraries(leakflow_extras
     PUBLIC
         leakflow_base
         cnpy++
+    PRIVATE
+        HDF5::HDF5
 )
 set_target_properties(leakflow_extras PROPERTIES
     CXX_EXTENSIONS OFF

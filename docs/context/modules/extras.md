@@ -1,7 +1,8 @@
 # Extras Module Context
 
-Use this for application-callable helpers above the base layer, especially NumPy
-payload/loading and future conversion helpers.
+Use this for application-callable file-format helpers above the base layer,
+especially the format-neutral tensor-dataset reader, HDF5 loading, NumPy
+payload/loading, and conversion helpers.
 
 ## Files
 
@@ -16,6 +17,7 @@ Sources:
 Tests:
 
 - `tests/extras`
+- generated temporary `.h5` fixtures inside HDF5 reader tests
 - generated temporary `.npy` fixtures inside NumPy tests
 
 ## Target
@@ -27,12 +29,24 @@ Tests:
 `leakflow_extras` depends on:
 
 - `leakflow_base`
+- HDF5
 - `cnpy++`
 
 `leakflow_base` must not depend on `leakflow_extras`.
 
 ## Current API
 
+- `TensorDatasetReader`: format-neutral interface for describing groups/arrays
+  and reading one array into a preallocated Torch tensor.
+- `TensorDatasetDescriptor`, `TensorArrayDescriptor`, and
+  `TensorGroupDescriptor`: deterministic storage-independent schema views,
+  including paths, dtypes, shapes, attributes, and row-alignment.
+- `TensorReadOptions`: row selection plus `io_batch_rows` for internal I/O.
+- `TensorReadProgress`: logical uncompressed bytes and rows read. Progress is
+  reported after each hyperslab and ends exactly at completion.
+- `Hdf5TensorDatasetReader`: recursively discovers HDF5 groups, arrays, and
+  attributes; supports `uint8` and `float32`; fills a single preallocated CPU
+  Torch tensor through batched hyperslab reads.
 - `NumpyPayload`: thin wrapper around `cnpypp::NpyArray`.
 - `load_npy(path)`: loads one `.npy` file into `NumpyPayload`.
 - `NumpyPayload::caps()`: exposes concrete runtime caps metadata using the
@@ -61,6 +75,59 @@ Rejected:
 - structured arrays,
 - Fortran-order arrays,
 - unsupported dtype shapes.
+
+## LeakFlow Tensor-Dataset Schema
+
+The AES HDF5 conversion uses these format-neutral logical paths:
+
+```text
+/traces                                      float32 [trace,sample]
+/plaintexts                                  uint8   [trace,byte]
+/keys                                        uint8   [key_byte]
+/ciphertexts                                 uint8   [trace,byte]
+/metadata                                    attributes
+/countermeasures/jitter/parameters/
+  loop_iterations                            uint8   [trace]  # jitter files only
+```
+
+Synchronized captures have no `/countermeasures` group. The ciphertext is
+derived with AES-128 from the stored plaintext/key and carries explicit
+derivation provenance. The jitter loop count is an exact label derived as
+`plaintext[0] & 0x0f`; it is grouped under `countermeasures` so future masking,
+shuffling, injected-noise, or region annotations can coexist without adding
+top-level special cases.
+
+The root carries `leakflow.schema=leakflow.sca.tensor-dataset` and
+`leakflow.schema.version=1`. Array attributes include:
+
+- `tensor.axes`,
+- `leakflow.logical_sha256` and `leakflow.logical_nbytes`,
+- `leakflow.row_aligned` (`false` for the fixed `/keys`, `true` for per-trace
+  arrays, including the rank-1 jitter label),
+- `origin.storage.layout`, `origin.storage.chunk_shape`,
+  `origin.storage.compression`, `origin.storage.compression_level`,
+  `origin.storage.shuffle`, and `origin.storage.checksum`.
+
+Common capture, source, and converter facts are attributes on `/metadata`.
+Role-specific payload facts stay with their arrays: `/traces` records
+`payload.leakage.inverted=false`, `/keys` records
+`payload.crypto.key.scope=fixed-per-file`,
+`/ciphertexts` records its derived AES-128 provenance/derivation, and the jitter
+parameter records its exact derivation provenance. Every array records its
+actual `origin.storage.*` encoding.
+
+Default conversion storage is gzip level 1 with byte shuffle and Fletcher32 for
+chunked arrays, targeting about 1 MiB chunks; the tiny fixed key remains
+contiguous and uncompressed.
+
+## Future Zarr Parity
+
+`TensorDatasetReader` is deliberately independent of HDF5. A future
+`ZarrTensorDatasetReader` should expose the same logical paths, shapes,
+attributes, row selections, and logical-byte progress. This gives HDF5 and Zarr
+a fair comparison seam: identical source tensors/hashes and chunk shapes,
+uncompressed-vs-uncompressed and matching gzip settings, plus a separate
+format-native optimized comparison.
 
 ## Conversion Status
 

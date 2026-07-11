@@ -21,6 +21,7 @@ RUN apt-get update \
         libboost-iostreams-dev \
         libgl1-mesa-dev \
         libglfw3-dev \
+        libhdf5-dev \
         zlib1g-dev \
         lldb \
         ninja-build \

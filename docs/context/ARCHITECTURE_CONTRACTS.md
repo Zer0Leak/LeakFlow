@@ -24,6 +24,7 @@ compact context version for day-to-day development.
 
 - Torch / LibTorch
 - NumPy / cnpy++
+- HDF5
 - AES
 - Kyber / ML-KEM
 - CUDA implementation details
@@ -97,8 +98,8 @@ Every stamped metadata key carries its group as the leading segment;
 - `capture.*` — durable acquisition/dataset/countermeasure facts
   (`capture.source`, `capture.sample_rate_hz`, `capture.dataset.name`,
   `capture.countermeasure.*`).
-- `origin.*` — per-input provenance (`origin.file.*`, `origin.role`, and fused
-  `origin.<pad>.*`).
+- `origin.*` — per-input and storage provenance (`origin.file.*`,
+  `origin.storage.*`, `origin.role`, and fused `origin.<pad>.*`).
 - `payload.*` — producer assertions about the current bytes (`payload.leakage.*`,
   `payload.crypto.*`, `payload.poi.*`, `payload.conversion.*`, ...). Unprefixed or
   unknown keys also resolve here, so `leakflow_core` stays domain-free.

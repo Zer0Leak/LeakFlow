@@ -6,8 +6,23 @@ This file is the compact phase/task brief for Codex.
 
 **No active phase.** The live-streaming phase and the AES CPA/report slice are
 implemented. Pick the next phase explicitly before starting work (candidates:
-dedicated CPA score/rank/heatmap plots, overlay/correlation plot polish, or
-Kyber / ML-KEM hypotheses).
+the discussed Zarr parity/conversion benchmark, dedicated CPA
+score/rank/heatmap plots, overlay/correlation plot polish, or Kyber / ML-KEM
+hypotheses).
+
+The post-phase **HDF5 tensor-dataset slice** is implemented:
+
+- one format-neutral LeakFlow SCA schema used by the HDF5 backend and reserved
+  for future Zarr parity,
+- `TensorDatasetReader` plus `Hdf5TensorDatasetReader`,
+- `Hdf5FileSrc` with complete-tensor output and chunk-level logical-byte
+  progress,
+- `FakeLiveHdf5Src` with aligned batches, pacing, and determinate row progress,
+- optional `traces`, `plaintexts`, `keys`, `ciphertexts`, and
+  `countermeasures` output pads,
+- one `key_NN.h5` per converted capture folder; the original folders are
+  retained temporarily so HDF5 and Zarr can later be benchmarked from identical
+  inputs.
 
 The **execution timing telemetry / profiling phase** is implemented (the
 "Execution Timing Telemetry and Trace Export" phase in `ROADMAP.md`): per-element
@@ -33,6 +48,8 @@ Recently completed, in order:
   vector clock subsumes their offline role.
 - **Live phase** (the largest) — implemented and green; offline unchanged.
   Authoritative design: `docs/design/dataflow_sync_model.md` §10–14.
+- **HDF5 tensor-dataset slice** — format-neutral reader seam, offline and fake
+  live HDF5 sources, dataset conversion/schema, and current CLI examples.
 
 Generic `Convert`, the conversion registry, dedicated CPA score/rank/heatmap
 plots, and Kyber hypotheses remain deferred.

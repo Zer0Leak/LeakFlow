@@ -48,7 +48,7 @@ Every stamped metadata key carries its group as the **leading segment**, so
 
 ```text
 leading capture.*    -> capture   (capture.source, capture.sample_rate_hz, capture.dataset.name, capture.countermeasure.*)
-leading origin.*     -> origin    (origin.file.*, origin.role, and fused origin.<pad>.*)
+leading origin.*     -> origin    (origin.file.*, origin.storage.*, origin.role, and fused origin.<pad>.*)
 leading routing.*    -> routing   (routing.element, routing.branch.*)
 leading payload.*    -> payload   (payload.leakage.*, payload.crypto.*, payload.poi.*, payload.conversion.*, ...)
 DEFAULT (unprefixed) -> payload
@@ -58,8 +58,9 @@ DEFAULT (unprefixed) -> payload
 vocabulary. Unprefixed or unknown keys default to payload, the safe choice for
 facts that should ride pass-through but not be forwarded onto derived buffers.
 
-Every element stamps keys in the prefixed form (for example `TorchFileSrc` stamps
-`origin.file.path` and `payload.leakage.inverted`). Hand-typed CLI metadata
+Every element stamps keys in the prefixed form (for example `Hdf5FileSrc`
+stamps `origin.file.path` and imports `payload.leakage.inverted` from the
+`/traces` array). Hand-typed CLI metadata
 annotations should follow the same convention; a bare annotation key resolves to
 payload.
 
@@ -173,8 +174,9 @@ the producer. If a generic statistical routine consumes from two producers, both
 producers emit the same general caps so the routine is a drop-in slot. Therefore
 LeakFlow does **not** mint a distinct caps type per semantic role.
 
-- Raw loaders (`TorchFileSrc`, `NumpySrc`) emit the generic transport caps
-  (`leakflow/torch-tensor`, `leakflow/numpy-array`). Semantic meaning is layered
+- Raw loaders (`Hdf5FileSrc`, `TorchFileSrc`, `NumpySrc`) emit generic transport
+  caps (`leakflow/torch-tensor`, `leakflow/torch-tensor-bundle`, or
+  `leakflow/numpy-array`). Semantic meaning is layered
   downstream by a semantic-aware element, a CLI caps annotation, or the first
   SCA-aware element, using the existing generic↔concrete compatibility rule.
 - Numeric semantics (traces, leakage, labels, scores, key-as-bytes,
@@ -253,9 +255,11 @@ feeding a `Predict` brick.
 | `FileSrc` / `FileSink` | `Source/File/Bytes`, `Sink/File/Bytes` | raw byte file I/O |
 | `BufferFileSrc` / `BufferFileSink` | `Source/File/Buffer`, `Sink/File/Buffer` | persisted full-buffer I/O |
 | `TorchFileSrc` / `TorchFileSink` | `Source/File/Torch`, `Sink/File/Torch` | Torch tensor file I/O |
+| `Hdf5FileSrc` | `Source/File/HDF5` | multi-array HDF5 tensor-dataset source |
 | `NumpySrc` | `Source/File/Numpy` | NumPy array file source |
 | `FakeSrc` / `FakeSink` | `Source/Test/Fake`, `Sink/Test/Fake` | test/smoke fixtures |
 | `FakeLiveSrc` | `Source/Live/Torch` | deterministic live-like Torch source |
+| `FakeLiveHdf5Src` | `Source/Live/HDF5` | deterministic aligned HDF5 batch replay |
 | `AppSrc` | `Source/App/Torch` | application-pushed Torch frames |
 | `Tee` | `PassThrough/Flow/Tee` | branch/fan-out flow control |
 | `Queue` | `PassThrough/Flow/Queue` | thread/rate-decoupling flow control |

@@ -1180,6 +1180,7 @@ void Pipeline::start_all() {
         log::write(element->make_log_record(log::LogLevel::Debug, "pipeline", "starting element"));
         element->set_stop_token(stop_token_);
         element->set_progress_sink(progress_sink_.get());
+        element->reset_progress_reporting();
         element->start();
         emit(PipelineEvent{
             .kind = PipelineEventKind::ElementStarted,

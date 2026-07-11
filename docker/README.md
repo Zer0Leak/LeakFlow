@@ -13,6 +13,7 @@ The container uses an official NVIDIA CUDA Ubuntu 26.04 base image so later phas
 - `git`
 - CPU LibTorch installed under `/opt/libtorch`
 - Boost filesystem/iostreams development packages for cnpy++ extras support
+- HDF5 development package (`libhdf5-dev`) for tensor-dataset loading
 - GLFW, OpenGL, and zlib development packages for Phase 22 plotting support
 - `python3`
 - `clang-format`
@@ -45,8 +46,10 @@ See `docs/guides/LOGGING.md` for more examples.
 
 ## Validate Inside The Container
 
-Phase 15 and later require LibTorch. The devcontainer installs CPU LibTorch at
-`/opt/libtorch` and exports `CMAKE_PREFIX_PATH=/opt/libtorch`. Run these
+Phase 15 and later require LibTorch, and current extras dataset I/O requires the
+HDF5 development package (`libhdf5-dev`). The devcontainer installs both, with
+CPU LibTorch at `/opt/libtorch`, and exports
+`CMAKE_PREFIX_PATH=/opt/libtorch`. Run these
 commands from the repository root inside the devcontainer:
 
 ```bash

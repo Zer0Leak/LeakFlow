@@ -54,7 +54,7 @@ is reserved for `--graph` runs.
 buffer downstream.
 
 ```bash
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="AES traces",group=aes,label=trace)'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES traces",group=aes,label=trace)'
 ```
 
 `TracePlot` accepts CPU `float32` `TorchTensorPayload` input with rank 1 or rank
@@ -119,7 +119,7 @@ fixture and opens a rank-2 trace browser with a trace slider.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="AES trace browser",label=trace,trace_index=4,color=#4aa3ffe6,line_width=1.4)'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES trace browser",label=trace,trace_index=4,color=#4aa3ffe6,line_width=1.4)'
 ```
 
 ### No Explicit Group
@@ -129,7 +129,7 @@ using the default plot group internally.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="Single AES trace",label=sample_trace,trace_index=12,x_label=sample,y_label=leakage,line_width=1.8)'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="Single AES trace",label=sample_trace,trace_index=12,x_label=sample,y_label=leakage,line_width=1.8)'
 ```
 
 ### Time Axis
@@ -139,7 +139,7 @@ as time. The value below treats the fixture as a 1 GHz capture.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="AES trace in time",label=time_trace,trace_index=8,x_axis=time_us,sample_rate_hz=1000000000,x_label="time (us)",y_label=leakage,line_width=1.5)'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES trace in time",label=time_trace,trace_index=8,x_axis=time_us,sample_rate_hz=1000000000,x_label="time (us)",y_label=leakage,line_width=1.5)'
 ```
 
 ### Grouped Overlay
@@ -151,7 +151,7 @@ values make the initial overlay compare two traces.
 
 ```bash
 ./build/leakflow run --graph \
-  'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Tee@t; @t.src_0 ! TracePlot(title="AES overlay comparison",group=aes_overlay,label=trace_0,trace_index=0,color="rgba(0,0,255,0.9)",line_width=1.6); @t.src_1 ! TracePlot(group=aes_overlay,label=trace_18,trace_index=18,layout=overlay,color="rgba(255,128,0,0.55)",line_width=1.2)'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); Tee@t; @data.traces ! @t; @t.src_0 ! TracePlot(title="AES overlay comparison",group=aes_overlay,label=trace_0,trace_index=0,color="rgba(0,0,255,0.9)",line_width=1.6); @t.src_1 ! TracePlot(group=aes_overlay,label=trace_18,trace_index=18,layout=overlay,color="rgba(255,128,0,0.55)",line_width=1.2)'
 ```
 
 ### Grouped Stacked View
@@ -162,7 +162,7 @@ TracePlot starts another panel.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Tee@t; @t.src_0 ! TracePlot(title="AES stacked comparison",group=aes_stack,label=early_trace,trace_index=2,line_width=1.5); @t.src_1 ! TracePlot(group=aes_stack,label=late_trace,trace_index=24,layout=stacked,line_width=1.5)'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); Tee@t; @data.traces ! @t; @t.src_0 ! TracePlot(title="AES stacked comparison",group=aes_stack,label=early_trace,trace_index=2,line_width=1.5); @t.src_1 ! TracePlot(group=aes_stack,label=late_trace,trace_index=24,layout=stacked,line_width=1.5)'
 ```
 
 ## Library Loop

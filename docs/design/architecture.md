@@ -59,30 +59,51 @@ The current local trace root is:
 traces/
 ```
 
-The current real trace dataset is an AES ChipWhisperer synchronized dataset stored as NumPy `.npy` files:
+The current real trace datasets are AES ChipWhisperer synchronized and
+global-initial-jitter captures. Current LeakFlow dataset files use one HDF5 file
+per key:
 
 ```text
-traces/aes/sync/
-  README.md
-  aes_sync_poi/
-  aes_sync_attack/
+traces/aes/
+  sync/
+    aes_sync_poi/key_01.h5 ... key_50.h5
+    aes_sync_attack/key_01.h5 ... key_30.h5
+  jitter/
+    aes_jitter_poi/key_01.h5 ... key_50.h5
+    aes_jitter_attack/key_01.h5 ... key_30.h5
 ```
 
-Each AES key folder contains:
+Each file contains the format-neutral LeakFlow SCA array hierarchy:
 
 ```text
-key.npy
-plain_texts.npy
-traces.npy
+/traces
+/plaintexts
+/keys
+/ciphertexts
+/metadata
 ```
 
 The documented array formats are:
 
 ```text
-key.npy          NumPy uint8   shape (16,)
-plain_texts.npy  NumPy uint8   shape (traces_per_key, 16)
-traces.npy       NumPy float32 shape (traces_per_key, num_samples)
+/traces       float32 [traces_per_key, num_samples]
+/plaintexts   uint8   [traces_per_key, 16]
+/keys         uint8   [16]
+/ciphertexts  uint8   [traces_per_key, 16]
 ```
+
+Jitter files additionally contain
+`/countermeasures/jitter/parameters/loop_iterations`, an exact per-trace label
+derived from `plaintext[0] & 0x0f`. Synchronized files contain no
+`/countermeasures` group. Dataset/capture facts live as attributes, and every
+numeric array records `tensor.axes`, logical size/hash, row-alignment, and
+storage layout. The HDF5 layout is intentionally format-neutral so a future
+Zarr backend can expose the same paths, attributes, reader properties, pads,
+and progress semantics.
+
+The original `key_NN/` Torch folders are retained temporarily as identical
+source material for a later HDF5/Zarr comparison; current CLI dataset workflows
+use `key_NN.h5`.
 
 In the current capture configuration, `num_samples = 5000`.
 
@@ -385,13 +406,16 @@ libleakflow_base
 leakflow_extras
   Optional extra file-format payload helpers.
   Layered above libleakflow_base.
-  Depends on cnpy++ for NumPy .npy loading.
+  Depends on HDF5 for tensor-dataset loading and cnpy++ for NumPy .npy loading.
+  Defines a format-neutral TensorDatasetReader seam for future Zarr parity.
   NumpyPayload wraps cnpypp::NpyArray.
 
 leakflow_plugins_extras
   Extras file-format and bridge elements:
+    Hdf5FileSrc
+    FakeLiveHdf5Src
     NumpySrc
-    future NumPy-to-Torch conversion elements
+    NumpyToTorch
 
 NumpySrc declares concrete `leakflow/numpy-array` source caps and emits buffers
 with `Caps("leakflow/numpy-array")`. Generic sink pads declared as

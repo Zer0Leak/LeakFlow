@@ -1,7 +1,7 @@
 # AES Leakage Model Guide
 
-These examples use the checked-in AES Torch tensor fixtures under
-`tests/fixtures/aes/sync/key_01/` and run from the repository root.
+These examples use the checked-in AES HDF5 fixture
+`tests/fixtures/aes/sync/key_01.h5` and run from the repository root.
 
 ## Build First
 
@@ -16,10 +16,23 @@ The tiny fixture set is intentionally small enough for CTest and CLI smoke
 commands:
 
 ```text
-tests/fixtures/aes/sync/key_01/traces_first_50.pt       float32 [50,5000]
-tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt  uint8   [50,16]
-tests/fixtures/aes/sync/key_01/key_first_50.pt          uint8   [16]
+tests/fixtures/aes/sync/key_01.h5
+  /traces       float32 [50,5000]
+  /plaintexts   uint8   [50,16]
+  /keys         uint8   [16]
+  /ciphertexts  uint8   [50,16]
 ```
+
+`Hdf5FileSrc` exposes each present array through a named Torch output pad. One
+source therefore keeps the trace, plaintext, key, and ciphertext tensors under
+the same dataset provenance. Only the pads connected by the pipeline need to be
+used.
+
+In `--graph` runs, `Hdf5FileSrc` updates the element progress bar while it fills
+the final tensors through internal HDF5 hyperslabs; downstream receives the
+complete tensors only after loading reaches 100%. `FakeLiveHdf5Src` instead
+updates progress after each emitted batch because it knows the selected trace
+count in advance.
 
 `AesLeakage` computes AES Hamming-weight leakage targets. For each selected
 state byte, the output payload is a Torch `uint8` tensor with shape `[B,N,C]`:
@@ -72,7 +85,7 @@ This computes the default `HW(y)` leakage for AES state byte `0`.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[0]); Summary@summary(level=3); @traces_src ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @summary'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0]); Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
 ```
 
 Expected summary facts include:
@@ -92,7 +105,7 @@ trace matrix has the same `N` as the plaintexts.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[0,1,2,3]); Summary@summary(level=3); @traces_src ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @summary'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0,1,2,3]); Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
 ```
 
 Expected summary facts include:
@@ -110,7 +123,7 @@ Set `channels` to emit more than one target channel per byte. This command emits
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[0],channels=[HW(m),HW(y)]); Summary@summary(level=3); @traces_src ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @summary'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0],channels=[HW(m),HW(y)]); Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
 ```
 
 Expected summary facts include:
@@ -127,7 +140,7 @@ Omit `byte_indexes` to compute all 16 AES state bytes. With the default
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage; Summary@summary(level=3); @traces_src ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @summary'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage; Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
 ```
 
 ## Save Leakage Tensor
@@ -136,7 +149,7 @@ Use `TorchFileSink` to write the `[B,N,C]` leakage tensor as a `.pt` file.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[0,1]); TorchFileSink@sink(path=/tmp/aes_leakage_bytes_0_1.pt); @traces_src ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @sink'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0,1]); TorchFileSink@sink(path=/tmp/aes_leakage_bytes_0_1.pt); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @sink'
 ```
 
 Python can load the result with:
@@ -192,14 +205,14 @@ and `5`. It opens the interactive TracePlot window after pipeline execution.
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[10],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @plot.annotations'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); Tee@traces; AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[10],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); TracePlot@plot(title="AES bytes 3 and 5 PoIs",group=aes,label=traces,x_axis=sample); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @plot.sink; @traces.src_2 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @plot.annotations'
 ```
 
 For a non-GUI smoke check, stop at `Summary` after the annotation converter:
 
 ```bash
 ./build/leakflow run \
-  'TorchFileSrc@traces_src(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt); Tee@traces; TorchFileSrc@plain_src(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt); TorchFileSrc@key_src(path=tests/fixtures/aes/sync/key_01/key_first_50.pt); AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=3); @traces_src ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @plain_src ! @leakage.plaintexts; @key_src ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary'
+  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); Tee@traces; AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=3); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary'
 ```
 
 Expected summary facts include:

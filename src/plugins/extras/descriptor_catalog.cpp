@@ -1,5 +1,7 @@
 #include "leakflow/plugins/extras/descriptor_catalog.hpp"
 
+#include "leakflow/plugins/extras/fake_live_hdf5_src.hpp"
+#include "leakflow/plugins/extras/hdf5_file_src.hpp"
 #include "leakflow/plugins/extras/numpy_src.hpp"
 #include "leakflow/plugins/extras/numpy_to_torch.hpp"
 
@@ -22,11 +24,13 @@ std::vector<PluginDescriptor> plugin_descriptors()
             .owner = extras_author,
             .author = extras_author,
             .license = extras_license,
-            .purpose = "shared library with extras file-format and conversion pipeline elements",
-            .keywords = {"extras", "numpy", "npy", "source", "conversion", "torch"},
+            .purpose = "shared library with extras file-format, dataset, and conversion pipeline elements",
+            .keywords = {"extras", "numpy", "npy", "hdf5", "h5", "source", "conversion", "torch"},
             .elements = {
                 NumpySrc::descriptor(),
                 NumpyToTorch::descriptor(),
+                Hdf5FileSrc::descriptor(),
+                FakeLiveHdf5Src::descriptor(),
             },
         }),
     };
@@ -57,6 +61,8 @@ void register_element_factories(ElementFactoryRegistry& registry)
         {
             {"NumpySrc", [](std::string name) { return std::make_shared<NumpySrc>(std::move(name)); }},
             {"NumpyToTorch", [](std::string name) { return std::make_shared<NumpyToTorch>(std::move(name)); }},
+            {"Hdf5FileSrc", [](std::string name) { return std::make_shared<Hdf5FileSrc>(std::move(name)); }},
+            {"FakeLiveHdf5Src", [](std::string name) { return std::make_shared<FakeLiveHdf5Src>(std::move(name)); }},
         });
 }
 

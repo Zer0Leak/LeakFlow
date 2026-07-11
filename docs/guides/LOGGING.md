@@ -179,7 +179,7 @@ level 2, and a `PlotAnnotationPayload` shows the count plus only the first
 annotation until level 3:
 
 ```bash
-./build/leakflow --log-level info --log-color never --summary-level 1 run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! FakeSink'
+./build/leakflow --log-level info --log-color never --summary-level 1 run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! FakeSink'
 ```
 
 Level 2 (the default) adds per-type internals such as a tensor's
@@ -187,21 +187,21 @@ Level 2 (the default) adds per-type internals such as a tensor's
 than just the first:
 
 ```bash
-./build/leakflow --log-level info --log-color never --summary-level 2 run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! FakeSink'
+./build/leakflow --log-level info --log-color never --summary-level 2 run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! FakeSink'
 ```
 
 The environment variable is equivalent, with the CLI flag taking precedence:
 
 ```bash
-LEAKFLOW_SUMMARY_LEVEL=1 ./build/leakflow --log-level info run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! FakeSink'
+LEAKFLOW_SUMMARY_LEVEL=1 ./build/leakflow --log-level info run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! FakeSink'
 ```
 
 ## Full Fixture Examples
 
-Log Torch loading only:
+Log HDF5 dataset loading only:
 
 ```bash
-./build/leakflow --log-level info --log-color never --log-filter 'element=TorchFileSrc' run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+./build/leakflow --log-level info --log-color never --log-filter 'element=Hdf5FileSrc' run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
 ```
 
 Log Torch conversion only:
@@ -213,7 +213,7 @@ Log Torch conversion only:
 Log all source elements and suppress summaries:
 
 ```bash
-./build/leakflow --log-level debug --log-color never --log-filter 'element_kclass=Source' --no-summaries run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! FakeSink'
+./build/leakflow --log-level debug --log-color never --log-filter 'element_kclass=Source' --no-summaries run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! FakeSink'
 ```
 
 Save a Torch tensor while logging sink events:

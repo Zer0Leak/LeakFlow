@@ -5,8 +5,10 @@ Copy and paste these commands from the repository root.
 ## Host CPU Build
 
 Use this for normal host development. This does not require CUDA, but LibTorch
-is required from Phase 15 onward. Phase 22 plotting also needs GLFW, OpenGL,
-and zlib development files on the host. CMake fetches `fmt`, `spdlog`, Dear
+is required from Phase 15 onward. HDF5 tensor-dataset I/O needs the HDF5
+development files (Ubuntu package `libhdf5-dev`), and Phase 22 plotting also
+needs GLFW, OpenGL, and zlib
+development files on the host. CMake fetches `fmt`, `spdlog`, Dear
 ImGui, ImPlot, and other source dependencies during configure. Replace
 `CMAKE_PREFIX_PATH` if your LibTorch installation lives somewhere else.
 
@@ -79,9 +81,9 @@ Pipeline syntax examples:
 ./build/leakflow run 'FakeSrc(caps_type=sca/test)[caps=sca/fake]{dataset=smoke} ! Summary(level=3)'
 ./build/leakflow run 'FakeSrc ! Tee@t; @t.src_0 ! Summary(level=2); @t.src_1 ! FakeSink'
 ./build/leakflow run --telemetry 'FakeSrc ! Summary'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchConvert(dtype=float32,device=cpu) ! Summary(level=3) ! FakeSink'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TracePlot(title="AES traces",group=aes,label=trace)'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TorchConvert(dtype=float32,device=cpu) ! Summary(level=3) ! FakeSink'
+./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES traces",group=aes,label=trace)'
 ```
 
 ## Build The Docker Image

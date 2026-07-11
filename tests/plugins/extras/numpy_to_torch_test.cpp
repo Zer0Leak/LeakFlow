@@ -178,7 +178,7 @@ int main()
     if (!expect(descriptors.size() == 1, "extras plugin descriptor count changed")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 2, "extras element descriptor count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 4, "extras element descriptor count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[1].type_name == "NumpyToTorch",

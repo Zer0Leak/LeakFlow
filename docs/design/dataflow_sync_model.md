@@ -789,7 +789,10 @@ These are intentionally **restart-scoped** (read once when the run starts):
 ## 14. CLI cookbook — drive every feature from the command line
 
 Recipes to *experiment* with sync, queues, threads, states, drops, and provenance.
-All use the checked-in fixtures (no hardware):
+This section deliberately retains the focused `.pt`/`FakeLiveSrc` fixtures to
+teach that element and to create independent sources for `Sync`. Current AES
+dataset workflows use `Hdf5FileSrc` or `FakeLiveHdf5Src` instead. All recipes
+below use checked-in fixtures (no hardware):
 
 - `tests/fixtures/aes/sync/key_01/traces_first_50.pt` — a `[50, 5000]` trace file.
 - `tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt` — a `[50, 16]` file.

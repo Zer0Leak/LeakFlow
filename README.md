@@ -3,7 +3,7 @@
 LeakFlow is a side-channel analysis framework for reproducible experiments with traces, leakage models, points of interest, labels, attacks, statistical analysis, plots, and optional learning workflows.
 
 This repository contains the full pipeline framework through the live-streaming
-phase: the modular core, the LibTorch-backed numeric layer, NumPy/Torch I/O,
+phase: the modular core, the LibTorch-backed numeric layer, HDF5/NumPy/Torch I/O,
 logging, the ImGui/ImPlot plotting and pipeline-graph runtime, the AES crypto
 plugin (leakage + Pearson PoI), the `PipelineSession` control layer, vector-clock
 buffer provenance, and threaded live streaming with a `Sync` element and a
@@ -28,23 +28,25 @@ The repository contains:
 - A LibTorch-backed `leakflow_base` library with tensor/tensor-bundle payloads and
   generic statistics; a `leakflow_crypto` helper library (Hamming/S-box/AES
   leakage).
-- A cnpy++-backed `leakflow_extras` library with a NumPy `.npy` payload, loader,
-  and NumPy-to-Torch conversion.
+- A `leakflow_extras` library with a format-neutral tensor-dataset reader
+  contract, HDF5 loading, a NumPy `.npy` payload/loader, and NumPy-to-Torch
+  conversion.
 - The `leakflow_log` logging layer and `leakflow_render` terminal/summary
   rendering.
 - The `leakflow_plot` ImGui/ImPlot plotting + pipeline-graph runtime.
 - The `leakflow` CLI runner and `leakflow-ls` descriptor inspection tool.
 - Linked plugin libraries: `leakflow_plugins_core` (incl. `Sync`),
   `leakflow_plugins_base` (`TorchFileSrc`, `TorchConvert`, `TorchFileSink`,
-  `FakeLiveSrc`), `leakflow_plugins_extras` (`NumpySrc`, `NumpyToTorch`),
+  `FakeLiveSrc`), `leakflow_plugins_extras` (`Hdf5FileSrc`,
+  `FakeLiveHdf5Src`, `NumpySrc`, `NumpyToTorch`),
   `leakflow_plugins_crypto` (`AesLeakage`, `PearsonPoiFinder`,
   `CorrelationPoiToPlotAnnotations`), and `leakflow_plugins_plot` (`TracePlot`).
-- Tiny checked-in AES Torch tensor fixtures under `tests/fixtures/aes/sync/`.
+- A tiny checked-in AES HDF5 dataset fixture under `tests/fixtures/aes/sync/`.
 - A Docker/devcontainer toolchain and an optional CUDA smoke executable gated by
   `LEAKFLOW_WITH_CUDA`.
 
-It does not yet contain Kyber, YAML/config running, a standalone GUI frontend, CPA
-/ attack-report elements, dataset-specific loaders, or dynamic plugin loading.
+It does not yet contain Kyber, YAML/config running, a standalone GUI frontend,
+or dynamic plugin loading.
 
 The active guidance files are:
 
@@ -87,7 +89,7 @@ src/log/                                   leakflow_log logging layer
 src/render/                               shared terminal render sources
 src/base/                                 LibTorch-backed base tensor payload library
 src/crypto/                                leakflow_crypto leakage helper library
-src/extras/                               cnpy++-backed extras NumPy payload library
+src/extras/                               extras HDF5/NumPy dataset and conversion library
 src/plot/                                  leakflow_plot ImGui/ImPlot runtime
 src/apps/common/                          app-only reusable helpers
 src/apps/leakflow/                        leakflow executable and CLI helper library
@@ -103,14 +105,14 @@ tests/log/                                 logging tests
 tests/render/                              render tests
 tests/base/                               base tensor payload tests
 tests/crypto/                              crypto helper tests
-tests/extras/                             extras NumPy payload tests
+tests/extras/                             extras HDF5/NumPy reader and payload tests
 tests/apps/                               CLI and application tests
 tests/plugins/core/                       core plugin element tests (incl. Sync)
 tests/plugins/base/                       base plugin element tests (incl. FakeLiveSrc)
 tests/plugins/extras/                     extras plugin element tests
 tests/plugins/crypto/                      crypto plugin element + AES PoI correctness
 tests/plugins/plot/                        plot plugin element tests
-tests/fixtures/aes/                       tiny checked-in AES Torch tensor fixtures
+tests/fixtures/aes/                       tiny checked-in AES HDF5 dataset fixture
 ```
 
 Subdirectory CMake files inherit top-level options through normal
@@ -131,7 +133,7 @@ LeakFlow includes a small GStreamer-inspired CLI language for manual pipelines:
 leakflow run 'FakeSrc ! Summary'
 leakflow run 'FakeSrc(caps_type=sca/test)[caps=sca/fake]{dataset=smoke} ! Summary(level=3)'
 leakflow run 'FakeSrc ! Tee@t; @t.src_0 ! Summary(level=2); @t.src_1 ! FakeSink'
-leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
 ```
 
 See `docs/reference/CLI_SYNTAX.md` for the complete target syntax, including element names, properties, pad references, pad caps annotations, metadata annotations, Tee branching, quoting, and examples.
@@ -146,7 +148,8 @@ When a phase is requested, read `AGENTS.md` and `ROADMAP.md` before making chang
 
 Use Clang as the default C++ compiler and Ninja as the default generator.
 LibTorch is required from Phase 15 onward. Phase 16 fetches `cnpy++` and
-requires Boost filesystem/iostreams for `leakflow_extras`. Phase 18 fetches
+requires Boost filesystem/iostreams for `leakflow_extras`; current dataset I/O
+also requires the HDF5 development library (Ubuntu package `libhdf5-dev`). Phase 18 fetches
 `fmt` for shared terminal formatting and colors. If CMake cannot find LibTorch
 automatically, pass its installation prefix with `CMAKE_PREFIX_PATH`:
 

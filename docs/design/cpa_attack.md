@@ -596,8 +596,8 @@ Validation:
 - AES fixture smoke pipeline:
 
 ```text
-TorchFileSrc@traces -> CpaAttack.features
-TorchFileSrc@plaintexts -> AesLeakageHypothesis -> CpaAttack.hypotheses
+@data.traces (Hdf5FileSrc) -> CpaAttack.features
+@data.plaintexts (Hdf5FileSrc) -> AesLeakageHypothesis -> CpaAttack.hypotheses
 CpaAttack -> Summary
 ```
 
@@ -685,14 +685,13 @@ Add a Kyber / ML-KEM hypothesis element only after the AES CPA path is stable.
 Non-live AES CPA:
 
 ```text
-TorchFileSrc@traces_src(path=traces/aes/sync/aes_sync_attack/key_01/traces.pt);
-TorchFileSrc@plain_src(path=traces/aes/sync/aes_sync_attack/key_01/plain_texts.pt);
+Hdf5FileSrc@data(path=traces/aes/sync/aes_sync_attack/key_01.h5);
 AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[0]);
 CpaAttack@attack(score_method=max_abs,score_channels=guess_dependent);
 Summary@summary(level=2);
 
-@traces_src ! @attack.features;
-@plain_src ! @hyp.plaintexts;
+@data.traces ! @attack.features;
+@data.plaintexts ! @hyp.plaintexts;
 @hyp ! @attack.hypotheses;
 @attack ! @summary
 ```
@@ -700,9 +699,8 @@ Summary@summary(level=2);
 With known-key stats:
 
 ```text
-TorchFileSrc@key_src(path=traces/aes/sync/aes_sync_attack/key_01/key.pt);
 AttackStats@stats;
 
 @attack ! @stats.scores;
-@key_src ! @stats.truth
+@data.keys ! @stats.truth
 ```

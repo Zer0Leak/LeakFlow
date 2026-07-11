@@ -29,6 +29,11 @@ CLI/inspect files if affected:
 
 ## Current Elements
 
+- `Hdf5FileSrc`: reads one LeakFlow tensor-dataset HDF5 file in internal
+  hyperslab batches, then emits one complete Torch payload per available named
+  output.
+- `FakeLiveHdf5Src`: replays aligned row batches from the same file as a finite,
+  paced live source.
 - `NumpySrc`: loads one `.npy` file through `leakflow_extras::load_npy(path)`
   and emits a `NumpyPayload`.
 - `NumpyToTorch`: converts a `NumpyPayload` into a `TorchTensorPayload` through
@@ -36,6 +41,93 @@ CLI/inspect files if affected:
 
 The descriptor catalog assembles the linked plugin descriptor and registers
 matching element factories with `ElementFactoryRegistry`.
+
+## HDF5 Source Pads And Metadata
+
+Both HDF5 sources declare optional outputs:
+
+| Pad | Payload | Logical HDF5 path |
+|---|---|---|
+| `traces` | `TorchTensorPayload` | `/traces` |
+| `plaintexts` | `TorchTensorPayload` | `/plaintexts` |
+| `keys` | `TorchTensorPayload` | `/keys` |
+| `ciphertexts` | `TorchTensorPayload` | `/ciphertexts` |
+| `countermeasures` | `TorchTensorBundlePayload` | `/countermeasures/**` |
+
+The current countermeasure bundle entry is
+`jitter.parameters.loop_iterations`. New countermeasure arrays become named
+bundle entries instead of new source pads.
+
+Every emitted buffer imports common capture/origin attributes from `/metadata`
+and the applicable array's role-specific payload attributes, then stamps:
+
+- `origin.file.format=hdf5`, `origin.file.path`, and `origin.file.size`,
+- `origin.hdf5.dataset`,
+- `origin.role`,
+- `origin.row.begin`, `origin.row.count`, and `origin.row.total`,
+- `tensor.axes` for ordinary tensors,
+- `payload.countermeasure.tensors` and `payload.countermeasure.dims` for the
+  countermeasure bundle.
+
+Ordinary dimension values are `trace,sample`, `trace,byte`, and `key_byte`.
+The current bundle dimension value is
+`jitter.parameters.loop_iterations=trace`.
+
+Typical offline syntax:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
+```
+
+Typical aligned multi-input syntax:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0]); Summary@summary; @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
+```
+
+Jitter files expose their nested labels as a tensor bundle:
+
+```bash
+leakflow run 'Hdf5FileSrc@data(path=traces/aes/jitter/aes_jitter_poi/key_01.h5); @data.countermeasures ! Summary ! FakeSink'
+```
+
+## Hdf5FileSrc Contract
+
+Properties:
+
+- `path`: required `.h5`/`.hdf5` path,
+- `device=cpu`: target Torch device after CPU reads,
+- `row_start=0`,
+- `row_count=0`: all remaining rows,
+- `io_batch_rows=256`: internal hyperslab size.
+
+`io_batch_rows` controls storage I/O only. `Hdf5FileSrc` preallocates each final
+tensor, fills it slice by slice, and emits only complete tensors. Its existing
+`ProgressReported` events use aggregate logical uncompressed bytes across the
+supported arrays: opening at `0`, chunk updates below `1`, and exact completion
+at `1`. The `storage_read` scope starts after file inspection and measures
+output materialization, including storage reads and device transfer. Use the
+built-in `process` duration for end-to-end HDF5/Zarr benchmark comparisons.
+
+## FakeLiveHdf5Src Contract
+
+`FakeLiveHdf5Src` shares `path`, `device`, `row_start`, `row_count`, and
+`io_batch_rows`, and adds:
+
+- `batch_size=1`: trace rows emitted together,
+- `trace_rate=0`: traces per second; zero disables pacing.
+
+It emits all available pads for the same row selection together, so every batch
+shares vector-clock provenance and downstream joins use the default barrier.
+The fixed `/keys` tensor accompanies each batch without being row-sliced. A
+smaller final batch is allowed. The source reports trace-based determinate
+progress after every emission and exact completion when the selected row count
+is exhausted. It honors cooperative stop, resets on `start()`, is live, and is
+not cache-replayable.
+
+```bash
+leakflow run --graph 'FakeLiveHdf5Src@data(path=tests/fixtures/aes/sync/key_01.h5,batch_size=1,trace_rate=10.0); @data.traces ! TracePlot(title="AES live replay",update_mode=accumulate)'
+```
 
 ## NumpySrc Contract
 
@@ -47,15 +139,15 @@ matching element factories with `ElementFactoryRegistry`.
   numeric caps parameters such as `dtype`, `device=cpu`, `rank`, and `shape`,
 - attaches `NumpyPayload`,
 - stamps minimal provenance metadata:
-  - `element`,
-  - `file.path`,
-  - `file.size`.
+  - `routing.element`,
+  - `origin.file.path`,
+  - `origin.file.size`.
 
 Do not duplicate backend-specific NumPy facts such as word size, labels, or
 memory order into caps or metadata. Those belong in `NumpyPayload` summaries or
 backend-specific code.
 
-Semantic facts such as `role=traces`, `algorithm=aes`, or capture details belong
+Semantic facts such as `origin.role=traces`, `payload.crypto.algorithm=aes`, or capture details belong
 to application annotations or future dataset-specific elements.
 
 ## NumpyToTorch Contract
@@ -72,10 +164,19 @@ to application annotations or future dataset-specific elements.
 - attaches `TorchTensorPayload`,
 - preserves incoming buffer metadata,
 - stamps conversion metadata:
-  - `conversion.id=numpy-to-torch`,
-  - `conversion.element=<element instance name>`.
+  - `payload.conversion.id=numpy-to-torch`,
+  - `payload.conversion.element=<element instance name>`.
 
 The conversion implementation id is `numpy-to-torch`.
+
+## Future Zarr Direction
+
+The next discussed file-format task is Zarr parity. `ZarrFileSrc` and its fake
+live equivalent should reuse the format-neutral reader contract and preserve
+the HDF5 sources' pad names, properties, row selections, Torch payloads,
+logical-byte/trace-count progress, and `storage_read` profiling scope. Format
+comparison should therefore measure the backend rather than different pipeline
+semantics.
 
 ## Future Convert Direction
 

@@ -37,7 +37,7 @@ Instead:
 - For base Torch plugin work, read `docs/context/modules/plugins-base.md`, then
   inspect only `include/leakflow/plugins/base`, `src/plugins/base`,
   `tests/plugins/base`, and CLI files if command syntax is affected.
-- For extras NumPy/conversion work, read `docs/context/modules/extras.md`, then
+- For extras HDF5/NumPy/conversion work, read `docs/context/modules/extras.md`, then
   inspect only `include/leakflow/extras`, `src/extras`, `tests/extras`, and the
   relevant extras plugin files if pipeline exposure is requested.
 - For core plugin work, read `docs/context/modules/plugins-core.md`, then inspect

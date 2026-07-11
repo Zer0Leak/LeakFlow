@@ -178,6 +178,7 @@ private:
 
     void lock_name();
     void set_live_driven(bool live_driven);
+    void reset_progress_reporting();
 
     // Lazily-bound duration accumulator for a declared duration channel; null when
     // the channel was not declared. process_stat() is the built-in "process" timer
