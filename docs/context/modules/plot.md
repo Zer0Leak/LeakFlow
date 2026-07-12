@@ -308,7 +308,10 @@ The progress-bar activity sweep animates only while the session is **Running**;
 the sweep is suppressed while **Paused**, **Idle**, or **Stopped**.
 Long synchronous elements can park at cooperative internal checkpoints while
 Paused. Cancellation is a distinct terminal progress outcome: the graph shows a
-static red 100% bar briefly, and canceled output is not routed to plot sinks.
+static red 100% bar briefly, and canceled output is not routed to plot sinks. On
+pipeline teardown, the graph also converts any progress entry still marked Active
+to this terminal cancellation state, so an incomplete reporter cannot leave a
+frozen progress window behind; explicit Completed and Cancelled outcomes are kept.
 
 Example of a downstream-only rerun:
 

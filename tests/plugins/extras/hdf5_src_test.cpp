@@ -6,6 +6,7 @@
 
 #include <hdf5.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -243,7 +244,9 @@ int main() {
   // and exact completion through the observer-facing progress channel.
   if (!expect(load_progress.reports.size() >= 2 &&
                   load_progress.reports.front().fraction == 0.0 &&
-                  load_progress.reports.back().fraction == 1.0,
+                  load_progress.reports.back().fraction == 1.0 &&
+                  load_progress.reports.back().status ==
+                      leakflow::ProgressStatus::Completed,
               "HDF5 source did not report chunked load progress")) {
     return 1;
   }
@@ -305,6 +308,42 @@ int main() {
     return 1;
   }
 
+  // Stop from an internal read checkpoint, after the first hyperslab has
+  // completed but before its Active progress can be published. No partial
+  // output or later Completed report may escape.
+  plugin::Hdf5FileSrc stopped_during_read;
+  stopped_during_read.set_property("path", sync_path.string());
+  stopped_during_read.set_property("io_batch_rows", std::int64_t{1});
+  CapturingProgressSink stopped_during_read_progress;
+  stopped_during_read.set_progress_sink(&stopped_during_read_progress);
+  std::stop_source read_stopper;
+  stopped_during_read.set_stop_token(read_stopper.get_token());
+  auto checkpoint_calls = 0;
+  stopped_during_read.set_pause_waiter(
+      [&read_stopper, &checkpoint_calls](std::stop_token) {
+        ++checkpoint_calls;
+        if (checkpoint_calls == 2) {
+          read_stopper.request_stop();
+        }
+      });
+  const auto interrupted_outputs = stopped_during_read.process_pads({});
+  if (!expect(interrupted_outputs.empty() && checkpoint_calls == 2,
+              "HDF5 source did not stop from its read checkpoint")) {
+    return 1;
+  }
+  if (!expect(
+          !stopped_during_read_progress.reports.empty() &&
+              stopped_during_read_progress.reports.back().status ==
+                  leakflow::ProgressStatus::Cancelled &&
+              std::ranges::none_of(
+                  stopped_during_read_progress.reports,
+                  [](const auto &report) {
+                    return report.status == leakflow::ProgressStatus::Completed;
+                  }),
+          "interrupted HDF5 read reported completion")) {
+    return 1;
+  }
+
   plugin::FakeLiveHdf5Src live;
   live.set_property("path", jitter_path.string());
   live.set_property("row_start", std::int64_t{1});
@@ -344,17 +383,50 @@ int main() {
   if (!expect(live_progress.reports.front().fraction == 0.0 &&
                   live_progress.reports.back().fraction == 1.0 &&
                   live_progress.reports.back().index == 3 &&
-                  live_progress.reports.back().total == 3,
+                  live_progress.reports.back().total == 3 &&
+                  live_progress.reports.back().status ==
+                      leakflow::ProgressStatus::Completed,
               "fake-live HDF5 progress was wrong")) {
     return 1;
   }
+  const auto completed_live_report_count = live_progress.reports.size();
   live.stop();
+  if (!expect(live_progress.reports.size() == completed_live_report_count,
+              "fake-live teardown duplicated completed progress")) {
+    return 1;
+  }
   live.start();
   if (!expect(!live.at_end_of_stream(),
               "fake-live HDF5 source did not restart")) {
     return 1;
   }
   live.stop();
+
+  // Stop between process callbacks closes an incomplete replay explicitly. This
+  // is the path used when the executor wakes a source blocked at a Queue boundary:
+  // no next process_pads call exists in which the source could observe the token.
+  plugin::FakeLiveHdf5Src stopped_between_batches;
+  stopped_between_batches.set_property("path", jitter_path.string());
+  stopped_between_batches.set_property("batch_size", std::int64_t{1});
+  CapturingProgressSink stopped_between_progress;
+  stopped_between_batches.set_progress_sink(&stopped_between_progress);
+  stopped_between_batches.start();
+  const auto before_stop = stopped_between_batches.process_pads({});
+  if (!expect(!before_stop.empty() &&
+                  !stopped_between_batches.at_end_of_stream(),
+              "fake-live stop fixture did not leave an incomplete replay")) {
+    return 1;
+  }
+  stopped_between_batches.stop();
+  if (!expect(!stopped_between_progress.reports.empty() &&
+                  stopped_between_progress.reports.back().fraction == 1.0 &&
+                  stopped_between_progress.reports.back().index == 1 &&
+                  stopped_between_progress.reports.back().total == 5 &&
+                  stopped_between_progress.reports.back().status ==
+                      leakflow::ProgressStatus::Cancelled,
+              "stopping between fake-live batches did not report cancellation")) {
+    return 1;
+  }
 
   // A live source honors a stop requested before a batch read: it aborts the
   // read and emits no batch (Cancelled) instead of replaying rows.
@@ -377,7 +449,58 @@ int main() {
               "stopped fake-live HDF5 source should report cancellation")) {
     return 1;
   }
+  const auto stopped_live_report_count = stopped_live_progress.reports.size();
   stopped_live.stop();
+  if (!expect(stopped_live_progress.reports.size() ==
+                  stopped_live_report_count,
+              "fake-live teardown duplicated a cancellation report")) {
+    return 1;
+  }
+
+  // A stop raised by the pacing checkpoint cancels the just-read batch before
+  // it is committed: the cursor stays put, no output travels, and success is
+  // never reported.
+  plugin::FakeLiveHdf5Src stopped_during_pace;
+  stopped_during_pace.set_property("path", jitter_path.string());
+  stopped_during_pace.set_property("batch_size", std::int64_t{1});
+  stopped_during_pace.set_property("trace_rate", 1.0);
+  CapturingProgressSink stopped_during_pace_progress;
+  stopped_during_pace.set_progress_sink(&stopped_during_pace_progress);
+  std::stop_source pace_stopper;
+  stopped_during_pace.set_stop_token(pace_stopper.get_token());
+  auto pace_checkpoint_called = false;
+  stopped_during_pace.set_pause_waiter(
+      [&pace_stopper, &pace_checkpoint_called](std::stop_token) {
+        pace_checkpoint_called = true;
+        pace_stopper.request_stop();
+      });
+  stopped_during_pace.start();
+  const auto paced_batch = stopped_during_pace.process_pads({});
+  if (!expect(pace_checkpoint_called && paced_batch.empty() &&
+                  !stopped_during_pace.at_end_of_stream(),
+              "stopped fake-live pacing committed a batch")) {
+    return 1;
+  }
+  if (!expect(
+          !stopped_during_pace_progress.reports.empty() &&
+              stopped_during_pace_progress.reports.back().status ==
+                  leakflow::ProgressStatus::Cancelled &&
+              std::ranges::none_of(
+                  stopped_during_pace_progress.reports,
+                  [](const auto &report) {
+                    return report.status == leakflow::ProgressStatus::Completed;
+                  }),
+          "stopped fake-live pacing reported completion")) {
+    return 1;
+  }
+  const auto stopped_pace_report_count =
+      stopped_during_pace_progress.reports.size();
+  stopped_during_pace.stop();
+  if (!expect(stopped_during_pace_progress.reports.size() ==
+                  stopped_pace_report_count,
+              "fake-live pacing teardown duplicated cancellation")) {
+    return 1;
+  }
 
   std::filesystem::remove(sync_path);
   std::filesystem::remove(jitter_path);

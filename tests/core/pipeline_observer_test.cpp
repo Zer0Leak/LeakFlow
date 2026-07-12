@@ -6,7 +6,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -111,6 +113,22 @@ public:
     }
 
     bool received = false;
+};
+
+class ProgressProbeElement final : public leakflow::Element {
+public:
+    explicit ProgressProbeElement(std::string name) : Element(std::move(name)) {
+        set_element_identity("ProgressProbe", "Source/Test");
+    }
+
+    std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer>) override {
+        return std::nullopt;
+    }
+
+    void publish(double fraction, std::string message, std::uint64_t index, std::uint64_t total,
+                 leakflow::ProgressStatus status = leakflow::ProgressStatus::Active) {
+        report_progress(fraction, std::move(message), index, total, status);
+    }
 };
 
 } // namespace
@@ -263,6 +281,85 @@ int main() {
     if (!expect(buffers.at("transform.out -> sink.in").buffer.payload_summary.front()
                     == "result=(byte_index: 3, shape: [2, 1, 2])",
                 "observer buffer payload summary was wrong")) {
+        return 1;
+    }
+
+    // A requested Stop closes only progress entries that are still Active. Explicit terminal
+    // reports remain unchanged, cancellation precedes Pipeline Stopped, and the detached sink
+    // suppresses any report attempted after teardown.
+    leakflow::Pipeline stop_pipeline;
+    auto active = std::make_shared<ProgressProbeElement>("active");
+    auto completed = std::make_shared<ProgressProbeElement>("completed");
+    auto explicitly_cancelled = std::make_shared<ProgressProbeElement>("explicitly_cancelled");
+    stop_pipeline.add(active);
+    stop_pipeline.add(completed);
+    stop_pipeline.add(explicitly_cancelled);
+    auto stop_observer = std::make_shared<RecordingObserver>();
+    stop_pipeline.set_observer(stop_observer);
+    std::stop_source stop_source;
+    stop_pipeline.set_stop_token(stop_source.get_token());
+    stop_pipeline.start_all();
+    active->publish(0.4, "working", 4, 10);
+    completed->publish(1.0, "complete", 10, 10, leakflow::ProgressStatus::Completed);
+    explicitly_cancelled->publish(0.6, "explicit cancel", 6, 10, leakflow::ProgressStatus::Cancelled);
+    stop_source.request_stop();
+    stop_pipeline.stop_all();
+    const auto event_count_after_stop = stop_observer->events.size();
+    // A terminal report bypasses Element's 33 ms Active-report throttle, so this specifically
+    // proves teardown detached/closed the sink rather than accidentally coalescing the call.
+    active->publish(1.0, "late completion", 10, 10, leakflow::ProgressStatus::Completed);
+
+    std::uint64_t stopped_sequence = 0;
+    int active_cancelled_count = 0;
+    int completed_count = 0;
+    int completed_cancelled_count = 0;
+    int explicit_cancelled_count = 0;
+    for (const auto &event : stop_observer->events) {
+        if (event.kind == leakflow::PipelineEventKind::Stopped) {
+            stopped_sequence = event.sequence;
+            continue;
+        }
+        if (event.kind != leakflow::PipelineEventKind::ProgressReported || !event.progress) {
+            continue;
+        }
+        if (!expect(stopped_sequence == 0, "progress event arrived after Pipeline Stopped")) {
+            return 1;
+        }
+        if (event.progress->element.element_name == "active"
+            && event.progress->status == leakflow::ProgressStatus::Cancelled) {
+            ++active_cancelled_count;
+            if (!expect(event.progress->fraction == 1.0 && event.progress->message == "cancelled"
+                            && event.progress->index == 4 && event.progress->total == 10,
+                        "synthesized cancellation did not preserve active progress counters")) {
+                return 1;
+            }
+        }
+        if (event.progress->element.element_name == "completed") {
+            if (event.progress->status == leakflow::ProgressStatus::Completed) {
+                ++completed_count;
+            } else if (event.progress->status == leakflow::ProgressStatus::Cancelled) {
+                ++completed_cancelled_count;
+            }
+        }
+        if (event.progress->element.element_name == "explicitly_cancelled"
+            && event.progress->status == leakflow::ProgressStatus::Cancelled) {
+            ++explicit_cancelled_count;
+        }
+    }
+    if (!expect(stopped_sequence != 0 && active_cancelled_count == 1,
+                "requested Stop did not emit exactly one cancellation for active progress")) {
+        return 1;
+    }
+    if (!expect(completed_count == 1 && completed_cancelled_count == 0,
+                "requested Stop replaced or duplicated explicit completion")) {
+        return 1;
+    }
+    if (!expect(explicit_cancelled_count == 1,
+                "requested Stop duplicated explicit cancellation")) {
+        return 1;
+    }
+    if (!expect(stop_observer->events.size() == event_count_after_stop,
+                "detached progress sink forwarded a report after Pipeline Stopped")) {
         return 1;
     }
 

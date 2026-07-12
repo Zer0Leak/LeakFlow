@@ -174,6 +174,9 @@ ElementOutputs Hdf5FileSrc::process_pads(ElementInputs inputs) {
         reader, options,
         [this, &total_bytes](const detail::AggregateReadProgress &update) {
           total_bytes = update.total_logical_bytes;
+          if (!cooperative_checkpoint()) {
+            return false;
+          }
           const auto fraction =
               update.total_logical_bytes == 0
                   ? 0.0
@@ -190,6 +193,11 @@ ElementOutputs Hdf5FileSrc::process_pads(ElementInputs inputs) {
           return cooperative_checkpoint();
         });
   } catch (const leakflow::extras::TensorReadCancelled &) {
+    report_progress(1.0, "cancelled", total_bytes, total_bytes,
+                    leakflow::ProgressStatus::Cancelled);
+    return {};
+  }
+  if (!cooperative_checkpoint()) {
     report_progress(1.0, "cancelled", total_bytes, total_bytes,
                     leakflow::ProgressStatus::Cancelled);
     return {};

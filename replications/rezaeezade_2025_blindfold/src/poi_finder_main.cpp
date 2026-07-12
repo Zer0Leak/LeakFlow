@@ -1,8 +1,8 @@
 // Rezaeezade et al. (2025), "Breaking the Blindfold" -- PoI finder replication.
 //
-// This app aggregates the Pearson PoI finder across many capture folders. Each
-// key_* folder holds one aligned (traces, plaintexts, key) capture. We feed one
-// folder per streaming step into an AppSrc (application-fed live source); because
+// This app aggregates the Pearson PoI finder across many capture files. Each
+// key_NN.h5 file holds one aligned (traces, plaintexts, key) capture. We feed one
+// file per streaming step into an AppSrc (application-fed live source); because
 // AppSrc declares itself live, PearsonCorrelator auto-selects its incremental mode
 // and folds every folder into running correlation moments -- it never resets
 // between folders, only at start(). PoiSelect (stateless) then picks the top-k PoIs.
@@ -19,13 +19,14 @@
 //
 // Usage:
 //   leakflow_rezaeezade_poi_finder [--graph] [ROOT_DIR]
-//   ROOT_DIR defaults to traces/aes/sync/aes_sync_poi and must contain key_* dirs,
-//   each with traces.pt, plain_texts.pt, and key.pt.
+//   ROOT_DIR defaults to traces/aes/sync/aes_sync_poi and must contain key_*.h5
+//   files, each with /traces, /plaintexts, and /keys datasets.
 
 #include "leakflow_cli.hpp"
 
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/pipeline_session.hpp"
+#include "leakflow/extras/hdf5_tensor_dataset_reader.hpp"
 #include "leakflow/log/logger.hpp"
 #include "leakflow/plot/pipeline_graph.hpp"
 #include "leakflow/plot/plot_runtime.hpp"
@@ -35,9 +36,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <string>
 #include <torch/torch.h>
@@ -49,9 +48,9 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr auto default_root = "traces/aes/sync/aes_sync_poi";
-constexpr auto traces_file = "traces.pt";
-constexpr auto plaintexts_file = "plain_texts.pt";
-constexpr auto key_file = "key.pt";
+constexpr auto traces_dataset = "/traces";
+constexpr auto plaintexts_dataset = "/plaintexts";
+constexpr auto keys_dataset = "/keys";
 
 void log_info(std::string message, std::map<std::string, std::string> fields = {})
 {
@@ -63,16 +62,6 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
     });
 }
 
-[[nodiscard]] torch::Tensor load_pt(const fs::path& path)
-{
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("could not open " + path.string());
-    }
-    std::vector<char> data{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-    return torch::pickle_load(data).toTensor();
-}
-
 [[nodiscard]] leakflow::Buffer tensor_buffer(torch::Tensor tensor)
 {
     auto payload = std::make_shared<leakflow::base::TorchTensorPayload>(std::move(tensor));
@@ -81,21 +70,21 @@ void log_info(std::string message, std::map<std::string, std::string> fields = {
     return buffer;
 }
 
-// Discover key_* capture folders under root, sorted for determinism.
-[[nodiscard]] std::vector<fs::path> capture_folders(const fs::path& root)
+// Discover key_*.h5 capture files under root, sorted for determinism.
+[[nodiscard]] std::vector<fs::path> capture_files(const fs::path& root)
 {
     if (!fs::is_directory(root)) {
         throw std::runtime_error("root is not a directory: " + root.string());
     }
 
-    std::vector<fs::path> folders;
+    std::vector<fs::path> files;
     for (const auto& entry : fs::directory_iterator(root)) {
-        if (entry.is_directory() && fs::exists(entry.path() / traces_file)) {
-            folders.push_back(entry.path());
+        if (entry.is_regular_file() && entry.path().extension() == ".h5") {
+            files.push_back(entry.path());
         }
     }
-    std::sort(folders.begin(), folders.end());
-    return folders;
+    std::sort(files.begin(), files.end());
+    return files;
 }
 
 // The analysis core is identical in every mode. With plotting on (--graph) a third
@@ -200,20 +189,20 @@ int main(int argc, char** argv)
                           << "  --auto-start         with --graph, begin running on open (else Stopped)\n"
                           << "  --save-correlation P  persist the aggregate correlation to the HDF5 file P\n"
                           << "                       (reload later with BufferFileSrc to re-select PoIs offline)\n"
-                          << "  ROOT_DIR             default: " << default_root << " (key_* dirs with "
-                          << traces_file << ", " << plaintexts_file << ", " << key_file << ")\n";
+                          << "  ROOT_DIR             default: " << default_root
+                          << " (key_*.h5 files with /traces, /plaintexts, /keys)\n";
                 return 0;
             } else {
                 root = arg;
             }
         }
 
-        const auto folders = capture_folders(root);
-        if (folders.empty()) {
-            throw std::runtime_error("no capture folders with " + std::string(traces_file) + " under " + root.string());
+        const auto files = capture_files(root);
+        if (files.empty()) {
+            throw std::runtime_error("no key_*.h5 capture files under " + root.string());
         }
-        log_info("aggregating PoI over capture folders",
-                 {{"folders", std::to_string(folders.size())}, {"root", root.string()}});
+        log_info("aggregating PoI over capture files",
+                 {{"files", std::to_string(files.size())}, {"root", root.string()}});
 
         auto built = leakflow::cli::build_builtin_pipeline_from_expression(
             pipeline_expression(graph, save_correlation_path.has_value()));
@@ -234,22 +223,26 @@ int main(int argc, char** argv)
         // PoI accumulates across frames. AppSrc owns the index and resets it to 0 on
         // start(), so Stop -> Start re-streams. nullopt = end of stream.
         app_src->set_frame_producer(
-            [folders](std::size_t index) -> std::optional<std::vector<leakflow::Buffer>> {
-                if (index >= folders.size()) {
+            [files](std::size_t index) -> std::optional<std::vector<leakflow::Buffer>> {
+                if (index >= files.size()) {
                     return std::nullopt;
                 }
-                const auto& folder = folders[index];
-                auto traces = tensor_buffer(load_pt(folder / traces_file));
+                const auto& file = files[index];
+                // One key_NN.h5 per fold: read its aligned /traces, /plaintexts, /keys
+                // through the same HDF5 reader Hdf5FileSrc uses. Whole-array reads
+                // (default options) mirror the old one-tensor-per-.pt-file loads.
+                leakflow::extras::Hdf5TensorDatasetReader reader(file);
+                auto traces = tensor_buffer(reader.read_tensor(traces_dataset));
                 traces.set_metadata("capture.source", "ChipWhisperer");
-                traces.set_metadata("origin.folder", folder.filename().string());
+                traces.set_metadata("origin.file", file.filename().string());
 
                 std::vector<leakflow::Buffer> frame;
                 frame.reserve(3);
                 frame.push_back(std::move(traces));
-                frame.push_back(tensor_buffer(load_pt(folder / plaintexts_file)));
-                frame.push_back(tensor_buffer(load_pt(folder / key_file)));
-                log_info("streaming capture folder",
-                         {{"folder", folder.filename().string()}, {"index", std::to_string(index)}});
+                frame.push_back(tensor_buffer(reader.read_tensor(plaintexts_dataset)));
+                frame.push_back(tensor_buffer(reader.read_tensor(keys_dataset)));
+                log_info("streaming capture file",
+                         {{"file", file.filename().string()}, {"index", std::to_string(index)}});
                 return frame;
             });
 

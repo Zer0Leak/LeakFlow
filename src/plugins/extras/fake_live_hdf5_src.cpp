@@ -54,20 +54,23 @@ namespace {
 // supplied checkpoint (Element::cooperative_checkpoint): it parks while paused
 // and returns false on stop, so a paused live source freezes between batches
 // and a stopped one unwinds the pacing sleep promptly.
-void pace(const std::function<bool()> &checkpoint, double trace_rate,
-          std::uint64_t rows) {
+[[nodiscard]] bool pace(const std::function<bool()> &checkpoint,
+                        double trace_rate, std::uint64_t rows) {
   if (trace_rate <= 0.0 || rows == 0) {
-    return;
+    return true;
   }
 
   const auto deadline =
       std::chrono::steady_clock::now() +
       std::chrono::duration<double>(static_cast<double>(rows) / trace_rate);
   constexpr auto poll = std::chrono::milliseconds(10);
-  while (checkpoint()) {
+  while (true) {
+    if (!checkpoint()) {
+      return false;
+    }
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) {
-      break;
+      return true;
     }
     std::this_thread::sleep_for(std::min(
         poll,
@@ -83,6 +86,7 @@ struct FakeLiveHdf5Src::Impl {
   std::unique_ptr<leakflow::extras::Hdf5TensorDatasetReader> reader;
   std::uint64_t total_rows = 0;
   std::uint64_t emitted_rows = 0;
+  bool terminal_progress_reported = false;
 };
 
 ElementDescriptor FakeLiveHdf5Src::descriptor() {
@@ -208,6 +212,7 @@ void FakeLiveHdf5Src::start() {
   impl_->emitted_rows = 0;
   if (impl_->total_rows == 0) {
     report_progress(1.0, "HDF5 live replay is empty", 0, 0);
+    impl_->terminal_progress_reported = true;
   } else {
     report_progress(0.0, "Starting HDF5 live replay", 0, impl_->total_rows);
   }
@@ -263,12 +268,23 @@ ElementOutputs FakeLiveHdf5Src::process_pads(ElementInputs inputs) {
                                     static_cast<double>(impl_->total_rows);
     report_progress(fraction, "cancelled", impl_->emitted_rows,
                     impl_->total_rows, leakflow::ProgressStatus::Cancelled);
+    impl_->terminal_progress_reported = true;
+    return {};
+  }
+
+  const auto report_cancelled = [this]() {
+    report_progress(1.0, "cancelled", impl_->emitted_rows,
+                    impl_->total_rows, leakflow::ProgressStatus::Cancelled);
+    impl_->terminal_progress_reported = true;
+  };
+  if (!pace([this] { return cooperative_checkpoint(); },
+            double_property_or(*this, "trace_rate", 0.0), batch_rows) ||
+      !cooperative_checkpoint()) {
+    report_cancelled();
     return {};
   }
 
   impl_->emitted_rows += batch_rows;
-  pace([this] { return cooperative_checkpoint(); },
-       double_property_or(*this, "trace_rate", 0.0), batch_rows);
   const auto fraction = impl_->total_rows == 0
                             ? 1.0
                             : static_cast<double>(impl_->emitted_rows) /
@@ -281,6 +297,9 @@ ElementOutputs FakeLiveHdf5Src::process_pads(ElementInputs inputs) {
       "Replaying HDF5 traces: " + std::to_string(impl_->emitted_rows) + "/" +
           std::to_string(impl_->total_rows),
       impl_->emitted_rows, impl_->total_rows, status);
+  if (status == leakflow::ProgressStatus::Completed) {
+    impl_->terminal_progress_reported = true;
+  }
 
   auto record = make_log_record(log::LogLevel::Debug, "element",
                                 "emitted HDF5 live batch");
@@ -298,6 +317,13 @@ bool FakeLiveHdf5Src::at_end_of_stream() const {
 
 bool FakeLiveHdf5Src::can_replay() const { return false; }
 
-void FakeLiveHdf5Src::stop() { impl_ = std::make_unique<Impl>(); }
+void FakeLiveHdf5Src::stop() {
+  if (impl_->reader && impl_->emitted_rows < impl_->total_rows &&
+      !impl_->terminal_progress_reported) {
+    report_progress(1.0, "cancelled", impl_->emitted_rows,
+                    impl_->total_rows, leakflow::ProgressStatus::Cancelled);
+  }
+  impl_ = std::make_unique<Impl>();
+}
 
 } // namespace leakflow::plugins::extras

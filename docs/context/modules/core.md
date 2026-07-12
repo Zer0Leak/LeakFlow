@@ -71,7 +71,10 @@ Tests:
   after Stop before observing, caching, or routing it.
 - `ProgressStatus` (`Active` / `Completed` / `Cancelled`) travels with element
   progress observations; terminal statuses are normalized to 100% and bypass
-  progress throttling.
+  progress throttling. The pipeline-owned progress sink tracks each element's
+  latest status: requested Stop closes any still-`Active` report once as
+  `Cancelled`, preserves explicit terminal reports, and detaches every progress
+  sink before the authoritative `Stopped` event so no later report can escape.
 - `BufferQueue` (`buffer_queue.hpp`): thread-safe bounded FIFO with
   Block/DropOldest/DropNewest; `pipeline_segments.hpp` decomposition and
   `Pipeline::run_threaded` (one `std::jthread` per segment).

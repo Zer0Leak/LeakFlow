@@ -167,6 +167,7 @@ int main() {
                 "graph runtime did not retain cancelled progress status")) {
         return 1;
     }
+    const auto explicit_cancelled_updated = cancelled_progress.updated;
 
     // Vector-clock provenance aggregation (Phase 27): component-wise max over
     // observed buffers ({0,1,1} then {0,2,1} -> {0,2,1}).
@@ -190,6 +191,36 @@ int main() {
     }
 
     runtime.observe(leakflow::PipelineEvent{
+        .kind = leakflow::PipelineEventKind::ProgressReported,
+        .progress =
+            leakflow::PipelineProgressObservation{
+                .element =
+                    leakflow::PipelineEndpointSnapshot{
+                        .element_name = "sink",
+                    },
+                .fraction = 0.6,
+                .message = "working",
+                .index = 6,
+                .total = 10,
+                .status = leakflow::ProgressStatus::Active,
+            },
+    });
+    runtime.observe(leakflow::PipelineEvent{
+        .kind = leakflow::PipelineEventKind::ProgressReported,
+        .progress =
+            leakflow::PipelineProgressObservation{
+                .element =
+                    leakflow::PipelineEndpointSnapshot{
+                        .element_name = "completed",
+                    },
+                .fraction = 1.0,
+                .message = "done",
+                .index = 10,
+                .total = 10,
+                .status = leakflow::ProgressStatus::Completed,
+            },
+    });
+    runtime.observe(leakflow::PipelineEvent{
         .kind = leakflow::PipelineEventKind::Error,
         .message = "boom",
     });
@@ -205,6 +236,27 @@ int main() {
         return 1;
     }
     if (!expect(runtime.last_error() && *runtime.last_error() == "boom", "graph runtime did not store latest error")) {
+        return 1;
+    }
+    const auto& stopped_active_progress = runtime.element_progress().at("sink");
+    if (!expect(stopped_active_progress.fraction == 1.0 && stopped_active_progress.message == "cancelled"
+                    && stopped_active_progress.index == 6 && stopped_active_progress.total == 10
+                    && stopped_active_progress.status == leakflow::ProgressStatus::Cancelled,
+                "stopped graph did not terminalize active progress as cancelled")) {
+        return 1;
+    }
+    const auto& stopped_completed_progress = runtime.element_progress().at("completed");
+    if (!expect(stopped_completed_progress.fraction == 1.0 && stopped_completed_progress.message == "done"
+                    && stopped_completed_progress.status == leakflow::ProgressStatus::Completed,
+                "stopped graph changed explicit completed progress")) {
+        return 1;
+    }
+    const auto& stopped_cancelled_progress = runtime.element_progress().at("source");
+    if (!expect(stopped_cancelled_progress.fraction == 0.4
+                    && stopped_cancelled_progress.message == "cancelled"
+                    && stopped_cancelled_progress.status == leakflow::ProgressStatus::Cancelled
+                    && stopped_cancelled_progress.updated == explicit_cancelled_updated,
+                "stopped graph changed explicit cancelled progress")) {
         return 1;
     }
 

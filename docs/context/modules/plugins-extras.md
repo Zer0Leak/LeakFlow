@@ -118,9 +118,11 @@ Properties:
 tensor, fills it slice by slice, and emits only complete tensors. Its existing
 `ProgressReported` events use aggregate logical uncompressed bytes across the
 supported arrays: opening at `0`, chunk updates below `1`, and exact completion
-at `1`. The `storage_read` scope starts after file inspection and measures
-output materialization, including storage reads and device transfer. Use the
-built-in `process` duration for end-to-end HDF5/Zarr benchmark comparisons.
+at `1`. Each chunk update and final completion pass a cooperative lifecycle
+checkpoint first; Stop reports `Cancelled` and emits no partial outputs. The
+`storage_read` scope starts after file inspection and measures output
+materialization, including storage reads and device transfer. Use the built-in
+`process` duration for end-to-end HDF5/Zarr benchmark comparisons.
 
 ## FakeLiveHdf5Src Contract
 
@@ -136,7 +138,11 @@ The fixed `/keys` tensor accompanies each batch without being row-sliced. A
 smaller final batch is allowed. The source reports trace-based determinate
 progress after every emission and exact completion when the selected row count
 is exhausted. It honors cooperative stop, resets on `start()`, is live, and is
-not cache-replayable.
+not cache-replayable. Pause takes effect at a batch boundary (including pacing);
+Stop during a batch read or pacing reports `Cancelled` and never commits or
+emits that batch. Lifecycle teardown also closes an incomplete replay with a
+terminal `Cancelled` report, including Stop while the source is blocked at a
+framework queue boundary between callbacks.
 
 ```bash
 leakflow run --graph 'FakeLiveHdf5Src@data(path=tests/fixtures/aes/sync/key_01.h5,batch_size=1,trace_rate=10.0); @data.traces ! TracePlot(title="AES live replay",update_mode=accumulate)'

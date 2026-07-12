@@ -1455,10 +1455,26 @@ void PipelineGraphRuntime::apply_event(const PipelineEvent &event) {
         latest_buffers_.clear();
         element_progress_.clear();
         break;
-    case PipelineEventKind::Stopped:
+    case PipelineEventKind::Stopped: {
         running_ = false;
         stopped_ = true;
+        // A stopped pipeline cannot still have work in flight. Long-running elements normally
+        // publish their own terminal outcome, but make teardown robust when one exits without
+        // doing so: turn only leftover Active entries into a brief cancelled result. Preserve an
+        // explicit Completed or Cancelled report exactly as the element published it.
+        const auto stopped_at = std::chrono::steady_clock::now();
+        for (auto &[name, progress] : element_progress_) {
+            (void)name;
+            if (progress.status != ProgressStatus::Active) {
+                continue;
+            }
+            progress.fraction = 1.0;
+            progress.message = "cancelled";
+            progress.status = ProgressStatus::Cancelled;
+            progress.updated = stopped_at;
+        }
         break;
+    }
     case PipelineEventKind::Error:
         running_ = false;
         last_error_ = event.message;

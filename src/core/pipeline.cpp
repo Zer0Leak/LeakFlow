@@ -1147,6 +1147,47 @@ public:
     explicit ProgressEventSink(Pipeline &pipeline) : pipeline_(pipeline) {}
 
     void report(Element &element, const ElementProgress &progress) override {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (closed_) {
+            return;
+        }
+        latest_.insert_or_assign(&element, progress);
+        // Admission and observer dispatch share this lock with close(), guaranteeing that an
+        // already-admitted Active report cannot escape after its synthesized cancellation.
+        emit(element, progress);
+    }
+
+    // Stop can arrive between a live source's process() calls, so the element has no
+    // opportunity to publish its own terminal report. Close only reports the still-Active
+    // entries; an explicit Completed/Cancelled report remains authoritative and is not
+    // duplicated. Once closed, late element reports are ignored.
+    void close(bool cancel_active) {
+        std::vector<std::pair<Element *, ElementProgress>> cancellations;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            if (closed_) {
+                return;
+            }
+            closed_ = true;
+            if (cancel_active) {
+                for (auto &[element, progress] : latest_) {
+                    if (progress.status != ProgressStatus::Active) {
+                        continue;
+                    }
+                    progress.fraction = 1.0;
+                    progress.message = "cancelled";
+                    progress.status = ProgressStatus::Cancelled;
+                    cancellations.emplace_back(element, progress);
+                }
+            }
+        }
+        for (const auto &[element, progress] : cancellations) {
+            emit(*element, progress);
+        }
+    }
+
+private:
+    void emit(Element &element, const ElementProgress &progress) {
         pipeline_.emit(PipelineEvent{
             .kind = PipelineEventKind::ProgressReported,
             .progress =
@@ -1161,8 +1202,10 @@ public:
         });
     }
 
-private:
     Pipeline &pipeline_;
+    std::mutex mutex_;
+    std::map<Element *, ElementProgress> latest_;
+    bool closed_ = false;
 };
 
 void Pipeline::start_all() {
@@ -1225,6 +1268,7 @@ std::optional<Buffer> Pipeline::rerun_from(const std::shared_ptr<Element> &eleme
 }
 
 void Pipeline::stop_all() {
+    const auto cancel_active_progress = stop_requested();
     for (std::size_t index = started_count_; index > 0; --index) {
         log::write(elements_[index - 1]->make_log_record(log::LogLevel::Debug, "pipeline", "stopping element"));
         elements_[index - 1]->stop();
@@ -1234,6 +1278,7 @@ void Pipeline::stop_all() {
             .message = "stopped",
         });
     }
+    close_progress_reporting(cancel_active_progress);
     started_count_ = 0;
     // Stop clears the run's vector-clock counters so the next start begins at 0.
     emit_counts_.clear();
@@ -2424,6 +2469,7 @@ std::vector<PadLink> Pipeline::activation_input_links(const PipelineSegment &seg
 }
 
 void Pipeline::stop_started(std::size_t started_count) noexcept {
+    const auto cancel_active_progress = stop_requested();
     for (std::size_t index = started_count; index > 0; --index) {
         try {
             log::write(elements_[index - 1]->make_log_record(log::LogLevel::Debug, "pipeline",
@@ -2437,6 +2483,22 @@ void Pipeline::stop_started(std::size_t started_count) noexcept {
         } catch (...) {
         }
     }
+    close_progress_reporting(cancel_active_progress);
+}
+
+void Pipeline::close_progress_reporting(bool cancel_active) noexcept {
+    try {
+        if (progress_sink_) {
+            static_cast<ProgressEventSink *>(progress_sink_.get())->close(cancel_active);
+        }
+    } catch (...) {
+        // Progress is diagnostic; failure to publish a terminal event must not prevent
+        // lifecycle teardown or the authoritative Pipeline Stopped event.
+    }
+    for (const auto &element : elements_) {
+        element->set_progress_sink(nullptr);
+    }
+    progress_sink_.reset();
 }
 
 std::uint32_t Pipeline::next_emit_count(const Element *element) {

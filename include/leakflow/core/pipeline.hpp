@@ -208,6 +208,7 @@ private:
     [[nodiscard]] bool is_active_boundary_consumer_segment(const PipelineSegment &segment) const;
     [[nodiscard]] std::vector<PadLink> activation_input_links(const PipelineSegment &segment) const;
     void stop_started(std::size_t started_count) noexcept;
+    void close_progress_reporting(bool cancel_active) noexcept;
     void emit(PipelineEvent event) noexcept;
 
     // Times element.process_pads() into the element's built-in process channel when
