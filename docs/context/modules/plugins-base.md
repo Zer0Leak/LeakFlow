@@ -38,6 +38,13 @@ CLI/inspect files if affected:
   (one trace per `1/rate` s); honors the cooperative stop token. Drives the live
   phase in tests/CLI without hardware. It does not stamp `capture.sample_rate_hz`;
   add that as explicit user metadata when the trace sampling rate matters.
+- `AppSrc`: application-fed live source. Instead of reading a file or device, the
+  application supplies frames — via a producer callback (pull mode) or `push_frame`
+  (push mode); each frame is an aligned set of buffers routed to `src_0..src_{n-1}`
+  and emitted in one firing (shared vector clock, like `Sync`). Declares itself
+  live. It is the generic seam for feeding external data (folders of `.h5`
+  captures, hardware, generated frames) into a pipeline without a per-dataset
+  source element. See the AppSrc Contract below.
 
 Element-specific descriptor data, including pads, properties, stamped metadata,
 and suggested user metadata, lives in each element source file through
@@ -102,6 +109,38 @@ property; pipelines should set it explicitly through source metadata when needed
 - stamps `conversion.id=torch-convert` and `conversion.element`,
 - remains explicit and does not imply generic `Convert` or a conversion
   registry.
+
+## AppSrc Contract
+
+`AppSrc` is the generic application-fed source. Two things it deliberately does
+**not** own — progress semantics and per-instance configuration — the framework
+exposes so the *application* driving it supplies them, elegantly and generically:
+
+- **Pull frame producer**: `set_frame_producer(FrameProducer)`, where
+  `FrameProducer = std::optional<std::vector<Buffer>>(std::size_t index, const
+  ProgressReport& report)`. AppSrc calls it on the worker thread for frame `index`
+  (`nullopt` = end of stream), owns the index, and rewinds to 0 in `start()`, so a
+  Stop → Start re-streams. Push mode: `push_frame` + `end_of_stream` from a
+  producer thread.
+- **App-driven progress**: the producer receives a `report(fraction, message,
+  index, total)` reporter that AppSrc binds to its own protected
+  `Element::report_progress`, so the app drives a determinate `--graph` node bar
+  per instance without touching the progress bus. AppSrc can't know the frame total
+  (the producer decides EOS), so the app reports it. Push-mode drivers use the
+  public `AppSrc::report_progress` passthrough (thread-safe). `fraction` 1.0
+  auto-promotes to `Completed`. A new app's total cost is the `report` parameter
+  plus one call.
+- **App-exposed instance properties**: the app enriches its AppSrc instance with
+  `Element::add_property(...)`, and the `--graph` control panel renders them (it
+  draws the element's live `property_specs()`; see `ARCHITECTURE_CONTRACTS.md`,
+  Properties). Mark a knob `PropertyEffectKind::Lifecycle` to make it editable only
+  when Stopped.
+
+`replications/rezaeezade_2025_blindfold/poi_finder_main.cpp` is the worked example:
+it streams one `key_*.h5` trace bundle per frame, reports per-bundle progress, and
+exposes `path` and `max_trace_bundles` as stopped-only lifecycle properties on its
+`src` node. Tests: `tests/plugins/base/app_src_test.cpp` (frame producer, restart,
+and the progress reporter → sink → `Completed`).
 
 ## Future TorchScript Elements
 

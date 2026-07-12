@@ -331,7 +331,13 @@ path when they control an element property.
   affected.
 - `payload-output` — output payload changes; downstream dataflow is affected.
 - `caps-output` — output caps may change; downstream links must be revalidated.
-- `lifecycle` — requires full-pipeline restart or lifecycle handling.
+- `lifecycle` — requires full-pipeline restart or lifecycle handling. The
+  `--graph` control panel therefore makes a `lifecycle` property **editable only in
+  the `Stopped` state** (read-only, marked `(stop to edit)`, while
+  Running / Paused / Idle), because a lifecycle edit could not take effect until a
+  restart anyway. This gate is generic (`draw_element_controls`), so it applies to
+  any lifecycle property — e.g. a live source's `path` or row range, or an
+  app-exposed `AppSrc` knob.
 
 Dataflow changes are changes to caps, metadata, payload, or lifecycle. They
 must not be represented as `ui-control` state. Metadata-output changes should
@@ -366,6 +372,18 @@ Property specs may also declare `PropertyEffect` and affected output pads. For
 example, `AesLeakage.channels` is `payload-output` with downstream invalidation
 on the `leakage` output pad because changing it changes the target tensor shape
 and target metadata consumed downstream.
+
+Properties live at two levels. An element **type** declares its properties in its
+static `descriptor()` — this is what `leakflow-ls` lists, and it stays generic. An
+element **instance** may be enriched at runtime through the public
+`Element::add_property(PropertySpec)` — used by applications to attach per-instance
+knobs (e.g. an `AppSrc` fed by an app; see
+`docs/context/modules/plugins-base.md`). Both the copied observer topology
+snapshot and the `--graph` control panel render an element's **live**
+`property_specs()`, not the static descriptor, so app-added properties appear as
+controls and ride the normal `PropertySpec` → session `SetProperty` (safe-point) →
+`property_as` path. `leakflow-ls` intentionally lists only type-level descriptor
+properties.
 
 ## Descriptors
 
