@@ -37,10 +37,13 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <memory>
 #include <string>
 #include <torch/torch.h>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -190,19 +193,22 @@ int main(int argc, char** argv)
                           << "  --save-correlation P  persist the aggregate correlation to the HDF5 file P\n"
                           << "                       (reload later with BufferFileSrc to re-select PoIs offline)\n"
                           << "  ROOT_DIR             default: " << default_root
-                          << " (key_*.h5 files with /traces, /plaintexts, /keys)\n";
+                          << " (key_*.h5 files with /traces, /plaintexts, /keys)\n"
+                          << "  In --graph, the 'src' node exposes live 'path' and 'max_trace_bundles'\n"
+                          << "  controls (this app's AppSrc instance properties).\n";
                 return 0;
             } else {
                 root = arg;
             }
         }
 
-        const auto files = capture_files(root);
-        if (files.empty()) {
+        // Validate the initial capture root up front for a clean startup error.
+        const auto initial_bundles = capture_files(root);
+        if (initial_bundles.empty()) {
             throw std::runtime_error("no key_*.h5 capture files under " + root.string());
         }
-        log_info("aggregating PoI over capture files",
-                 {{"files", std::to_string(files.size())}, {"root", root.string()}});
+        log_info("aggregating PoI over trace bundles",
+                 {{"bundles", std::to_string(initial_bundles.size())}, {"path", root.string()}});
 
         auto built = leakflow::cli::build_builtin_pipeline_from_expression(
             pipeline_expression(graph, save_correlation_path.has_value()));
@@ -212,31 +218,62 @@ int main(int argc, char** argv)
             throw std::runtime_error("expected element 'src' to be an AppSrc");
         }
 
+        // App-exposed instance properties: the application enriches its own AppSrc
+        // instance through the generic Element::add_property seam, so both render as
+        // live controls on the 'src' node in the --graph panel (the panel draws the
+        // element's live property specs). `path` is lifecycle-scoped -- changing it
+        // re-discovers the captures on the next restart. `max_trace_bundles` is a live
+        // knob the producer honors forward, per frame (0 = all).
+        app_src->add_property(leakflow::PropertySpec(
+            "path", root.string(), "capture root directory (one key_*.h5 per trace bundle)", "",
+            std::monostate{}, "a directory of key_*.h5 captures",
+            leakflow::PropertyEffect{
+                .kind = leakflow::PropertyEffectKind::Lifecycle,
+                .scope = leakflow::PropertyInvalidationScope::FullPipeline,
+            }));
+        app_src->add_property(leakflow::PropertySpec(
+            "max_trace_bundles", std::int64_t{0}, "fold at most N trace bundles (0 = all)", "bundles",
+            leakflow::IntRangeConstraint{0, std::numeric_limits<std::int64_t>::max()}, "",
+            leakflow::PropertyEffect{}));
+
         if (save_correlation_path) {
             built.pipeline.element("save")->set_property("path", *save_correlation_path);
             log_info("saving aggregate correlation", {{"path", *save_correlation_path}});
         }
 
-        // Lazy pull: the source asks for folder `index` when the pump needs it, so
-        // the graph window opens immediately and only ~one folder is in memory at a
-        // time. Each returned frame is one aligned (traces, plaintexts, key) set; the
-        // PoI accumulates across frames. AppSrc owns the index and resets it to 0 on
-        // start(), so Stop -> Start re-streams. nullopt = end of stream.
+        // Lazy pull: one aligned (traces, plaintexts, key) trace bundle per frame; the
+        // PoI accumulates across bundles. AppSrc rewinds to index 0 on start(), so a
+        // Stop -> Start re-streams. The producer reads the app-exposed properties: it
+        // (re)discovers `path` at stream start (index 0, only when it changed) and caps
+        // the fold count by the live `max_trace_bundles`. nullopt = end of stream.
+        auto bundles = std::make_shared<std::vector<fs::path>>(initial_bundles);
+        auto bundles_path = std::make_shared<std::string>(root.string());
         app_src->set_frame_producer(
-            [files](std::size_t index, const auto& report) -> std::optional<std::vector<leakflow::Buffer>> {
-                if (index >= files.size()) {
-                    report(1.0, "done", files.size(), files.size());
+            [app_src, bundles, bundles_path](std::size_t index, const auto& report)
+                -> std::optional<std::vector<leakflow::Buffer>> {
+                if (index == 0) {
+                    const auto path = app_src->property_as<std::string>("path").value_or(*bundles_path);
+                    if (path != *bundles_path) {
+                        *bundles = capture_files(path);
+                        *bundles_path = path;
+                    }
+                }
+                const auto configured = app_src->property_as<std::int64_t>("max_trace_bundles").value_or(0);
+                const auto count = (configured > 0)
+                    ? std::min<std::size_t>(static_cast<std::size_t>(configured), bundles->size())
+                    : bundles->size();
+                if (index >= count) {
+                    report(1.0, "done", count, count);
                     return std::nullopt;
                 }
-                const auto& file = files[index];
+                const auto& file = (*bundles)[index];
                 // Drive this AppSrc's --graph progress bar: the app is the only place
-                // that knows the file count, so it reports; AppSrc relays it to the
+                // that knows the bundle count, so it reports; AppSrc relays it to the
                 // generic element progress channel (per instance). See report(...).
-                report(static_cast<double>(index) / static_cast<double>(files.size()),
-                       "streaming " + file.stem().string(), index, files.size());
+                report(static_cast<double>(index) / static_cast<double>(count),
+                       "streaming " + file.stem().string(), index, count);
                 // One key_NN.h5 per fold: read its aligned /traces, /plaintexts, /keys
-                // through the same HDF5 reader Hdf5FileSrc uses. Whole-array reads
-                // (default options) mirror the old one-tensor-per-.pt-file loads.
+                // through the same HDF5 reader Hdf5FileSrc uses.
                 leakflow::extras::Hdf5TensorDatasetReader reader(file);
                 auto traces = tensor_buffer(reader.read_tensor(traces_dataset));
                 traces.set_metadata("capture.source", "ChipWhisperer");
@@ -247,7 +284,7 @@ int main(int argc, char** argv)
                 frame.push_back(std::move(traces));
                 frame.push_back(tensor_buffer(reader.read_tensor(plaintexts_dataset)));
                 frame.push_back(tensor_buffer(reader.read_tensor(keys_dataset)));
-                log_info("streaming capture file",
+                log_info("streaming trace bundle",
                          {{"file", file.filename().string()}, {"index", std::to_string(index)}});
                 return frame;
             });
