@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -49,7 +50,12 @@ namespace {
   return fallback;
 }
 
-void pace(const std::stop_token &stop, double trace_rate, std::uint64_t rows) {
+// Paces the replay to trace_rate, cooperating with pause/stop through the
+// supplied checkpoint (Element::cooperative_checkpoint): it parks while paused
+// and returns false on stop, so a paused live source freezes between batches
+// and a stopped one unwinds the pacing sleep promptly.
+void pace(const std::function<bool()> &checkpoint, double trace_rate,
+          std::uint64_t rows) {
   if (trace_rate <= 0.0 || rows == 0) {
     return;
   }
@@ -58,7 +64,7 @@ void pace(const std::stop_token &stop, double trace_rate, std::uint64_t rows) {
       std::chrono::steady_clock::now() +
       std::chrono::duration<double>(static_cast<double>(rows) / trace_rate);
   constexpr auto poll = std::chrono::milliseconds(10);
-  while (!stop.stop_requested()) {
+  while (checkpoint()) {
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) {
       break;
@@ -240,22 +246,41 @@ ElementOutputs FakeLiveHdf5Src::process_pads(ElementInputs inputs) {
   options.row_count = batch_rows;
 
   ElementOutputs outputs;
-  {
+  try {
     auto storage_scope = profile_scope("storage_read");
-    outputs = detail::read_hdf5_outputs(*impl_->reader, options);
+    // Live semantics: abort a batch read on stop, but do not park on pause
+    // mid-batch (pausing a live source is handled at the between-batch safe
+    // point). Hence a stop-only check here, not cooperative_checkpoint.
+    outputs = detail::read_hdf5_outputs(
+        *impl_->reader, options,
+        [this](const detail::AggregateReadProgress &) {
+          return !stop_token().stop_requested();
+        });
+  } catch (const leakflow::extras::TensorReadCancelled &) {
+    const auto fraction = impl_->total_rows == 0
+                              ? 1.0
+                              : static_cast<double>(impl_->emitted_rows) /
+                                    static_cast<double>(impl_->total_rows);
+    report_progress(fraction, "cancelled", impl_->emitted_rows,
+                    impl_->total_rows, leakflow::ProgressStatus::Cancelled);
+    return {};
   }
 
   impl_->emitted_rows += batch_rows;
-  pace(stop_token(), double_property_or(*this, "trace_rate", 0.0), batch_rows);
+  pace([this] { return cooperative_checkpoint(); },
+       double_property_or(*this, "trace_rate", 0.0), batch_rows);
   const auto fraction = impl_->total_rows == 0
                             ? 1.0
                             : static_cast<double>(impl_->emitted_rows) /
                                   static_cast<double>(impl_->total_rows);
+  const auto status = impl_->emitted_rows >= impl_->total_rows
+                          ? leakflow::ProgressStatus::Completed
+                          : leakflow::ProgressStatus::Active;
   report_progress(
       fraction,
       "Replaying HDF5 traces: " + std::to_string(impl_->emitted_rows) + "/" +
           std::to_string(impl_->total_rows),
-      impl_->emitted_rows, impl_->total_rows);
+      impl_->emitted_rows, impl_->total_rows, status);
 
   auto record = make_log_record(log::LogLevel::Debug, "element",
                                 "emitted HDF5 live batch");

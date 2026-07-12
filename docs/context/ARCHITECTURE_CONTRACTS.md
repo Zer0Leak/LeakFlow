@@ -425,6 +425,45 @@ spec `Size` (monitoring, gated by `--telemetry`, default on with `--graph`) or
   timing is best-effort like the observer — never required for correctness, and
   tests assert structure, never durations.
 
+## Long-Running Work: Progress and Cooperative Cancellation
+
+Long `process()`/`process_pads()` calls must stay responsive to the session's
+pause/stop control plane and should surface progress. There are two cases:
+
+- **Element-owned loop** (the element itself iterates): call
+  `report_progress(fraction, message, index, total, status)` to publish progress
+  on the observer bus, and `cooperative_checkpoint()` between units of work.
+  `cooperative_checkpoint()` parks while paused and returns `false` on stop; on a
+  `false` return the element stops early and returns an empty result. Emit an
+  explicit terminal `ProgressStatus::Completed` on success and
+  `ProgressStatus::Cancelled` when a checkpoint aborts the work.
+
+- **Library-owned loop** (the heavy loop lives in a compute/IO library the
+  element calls, e.g. `leakflow_ml`, `leakflow_extras`): the library stays
+  framework-agnostic (no `leakflow_core` types) and exposes optional
+  **framework-agnostic callbacks** — a progress callback and/or a cheap
+  checkpoint callback — that **return `bool`, where `false` means cancel**. The
+  library aborts promptly on a `false` return (throwing a typed cancellation
+  rather than returning partial data when a partial result would be unsafe). The
+  calling element bridges those callbacks to `report_progress` and
+  `cooperative_checkpoint()`, and translates a cancellation into an empty result
+  plus a `Cancelled` report.
+
+Reference implementations: `leakflow::ml::GaussianMixture::fit(x, on_progress,
+on_checkpoint)` (both callbacks `bool`, `false` = cancel), bridged by the
+`GaussianMixture` element; and `leakflow::extras::TensorDatasetReader::read_tensor`
+(progress callback `bool`, `false` throws `TensorReadCancelled`), bridged by
+`Hdf5FileSrc`/`FakeLiveHdf5Src`. A new backend on a shared library contract (e.g.
+a future Zarr `TensorDatasetReader`) inherits the same cancellation contract.
+
+Progress and cancellation are **best-effort diagnostics/control**, like the
+observer and profiling: they must never be required for experiment correctness,
+and `report_progress` is a cheap no-op when no sink is injected. Purely
+vectorized elements whose heavy work is a single library/tensor call (e.g. the
+CPA/DPA/correlation/leakage crypto elements) have no interruptible inner loop;
+they rely on the executor's between-buffer safe points for pause/stop and do not
+need in-call checkpoints.
+
 ## Future Plugin Boundaries
 
 Future algorithm or UI features must stay outside core:

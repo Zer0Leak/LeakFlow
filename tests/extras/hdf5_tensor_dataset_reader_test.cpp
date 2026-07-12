@@ -342,6 +342,7 @@ int main() {
   const auto trace_tensor = reader.read_tensor(
       "/traces", trace_options, [&trace_progress](const auto &update) {
         trace_progress.push_back(update);
+        return true;
       });
   if (!expect(trace_tensor.device().is_cpu() &&
                   trace_tensor.scalar_type() == torch::kFloat32,
@@ -377,6 +378,7 @@ int main() {
       reader.read_tensor("/countermeasures/jitter/parameters/loop_iterations",
                          label_options, [&label_progress](const auto &update) {
                            label_progress.push_back(update);
+                           return true;
                          });
   if (!expect(labels.sizes().vec() == std::vector<std::int64_t>{2} &&
                   labels.data_ptr<std::uint8_t>()[0] == 2 &&
@@ -407,11 +409,36 @@ int main() {
   const auto empty = reader.read_tensor("/traces", empty_options,
                                         [&empty_progress](const auto &update) {
                                           empty_progress.push_back(update);
+                                          return true;
                                         });
   if (!expect(empty.sizes().vec() == std::vector<std::int64_t>{0, 3} &&
                   empty_progress.size() == 1 &&
                   empty_progress.front().fraction() == 1.0,
               "empty row selection behavior mismatch")) {
+    return 1;
+  }
+
+  // A progress callback that returns false aborts a multi-hyperslab read with
+  // TensorReadCancelled and does not return a partial tensor. The callback is
+  // exercised once per hyperslab, so cancelling after the first chunk unwinds
+  // the loop mid-read.
+  std::uint64_t cancel_calls = 0;
+  if (!expect(throws_exception<leakflow::extras::TensorReadCancelled>(
+                  [&reader, &cancel_calls] {
+                    leakflow::extras::TensorReadOptions options;
+                    options.rows = {.start = 0, .count = 5};
+                    options.io_batch_rows = 1;
+                    (void)reader.read_tensor("/traces", options,
+                                             [&cancel_calls](const auto &) {
+                                               ++cancel_calls;
+                                               return false;
+                                             });
+                  }),
+              "cancelling progress callback should abort the read")) {
+    return 1;
+  }
+  if (!expect(cancel_calls == 1,
+              "cancel should stop after the first hyperslab, not read on")) {
     return 1;
   }
 

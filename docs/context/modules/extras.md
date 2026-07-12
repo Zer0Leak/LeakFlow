@@ -43,7 +43,11 @@ Tests:
   including paths, dtypes, shapes, attributes, and row-alignment.
 - `TensorReadOptions`: row selection plus `io_batch_rows` for internal I/O.
 - `TensorReadProgress`: logical uncompressed bytes and rows read. Progress is
-  reported after each hyperslab and ends exactly at completion.
+  reported after each hyperslab and ends exactly at completion. The progress
+  callback returns `bool`: `false` requests cancellation, and `read_tensor`
+  aborts promptly with `TensorReadCancelled` instead of returning a partial
+  tensor. Source elements bridge this to `Element::cooperative_checkpoint()` so a
+  long read honors pause/stop (see ARCHITECTURE_CONTRACTS.md, Long-Running Work).
 - `Hdf5TensorDatasetReader`: recursively discovers HDF5 groups, arrays, and
   attributes; supports `uint8` and `float32`; fills a single preallocated CPU
   Torch tensor through batched hyperslab reads.

@@ -422,15 +422,19 @@ read_hdf5_outputs(const leakflow::extras::TensorDatasetReader &reader,
     auto tensor = reader.read_tensor(
         array->path, read_options,
         [&](const leakflow::extras::TensorReadProgress &update) {
-          if (progress) {
-            progress(AggregateReadProgress{
-                .array_path = update.array_path,
-                .logical_bytes_read = bytes_before + update.logical_bytes_read,
-                .total_logical_bytes = total_bytes,
-                .rows_read = update.rows_read,
-                .total_rows = update.total_rows,
-            });
+          // Forward the caller's continue/abort decision to the reader so a
+          // cancel unwinds mid-hyperslab as TensorReadCancelled. No callback
+          // means never cancel.
+          if (!progress) {
+            return true;
           }
+          return progress(AggregateReadProgress{
+              .array_path = update.array_path,
+              .logical_bytes_read = bytes_before + update.logical_bytes_read,
+              .total_logical_bytes = total_bytes,
+              .rows_read = update.rows_read,
+              .total_rows = update.total_rows,
+          });
         });
     completed_bytes += array->selected_logical_bytes(selection);
     tensor = move_to_device(std::move(tensor), options.device);

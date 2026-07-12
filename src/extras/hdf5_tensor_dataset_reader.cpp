@@ -572,6 +572,14 @@ torch::Tensor Hdf5TensorDatasetReader::read_tensor(
     throw std::invalid_argument("HDF5 tensor array paths must be absolute");
   }
 
+  // Report progress and honor cooperative cancellation: a false return aborts
+  // the read with TensorReadCancelled rather than returning a partial tensor.
+  const auto report = [&progress](const TensorReadProgress &update) {
+    if (progress && !progress(update)) {
+      throw TensorReadCancelled();
+    }
+  };
+
   const auto *array = impl_->dataset.find_array(requested_path);
   if (array == nullptr) {
     throw std::out_of_range("HDF5 tensor array does not exist: " +
@@ -593,29 +601,25 @@ torch::Tensor Hdf5TensorDatasetReader::read_tensor(
                          H5S_ALL, H5S_ALL, H5P_DEFAULT, output.data_ptr()),
                  "fixed tensor read", array->path);
     }
-    if (progress) {
-      progress({
-          .array_path = array->path,
-          .logical_bytes_read = total_bytes,
-          .total_logical_bytes = total_bytes,
-          .rows_read = 1,
-          .total_rows = 1,
-      });
-    }
+    report({
+        .array_path = array->path,
+        .logical_bytes_read = total_bytes,
+        .total_logical_bytes = total_bytes,
+        .rows_read = 1,
+        .total_rows = 1,
+    });
     return output;
   }
 
   const auto selected_rows = static_cast<std::uint64_t>(output_shape.front());
   if (selected_rows == 0) {
-    if (progress) {
-      progress({
-          .array_path = array->path,
-          .logical_bytes_read = 0,
-          .total_logical_bytes = 0,
-          .rows_read = 0,
-          .total_rows = 0,
-      });
-    }
+    report({
+        .array_path = array->path,
+        .logical_bytes_read = 0,
+        .total_logical_bytes = 0,
+        .rows_read = 0,
+        .total_rows = 0,
+    });
     return output;
   }
 
@@ -649,15 +653,15 @@ torch::Tensor Hdf5TensorDatasetReader::read_tensor(
                "tensor hyperslab read", array->path);
 
     rows_read += chunk_rows;
-    if (progress) {
-      progress({
-          .array_path = array->path,
-          .logical_bytes_read = rows_read * bytes_per_row,
-          .total_logical_bytes = total_bytes,
-          .rows_read = rows_read,
-          .total_rows = selected_rows,
-      });
-    }
+    // Fires once per hyperslab; a false return here throws TensorReadCancelled
+    // and unwinds the loop, discarding the partially-filled output tensor.
+    report({
+        .array_path = array->path,
+        .logical_bytes_read = rows_read * bytes_per_row,
+        .total_logical_bytes = total_bytes,
+        .rows_read = rows_read,
+        .total_rows = selected_rows,
+    });
   }
   return output;
 }

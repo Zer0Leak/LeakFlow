@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
@@ -283,6 +284,27 @@ int main() {
     return 1;
   }
 
+  // A stop requested before the read makes Hdf5FileSrc emit no outputs and
+  // report cancellation instead of loading the whole dataset.
+  plugin::Hdf5FileSrc stopped_source;
+  stopped_source.set_property("path", sync_path.string());
+  CapturingProgressSink stopped_progress;
+  stopped_source.set_progress_sink(&stopped_progress);
+  std::stop_source source_stopper;
+  source_stopper.request_stop();
+  stopped_source.set_stop_token(source_stopper.get_token());
+  const auto stopped_outputs = stopped_source.process_pads({});
+  if (!expect(stopped_outputs.empty(),
+              "stopped HDF5 source should emit no outputs")) {
+    return 1;
+  }
+  if (!expect(!stopped_progress.reports.empty() &&
+                  stopped_progress.reports.back().status ==
+                      leakflow::ProgressStatus::Cancelled,
+              "stopped HDF5 source should report cancellation")) {
+    return 1;
+  }
+
   plugin::FakeLiveHdf5Src live;
   live.set_property("path", jitter_path.string());
   live.set_property("row_start", std::int64_t{1});
@@ -333,6 +355,29 @@ int main() {
     return 1;
   }
   live.stop();
+
+  // A live source honors a stop requested before a batch read: it aborts the
+  // read and emits no batch (Cancelled) instead of replaying rows.
+  plugin::FakeLiveHdf5Src stopped_live;
+  stopped_live.set_property("path", jitter_path.string());
+  CapturingProgressSink stopped_live_progress;
+  stopped_live.set_progress_sink(&stopped_live_progress);
+  std::stop_source live_stopper;
+  live_stopper.request_stop();
+  stopped_live.set_stop_token(live_stopper.get_token());
+  stopped_live.start();
+  const auto stopped_batch = stopped_live.process_pads({});
+  if (!expect(stopped_batch.empty(),
+              "stopped fake-live HDF5 source should emit no batch")) {
+    return 1;
+  }
+  if (!expect(!stopped_live_progress.reports.empty() &&
+                  stopped_live_progress.reports.back().status ==
+                      leakflow::ProgressStatus::Cancelled,
+              "stopped fake-live HDF5 source should report cancellation")) {
+    return 1;
+  }
+  stopped_live.stop();
 
   std::filesystem::remove(sync_path);
   std::filesystem::remove(jitter_path);

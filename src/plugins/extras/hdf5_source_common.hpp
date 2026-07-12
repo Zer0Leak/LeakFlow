@@ -33,8 +33,13 @@ struct AggregateReadProgress {
   std::uint64_t total_rows = 0;
 };
 
+// Progress + cancellation callback for a whole-dataset read, mirroring
+// leakflow::extras::TensorReadProgressCallback: return true to continue, false
+// to abort. A false return propagates as TensorReadCancelled out of
+// read_hdf5_outputs, so the calling source element can report cancellation and
+// emit no outputs. An unset callback never cancels.
 using AggregateReadProgressCallback =
-    std::function<void(const AggregateReadProgress &)>;
+    std::function<bool(const AggregateReadProgress &)>;
 
 [[nodiscard]] Hdf5SourceOptions source_options(const Element &element);
 [[nodiscard]] std::uint64_t

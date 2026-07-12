@@ -160,9 +160,15 @@ ElementOutputs Hdf5FileSrc::process_pads(ElementInputs inputs) {
   report_progress(0.0, "Opening HDF5 tensor dataset", 0, 0);
   leakflow::extras::Hdf5TensorDatasetReader reader(options.path);
 
+  // Bail before reading if a stop is already pending (mirrors GaussianMixture).
+  if (!cooperative_checkpoint()) {
+    report_progress(1.0, "cancelled", 0, 0, leakflow::ProgressStatus::Cancelled);
+    return {};
+  }
+
   std::uint64_t total_bytes = 0;
   ElementOutputs outputs;
-  {
+  try {
     auto storage_scope = profile_scope("storage_read");
     outputs = detail::read_hdf5_outputs(
         reader, options,
@@ -179,9 +185,17 @@ ElementOutputs Hdf5FileSrc::process_pads(ElementInputs inputs) {
                               std::to_string(update.total_rows) + " rows",
                           update.logical_bytes_read,
                           update.total_logical_bytes);
+          // Park while paused; abort the read on stop (unwinds the reader's
+          // hyperslab loop as TensorReadCancelled).
+          return cooperative_checkpoint();
         });
+  } catch (const leakflow::extras::TensorReadCancelled &) {
+    report_progress(1.0, "cancelled", total_bytes, total_bytes,
+                    leakflow::ProgressStatus::Cancelled);
+    return {};
   }
-  report_progress(1.0, "HDF5 tensor dataset loaded", total_bytes, total_bytes);
+  report_progress(1.0, "HDF5 tensor dataset loaded", total_bytes, total_bytes,
+                  leakflow::ProgressStatus::Completed);
 
   auto record = make_log_record(log::LogLevel::Debug, "element",
                                 "loaded HDF5 tensor dataset");

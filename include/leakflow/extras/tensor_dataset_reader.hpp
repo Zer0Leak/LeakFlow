@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,8 +76,24 @@ struct TensorReadProgress {
   [[nodiscard]] double fraction() const noexcept;
 };
 
+// Progress + cancellation callback for a long read. Framework-agnostic (no
+// LeakFlow core types), following the same convention as the ml library's fit
+// callbacks: return true to continue, false to abort. On a false return the
+// reader stops promptly and throws TensorReadCancelled instead of returning a
+// partially-filled tensor. A calling element bridges this to
+// Element::cooperative_checkpoint() so a long read honors pause/stop. See
+// docs/context/ARCHITECTURE_CONTRACTS.md (Long-Running Work).
 using TensorReadProgressCallback =
-    std::function<void(const TensorReadProgress &)>;
+    std::function<bool(const TensorReadProgress &)>;
+
+// Thrown by read_tensor when the progress callback requests cancellation. A
+// partial tensor is never returned, so callers can treat a caught
+// TensorReadCancelled as "no output this read".
+class TensorReadCancelled : public std::runtime_error {
+public:
+  TensorReadCancelled()
+      : std::runtime_error("tensor dataset read was cancelled") {}
+};
 
 class TensorDatasetReader {
 public:
@@ -85,6 +102,8 @@ public:
   [[nodiscard]] virtual const TensorDatasetDescriptor &
   descriptor() const noexcept = 0;
 
+  // Reads the named array. If progress is set and returns false, the read is
+  // aborted with TensorReadCancelled (no partial tensor is returned).
   [[nodiscard]] virtual torch::Tensor
   read_tensor(std::string_view path, const TensorReadOptions &options = {},
               TensorReadProgressCallback progress = {}) const = 0;
