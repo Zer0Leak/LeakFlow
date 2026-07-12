@@ -42,6 +42,7 @@ int main()
     leakflow::Buffer input(source_payload->caps());
     input.set_metadata("capture.dataset.name", "unit");
     input.set_payload(source_payload);
+    input.set_metadata("payload.layout", "trace/sample");
 
     base_plugin::TorchConvert converter;
     converter.set_property("dtype", std::string("float32"));
@@ -68,6 +69,10 @@ int main()
     }
     if (!expect(output->metadata("payload.conversion.id") == base_plugin::torch_convert_conversion_id,
                 "TorchConvert did not stamp conversion id")) {
+        return 1;
+    }
+    if (!expect(output->metadata("payload.layout") == "trace/sample",
+                "TorchConvert did not preserve the semantic input layout")) {
         return 1;
     }
 

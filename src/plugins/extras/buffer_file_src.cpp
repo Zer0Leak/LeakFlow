@@ -36,6 +36,13 @@ ElementDescriptor BufferFileSrc::descriptor()
             PropertySpec("path", std::string(), "HDF5 file to read the buffer from (a .h5 file)"),
         },
         .keywords = {"buffer", "file", "source", "load", "deserialize", "hdf5", "h5"},
+        .metadata_set_by_element = {
+            make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "payload layout restored from the archived buffer metadata",
+                {"axis_0/axis_1", "trace/sample", "byte"}),
+        },
     };
 }
 
@@ -74,10 +81,12 @@ std::optional<Buffer> BufferFileSrc::process(std::optional<Buffer> input)
     }
 
     Buffer buffer(Caps(archive.caps_type(), archive.caps_params()));
+    buffer.set_payload(std::move(payload));
+    // Archive metadata is authoritative. In particular, restore a semantic
+    // payload.layout after set_payload() has installed the payload's generic fallback.
     for (const auto& [key, value] : archive.metadata()) {
         buffer.set_metadata(key, value);
     }
-    buffer.set_payload(std::move(payload));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "loaded buffer");
     record.fields.emplace("path", path);

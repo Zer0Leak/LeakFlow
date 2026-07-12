@@ -79,6 +79,11 @@ int main()
         if (!expect(annotations->annotation_count() == 2, "expected one annotation per unit")) {
             return 1;
         }
+        if (!expect(output->metadata("payload.layout")
+                        == "annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]",
+                    "annotation payload layout was wrong")) {
+            return 1;
+        }
         const auto& success_annotation = annotations->annotation(0);
         const auto& failure_annotation = annotations->annotation(1);
         if (!expect(success_annotation.marker == "square", "success annotation marker should be square")) {

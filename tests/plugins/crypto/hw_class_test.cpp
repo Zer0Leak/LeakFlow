@@ -50,6 +50,9 @@ int main()
     if (!expect(out->metadata_or("payload.class.count", "") == "81", "HwClass: class count metadata wrong")) {
         return 1;
     }
+    if (!expect(out->metadata_or("payload.layout", "") == "unit/trace", "HwClass: payload layout wrong")) {
+        return 1;
+    }
 
     std::cout << "hw_class tests passed\n";
     return 0;

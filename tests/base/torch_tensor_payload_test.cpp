@@ -53,6 +53,9 @@ int main()
     if (!expect(payload.rank() == 2, "tensor payload rank mismatch")) {
         return 1;
     }
+    if (!expect(payload.layout() == "axis_0/axis_1", "tensor payload layout mismatch")) {
+        return 1;
+    }
     if (!expect(payload.element_count() == 6, "tensor payload element count mismatch")) {
         return 1;
     }
@@ -124,6 +127,11 @@ int main()
         return 1;
     }
 
+    leakflow::base::TorchTensorPayload scalar_payload(torch::tensor(1.0F));
+    if (!expect(scalar_payload.layout() == "scalar", "scalar tensor payload layout mismatch")) {
+        return 1;
+    }
+
     if (!expect(throws_invalid_argument([] {
             leakflow::base::TorchTensorPayload invalid{torch::Tensor()};
         }),
@@ -148,6 +156,10 @@ int main()
         return 1;
     }
     if (!expect(roundtrip->element_count() == 6, "buffer tensor payload element count mismatch")) {
+        return 1;
+    }
+    if (!expect(buffer.metadata("payload.layout") == "axis_0/axis_1",
+            "buffer did not publish tensor payload layout")) {
         return 1;
     }
 

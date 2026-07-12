@@ -96,17 +96,17 @@ enum class RankBy {
     return modes;
 }
 
-[[nodiscard]] std::vector<std::int64_t> per_result_group_top_k_for(const Element& element, std::int64_t result_group_count)
+[[nodiscard]] std::vector<std::int64_t> per_unit_top_k_for(const Element& element, std::int64_t unit_count)
 {
     auto values = int_list_property_or(element, "top_k", IntList{10});
     if (values.empty()) {
         throw std::invalid_argument("PoiSelect top_k cannot be empty");
     }
     if (values.size() == 1) {
-        return std::vector<std::int64_t>(static_cast<std::size_t>(result_group_count), values.front());
+        return std::vector<std::int64_t>(static_cast<std::size_t>(unit_count), values.front());
     }
-    if (values.size() != static_cast<std::size_t>(result_group_count)) {
-        throw std::invalid_argument("PoiSelect top_k must have length 1 or result group count");
+    if (values.size() != static_cast<std::size_t>(unit_count)) {
+        throw std::invalid_argument("PoiSelect top_k must have length 1 or unit count");
     }
     return values;
 }
@@ -141,28 +141,28 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
     return torch::stack({indexes.to(torch::kFloat64), values.to(torch::kFloat64)}, 1).contiguous();
 }
 
-[[nodiscard]] std::vector<CorrelationPoiResult> per_byte_results(
+[[nodiscard]] std::vector<CorrelationPoiResult> per_unit_results(
     const CorrelationPayload& correlation,
     const std::vector<std::int64_t>& top_k_values,
     const std::vector<RankBy>& rank_modes)
 {
     const auto& grouped = correlation.grouped_correlation();
-    const auto& byte_indexes = correlation.byte_indexes();
+    const auto& unit_indexes = correlation.unit_indexes();
     const auto channel_count = correlation.channel_count();
     const auto feature_count = correlation.feature_count();
 
     std::vector<CorrelationPoiResult> results;
-    results.reserve(byte_indexes.size());
+    results.reserve(unit_indexes.size());
 
-    for (auto byte_offset = std::int64_t{0}; byte_offset < static_cast<std::int64_t>(byte_indexes.size());
-         ++byte_offset) {
-        const auto top_k = top_k_values.at(static_cast<std::size_t>(byte_offset));
+    for (auto unit_offset = std::int64_t{0}; unit_offset < static_cast<std::int64_t>(unit_indexes.size());
+         ++unit_offset) {
+        const auto top_k = top_k_values.at(static_cast<std::size_t>(unit_offset));
         validate_top_k(top_k, feature_count);
 
         std::vector<torch::Tensor> channel_results;
         channel_results.reserve(static_cast<std::size_t>(channel_count));
         for (auto channel_index = std::int64_t{0}; channel_index < channel_count; ++channel_index) {
-            const auto correlations = grouped[byte_offset][channel_index];
+            const auto correlations = grouped[unit_offset][channel_index];
             const auto scores = contribution_for(correlations, rank_modes.at(static_cast<std::size_t>(channel_index)));
             const auto [selected_scores, selected_indexes] = torch::topk(scores, top_k);
             (void)selected_scores;
@@ -171,7 +171,7 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
         }
 
         results.push_back(CorrelationPoiResult{
-            .unit = byte_indexes.at(static_cast<std::size_t>(byte_offset)),
+            .unit_index = unit_indexes.at(static_cast<std::size_t>(unit_offset)),
             .result = torch::stack(channel_results, 0).contiguous(),
         });
     }
@@ -183,18 +183,33 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
 {
     static constexpr std::string_view keys[] = {
         "payload.leakage.model",
-        "payload.leakage.byte_indexes",
         "payload.leakage.channels",
         "payload.crypto.algorithm",
         "payload.crypto.state_bytes",
         "payload.trace.count",
         "payload.trace.input",
+        "attack.unit.kind",
+        "attack.unit.indexes",
+        "attack.unit.count",
     };
     for (const auto key : keys) {
         if (source.has_metadata(key)) {
             sink.set_metadata(std::string(key), source.metadata(key));
         }
     }
+}
+
+[[nodiscard]] std::string unit_indexes_metadata(const std::vector<std::int64_t>& unit_indexes)
+{
+    auto value = std::string("[");
+    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+        if (index != 0) {
+            value += ",";
+        }
+        value += std::to_string(unit_indexes[index]);
+    }
+    value += "]";
+    return value;
 }
 
 } // namespace
@@ -204,7 +219,7 @@ ElementDescriptor PoiSelect::descriptor()
     return {
         .type_name = "PoiSelect",
         .klass = "Analyze/SCA/PoI/Select",
-        .purpose = "select top-k points of interest per (byte, channel) from a correlation buffer",
+        .purpose = "select top-k points of interest per (unit, channel) from a correlation buffer",
         .input_pads = {
             Pad("correlation", PadDirection::Input, Caps(correlation_caps_type)),
         },
@@ -212,14 +227,14 @@ ElementDescriptor PoiSelect::descriptor()
             Pad("poi", PadDirection::Output, Caps(correlation_poi_caps_type)),
         },
         .property_specs = {
-            PropertySpec("top_k", IntList{10}, "PoI count list; one value applies to all result groups",
+            PropertySpec("top_k", IntList{10}, "PoI count list; one value applies to all units",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
                     .scope = PropertyInvalidationScope::Downstream,
                     .output_pads = {"poi"},
                 }),
-            PropertySpec("rank_by", StringList{"abs"}, "Ranking mode list per result group: abs, positive, or negative",
+            PropertySpec("rank_by", StringList{"abs"}, "Ranking mode list per unit: abs, positive, or negative",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
@@ -254,6 +269,14 @@ ElementDescriptor PoiSelect::descriptor()
                 std::int64_t{},
                 "number of trace observations represented by this PoI result",
                 {"1", "50", "10000"}),
+            make_element_metadata_descriptor(
+                "payload.poi.unit_count", std::int64_t{},
+                "number of attack units represented by this PoI result", {"16"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"unit/channel/poi/[sample_index,correlation]"}),
         },
     };
 }
@@ -277,9 +300,9 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
         throw std::invalid_argument("PoiSelect requires a CorrelationPayload");
     }
 
-    const auto result_group_count = static_cast<std::int64_t>(payload->byte_indexes().size());
+    const auto unit_count = payload->unit_count();
     const auto rank_modes = rank_modes_for(*this, payload->channel_count());
-    auto results = per_byte_results(*payload, per_result_group_top_k_for(*this, result_group_count), rank_modes);
+    auto results = per_unit_results(*payload, per_unit_top_k_for(*this, unit_count), rank_modes);
 
     Buffer output{Caps(correlation_poi_caps_type)};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "correlation", name());
@@ -291,11 +314,14 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
         output.set_metadata("payload.poi.correlation_mode", input->metadata("payload.correlation.mode"));
     }
     output.set_metadata("payload.poi.observation_count", std::to_string(payload->observation_count()));
+    output.set_metadata("payload.poi.unit_count", std::to_string(unit_count));
+    output.set_metadata("attack.unit.count", std::to_string(unit_count));
+    output.set_metadata("attack.unit.indexes", unit_indexes_metadata(payload->unit_indexes()));
     output.set_payload(std::make_shared<CorrelationPoiPayload>(std::move(results), payload->score_name()));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "selected Pearson correlation PoIs");
     record.fields.emplace("payload.poi.method", pearson_poi_method_id);
-    record.fields.emplace("result_groups", std::to_string(result_group_count));
+    record.fields.emplace("units", std::to_string(unit_count));
     record.fields.emplace("channel_count", std::to_string(payload->channel_count()));
     record.fields.emplace("features_count", std::to_string(payload->feature_count()));
     record.fields.emplace("observation_count", std::to_string(payload->observation_count()));

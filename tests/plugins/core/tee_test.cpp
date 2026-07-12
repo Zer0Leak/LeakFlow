@@ -15,6 +15,11 @@ public:
     {
         return "test/payload";
     }
+
+    [[nodiscard]] std::string layout() const override
+    {
+        return "item";
+    }
 };
 
 bool expect(bool condition, const char* message)
@@ -76,6 +81,10 @@ int main()
         return 1;
     }
     if (!expect(branches[0].metadata("source") == "test", "Tee branch metadata was not copied")) {
+        return 1;
+    }
+    if (!expect(branches[0].metadata("payload.layout") == "item",
+            "Tee branch payload layout was not preserved")) {
         return 1;
     }
     if (!expect(branches[0].payload() == branches[1].payload(), "Tee branches did not share payload pointer")) {

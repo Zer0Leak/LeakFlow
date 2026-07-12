@@ -54,6 +54,10 @@ int main()
         if (!expect(torch::equal(selected, features.index_select(1, indexes)), "FeatureSelect 1-D: wrong values")) {
             return 1;
         }
+        if (!expect(out->metadata_or("payload.layout", "") == "observation/feature",
+                "FeatureSelect 1-D: wrong payload layout")) {
+            return 1;
+        }
     }
 
     // --- FeatureSelect: 2-D per-unit indexes broadcast a shared [T,N] matrix ---
@@ -69,6 +73,10 @@ int main()
         if (!expect(torch::equal(selected[0], features.index_select(1, indexes[0]))
                         && torch::equal(selected[1], features.index_select(1, indexes[1])),
                     "FeatureSelect 2-D: wrong per-unit values")) {
+            return 1;
+        }
+        if (!expect(out->metadata_or("payload.layout", "") == "unit/observation/feature",
+                "FeatureSelect 2-D: wrong payload layout")) {
             return 1;
         }
     }
@@ -91,6 +99,10 @@ int main()
             return 1;
         }
         if (!expect(out->metadata_or("payload.cluster_stats.ari", "") == "1.000000", "ari metadata wrong")) {
+            return 1;
+        }
+        if (!expect(out->metadata_or("payload.layout", "") == "true_class/cluster",
+                "ClusteringStats payload layout wrong")) {
             return 1;
         }
     }

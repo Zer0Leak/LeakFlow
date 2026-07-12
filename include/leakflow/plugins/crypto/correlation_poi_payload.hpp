@@ -12,11 +12,11 @@ namespace leakflow::plugins::crypto {
 
 inline constexpr auto correlation_poi_caps_type = "leakflow/correlation-poi";
 
-// One attack unit's selected PoIs. `unit` is the generic unit identifier (an AES key byte, a
+// One attack unit's selected PoIs. `unit_index` is the generic unit identifier (an AES key byte, a
 // Kyber coefficient, ...). `result` is a `[channel, poi, 2]` tensor where the last axis is the
-// (sample_index, correlation) pair -- see the `payload.poi.dims` metadata producers set.
+// (sample_index, score) pair. `[channel, poi, 1]` carries score only.
 struct CorrelationPoiResult {
-    std::uint16_t unit = 0;
+    std::int64_t unit_index = 0;
     torch::Tensor result;
 };
 
@@ -25,11 +25,12 @@ public:
     CorrelationPoiPayload(std::vector<CorrelationPoiResult> results, std::string score_name);
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     [[nodiscard]] const std::vector<CorrelationPoiResult>& results() const;
     [[nodiscard]] const CorrelationPoiResult& result(std::size_t index) const;
-    [[nodiscard]] std::size_t result_count() const;
+    [[nodiscard]] std::size_t unit_count() const;
     [[nodiscard]] const std::string& score_name() const;
 
 private:

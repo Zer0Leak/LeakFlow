@@ -50,7 +50,10 @@ int main()
     leakflow::ElementInputs inputs;
     inputs.emplace("poi", std::move(poi_buffer));
     inputs.emplace("traces", torch_buffer(traces));
-    inputs.emplace("targets", torch_buffer(leakage));
+    auto target_buffer = torch_buffer(leakage);
+    target_buffer.set_metadata("attack.unit.indexes", "[0]");
+    target_buffer.set_metadata("attack.unit.count", "1");
+    inputs.emplace("targets", std::move(target_buffer));
 
     leakflow::plugins::crypto::PoiCorrelation element;
     const auto out = element.process_inputs(std::move(inputs));
@@ -59,6 +62,12 @@ int main()
     }
     const auto rescored = out->payload_as<leakflow::plugins::crypto::CorrelationPoiPayload>();
     if (!expect(rescored != nullptr && rescored->results().size() == 1, "output is not a rescored PoI payload")) {
+        return 1;
+    }
+    if (!expect(out->metadata("payload.layout") == "unit/channel/poi/[sample_index,correlation]"
+                    && out->metadata("payload.poi.unit_count") == "1"
+                    && out->metadata("attack.unit.indexes") == "[0]",
+                "rescored PoI unit/layout metadata was wrong")) {
         return 1;
     }
     const auto& r = rescored->results().front().result; // [1,2,2]

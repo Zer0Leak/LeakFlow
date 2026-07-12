@@ -169,6 +169,10 @@ int main()
                 "TorchFileSrc still stamped default sample_rate_hz metadata")) {
         return 1;
     }
+    if (!expect(loaded_buffer->metadata("payload.layout") == "axis_0/axis_1",
+                "TorchFileSrc did not publish the generic tensor layout")) {
+        return 1;
+    }
 
     const auto loaded_payload = loaded_buffer->payload_as<leakflow::base::TorchTensorPayload>();
     if (!expect(loaded_payload != nullptr, "TorchFileSrc payload type was wrong")) {

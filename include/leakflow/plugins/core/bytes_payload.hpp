@@ -11,6 +11,7 @@ public:
     explicit BytesPayload(std::string bytes = {});
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     [[nodiscard]] const std::string& bytes() const;
     [[nodiscard]] std::string& bytes();
 
@@ -19,4 +20,3 @@ private:
 };
 
 } // namespace leakflow::plugins::core
-

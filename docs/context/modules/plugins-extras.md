@@ -46,7 +46,9 @@ CLI/inspect files if affected:
   payload body through an `Hdf5BufferArchiveWriter`/`Reader` (see
   `docs/context/modules/extras.md`), while the element writes the caps/metadata
   envelope as attributes. `any` caps, so they link to anything; the reloaded buffer
-  carries its saved concrete caps. They live here — not in `leakflow_plugins_core` —
+  carries its saved concrete caps and exact archived `payload.layout`. The source
+  attaches the decoded payload before restoring archive metadata, so a saved
+  semantic layout overrides the payload type's generic fallback. They live here — not in `leakflow_plugins_core` —
   because only this layer links both Torch and the HDF5 backend. Enables e.g. saving
   an expensive `PearsonCorrelator` correlation once and reloading it to re-select
   PoIs (`PoiSelect`) offline. Codecs: `TorchTensorPayload` (base),
@@ -79,11 +81,12 @@ and the applicable array's role-specific payload attributes, then stamps:
 - `origin.role`,
 - `origin.row.begin`, `origin.row.count`, and `origin.row.total`,
 - `tensor.axes` for ordinary tensors,
-- `payload.countermeasure.tensors` and `payload.countermeasure.dims` for the
-  countermeasure bundle.
+- `payload.countermeasure.tensors` for the countermeasure bundle,
+- `payload.layout` for every payload.
 
-Ordinary dimension values are `trace,sample`, `trace,byte`, and `key_byte`.
-The current bundle dimension value is
+Ordinary tensor layouts are `trace/sample`, `trace/byte`, and `key_byte`,
+derived from each array's comma-separated storage `tensor.axes`. The current
+bundle layout is
 `jitter.parameters.loop_iterations=trace`.
 
 Typical offline syntax:
@@ -157,6 +160,8 @@ leakflow run --graph 'FakeLiveHdf5Src@data(path=tests/fixtures/aes/sync/key_01.h
 - emits a `Buffer` with `leakflow/numpy-array` caps plus concrete runtime
   numeric caps parameters such as `dtype`, `device=cpu`, `rank`, and `shape`,
 - attaches `NumpyPayload`,
+- publishes the rank-derived generic `payload.layout` (`scalar` or
+  `axis_0/axis_1/...`),
 - stamps minimal provenance metadata:
   - `routing.element`,
   - `origin.file.path`,
@@ -181,7 +186,8 @@ to application annotations or future dataset-specific elements.
 - emits a `Buffer` with `leakflow/torch-tensor` caps plus concrete runtime
   numeric caps parameters such as `dtype`, `device`, `rank`, and `shape`,
 - attaches `TorchTensorPayload`,
-- preserves incoming buffer metadata,
+- preserves incoming buffer metadata, including an exact semantic
+  `payload.layout` override,
 - stamps conversion metadata:
   - `payload.conversion.id=numpy-to-torch`,
   - `payload.conversion.element=<element instance name>`.

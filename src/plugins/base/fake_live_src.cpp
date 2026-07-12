@@ -81,6 +81,11 @@ ElementDescriptor FakeLiveSrc::descriptor()
                 std::int64_t{},
                 "axis-0 row index of the streamed buffer",
                 {"0", "1", "2"}),
+            make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "ordered axes of the streamed tensor payload",
+                {"axis_0/axis_1"}),
         },
         .metadata_suggestions = {
             make_element_metadata_descriptor(

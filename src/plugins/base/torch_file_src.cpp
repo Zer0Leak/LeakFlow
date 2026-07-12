@@ -141,6 +141,11 @@ ElementDescriptor TorchFileSrc::descriptor()
                 std::int64_t{},
                 "input file size in bytes",
                 {"40001506"}),
+            make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "ordered axes of the loaded tensor payload",
+                {"axis_0/axis_1", "axis_0"}),
         },
         .metadata_suggestions = {
             make_element_metadata_descriptor(

@@ -15,6 +15,11 @@ public:
         return "test/payload";
     }
 
+    [[nodiscard]] std::string layout() const override
+    {
+        return "row/column";
+    }
+
     void describe(leakflow::SummarySection& section, std::int64_t summary_level) const override
     {
         section.add_field("payload", type_name(), leakflow::SummaryValueRole::TypeName);

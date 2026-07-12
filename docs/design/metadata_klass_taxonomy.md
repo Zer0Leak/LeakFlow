@@ -54,6 +54,16 @@ leading payload.*    -> payload   (payload.leakage.*, payload.crypto.*, payload.
 DEFAULT (unprefixed) -> payload
 ```
 
+`payload.layout` is the reserved, payload-generic structural description of the
+current payload. Every concrete `Payload` supplies it through `Payload::layout()`;
+`Buffer::set_payload(...)` replaces the key when a payload is attached and erases
+it when the payload is cleared. Dense axes are slash-separated
+(`unit/channel/feature`), scalars are `scalar`, and structured payloads use
+semicolon-separated named members (`scores=unit/guess;ranking=unit/rank`).
+Payload-producing element descriptors advertise this key. New payload types must
+implement a meaningful non-empty layout; new payload-replacing elements must
+override the generic tensor axes when they know stronger semantic names.
+
 `leakflow_core` only needs the four group names; it never lists any domain
 vocabulary. Unprefixed or unknown keys default to payload, the safe choice for
 facts that should ride pass-through but not be forwarded onto derived buffers.
@@ -157,6 +167,10 @@ Rules and rationale:
 - **Reframe copies origin as-is** (single input, no relabel) and copies capture,
   but **drops upstream payload** — the element re-owns only the payload facts it
   can vouch for (for example `conversion.*`).
+- Attaching the replacement payload always installs its own `payload.layout`.
+  Representation-only converters that preserve logical axes explicitly re-own
+  the input layout after attaching the converted payload. Pass-through elements
+  retain the existing buffer envelope and therefore retain its layout unchanged.
 - An Analyze element may additionally **re-own a curated subset** of payload
   facts it is asserting about its output. `PearsonCorrelator`/`PoiSelect` do this for
   `leakage.*`/`crypto.*`/`trace.*` that describe the target model, since the PoI

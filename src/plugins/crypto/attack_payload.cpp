@@ -281,6 +281,17 @@ std::string AttackScoresPayload::type_name() const
     return attack_scores_caps_type;
 }
 
+std::string AttackScoresPayload::layout() const
+{
+    auto value = std::string(
+        "scores=unit/guess;ranking=unit/rank;best_guess=unit;best_guess_index=unit;"
+        "best_score=unit;best_channel=unit;best_sample=unit;guess_values=guess");
+    if (correlations_) {
+        value += ";correlations=unit/guess/channel/sample";
+    }
+    return value;
+}
+
 void AttackScoresPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
@@ -421,6 +432,20 @@ AttackStatsPayload::AttackStatsPayload(
 std::string AttackStatsPayload::type_name() const
 {
     return attack_stats_caps_type;
+}
+
+std::string AttackStatsPayload::layout() const
+{
+    auto value = std::string();
+    if (has_truth()) {
+        value = "true_rank=unit;true_guess=unit;true_score=unit;success=unit;";
+    }
+    value +=
+        "top1_guess=unit;top2_guess=unit;score_gap=unit;best_channel=unit;best_sample=unit;"
+        "topk_guess=unit/rank;topk_score=unit/rank;topk_margin=unit/rank;"
+        "topk_relative_margin=unit/rank;topk_z_score=unit/rank;"
+        "topk_robust_z_score=unit/rank;topk_separation=unit/rank";
+    return value;
 }
 
 void AttackStatsPayload::describe(SummarySection& section, std::int64_t summary_level) const

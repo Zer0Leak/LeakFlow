@@ -14,6 +14,11 @@ std::string BytesPayload::type_name() const
     return "leakflow/bytes";
 }
 
+std::string BytesPayload::layout() const
+{
+    return "byte";
+}
+
 const std::string& BytesPayload::bytes() const
 {
     return bytes_;
@@ -25,4 +30,3 @@ std::string& BytesPayload::bytes()
 }
 
 } // namespace leakflow::plugins::core
-

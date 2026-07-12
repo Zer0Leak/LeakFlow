@@ -18,6 +18,12 @@ The pipeline **elements** that wrap these APIs live in the `leakflow_plugins_ml`
 family (klass `Analyze/Clustering/...`, `Analyze/Evaluation/Clustering`,
 `Transform/Feature/Select`, `Plot/Heatmap`).
 
+Every payload-producing wrapper stamps the core `payload.layout` contract with
+semantic axes after attaching its Torch payload: `FeatureSelect` emits
+`observation/feature` or `unit/observation/feature`, `GaussianMixture` emits
+`observation` or `unit/observation`, and `ClusteringStats` emits
+`true_class/cluster` or `unit/true_class/cluster`.
+
 ## Current API
 
 - `gaussian_mixture.hpp`: `GaussianMixture` — GMM/EM modelled on

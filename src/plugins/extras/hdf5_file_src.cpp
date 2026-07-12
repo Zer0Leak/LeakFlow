@@ -118,9 +118,10 @@ ElementDescriptor Hdf5FileSrc::descriptor() {
                   "tensor.axes", std::string(), "semantic Torch tensor axes",
                   {"trace,sample", "trace,byte", "key_byte"}),
               make_element_metadata_descriptor(
-                  "payload.countermeasure.dims", std::string(),
-                  "semantic axes for named countermeasure tensors",
-                  {"jitter.parameters.loop_iterations=trace"}),
+                  "payload.layout", std::string(),
+                  "ordered semantic axes of the emitted payload",
+                  {"trace/sample", "trace/byte", "key_byte",
+                   "jitter.parameters.loop_iterations=trace"}),
               make_element_metadata_descriptor(
                   "payload.countermeasure.tensors", std::string(),
                   "comma-separated tensor names in the countermeasure bundle",

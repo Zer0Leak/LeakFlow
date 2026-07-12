@@ -136,6 +136,11 @@ ElementDescriptor TorchConvert::descriptor()
                 std::string(),
                 "element instance name that performed the conversion",
                 {"torchconvert0"}),
+            make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "ordered axes preserved from the input tensor",
+                {"trace/sample", "axis_0/axis_1"}),
         },
     };
 }
@@ -176,6 +181,9 @@ std::optional<Buffer> TorchConvert::process(std::optional<Buffer> input)
     output.set_metadata("payload.conversion.id", torch_convert_conversion_id);
     output.set_metadata("payload.conversion.element", name());
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(converted_payload)));
+    if (input->has_metadata("payload.layout")) {
+        output.set_metadata("payload.layout", input->metadata("payload.layout"));
+    }
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "converted Torch tensor");
     record.fields.emplace("payload.conversion.id", torch_convert_conversion_id);

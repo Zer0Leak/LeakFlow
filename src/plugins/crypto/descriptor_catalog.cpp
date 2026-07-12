@@ -122,33 +122,33 @@ void register_element_factories(ElementFactoryRegistry& registry)
 
 namespace {
 
-[[nodiscard]] torch::Tensor byte_indexes_to_tensor(const std::vector<std::uint16_t>& byte_indexes)
+[[nodiscard]] torch::Tensor unit_indexes_to_tensor(const std::vector<std::int64_t>& unit_indexes)
 {
-    auto tensor = torch::empty({static_cast<std::int64_t>(byte_indexes.size())}, torch::kInt64);
+    auto tensor = torch::empty({static_cast<std::int64_t>(unit_indexes.size())}, torch::kInt64);
     auto accessor = tensor.accessor<std::int64_t, 1>();
-    for (std::size_t index = 0; index < byte_indexes.size(); ++index) {
-        accessor[static_cast<std::int64_t>(index)] = byte_indexes[index];
+    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+        accessor[static_cast<std::int64_t>(index)] = unit_indexes[index];
     }
     return tensor;
 }
 
-[[nodiscard]] std::vector<std::uint16_t> byte_indexes_from_tensor(const torch::Tensor& tensor)
+[[nodiscard]] std::vector<std::int64_t> unit_indexes_from_tensor(const torch::Tensor& tensor)
 {
     const auto contiguous = tensor.to(torch::kInt64).contiguous();
     const auto accessor = contiguous.accessor<std::int64_t, 1>();
-    std::vector<std::uint16_t> byte_indexes;
-    byte_indexes.reserve(static_cast<std::size_t>(contiguous.size(0)));
+    std::vector<std::int64_t> unit_indexes;
+    unit_indexes.reserve(static_cast<std::size_t>(contiguous.size(0)));
     for (std::int64_t index = 0; index < contiguous.size(0); ++index) {
-        byte_indexes.push_back(static_cast<std::uint16_t>(accessor[index]));
+        unit_indexes.push_back(accessor[index]);
     }
-    return byte_indexes;
+    return unit_indexes;
 }
 
 } // namespace
 
 void register_payload_codecs(PayloadCodecRegistry& codecs)
 {
-    // CorrelationPayload: [grouped, byte_indexes, channel_count, feature_count,
+    // CorrelationPayload: [grouped, unit_indexes, channel_count, feature_count,
     // score_name, observation_count] pickled as one IValue tuple.
     codecs.register_codec(
         correlation_caps_type,
@@ -160,7 +160,7 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                         throw std::invalid_argument("correlation codec: payload is not a CorrelationPayload");
                     }
                     archive.write_tensor("grouped_correlation", correlation->grouped_correlation());
-                    archive.write_tensor("byte_indexes", byte_indexes_to_tensor(correlation->byte_indexes()));
+                    archive.write_tensor("unit_indexes", unit_indexes_to_tensor(correlation->unit_indexes()));
                     archive.write_int("channel_count", correlation->channel_count());
                     archive.write_int("feature_count", correlation->feature_count());
                     archive.write_string("score_name", correlation->score_name());
@@ -170,7 +170,7 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                 [](const leakflow::base::BufferArchiveReader& archive) -> std::shared_ptr<Payload> {
                     return std::make_shared<CorrelationPayload>(
                         archive.read_tensor("grouped_correlation"),
-                        byte_indexes_from_tensor(archive.read_tensor("byte_indexes")),
+                        unit_indexes_from_tensor(archive.read_tensor("unit_indexes")),
                         archive.read_int("channel_count"),
                         archive.read_int("feature_count"),
                         archive.read_string("score_name"),
@@ -178,7 +178,7 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                 },
         });
 
-    // CorrelationPoiPayload: [byte_indexes, list<result tensor>, score_name].
+    // CorrelationPoiPayload: [unit_indexes, list<result tensor>, score_name].
     codecs.register_codec(
         correlation_poi_caps_type,
         PayloadCodec{
@@ -188,26 +188,26 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
                     if (poi == nullptr) {
                         throw std::invalid_argument("correlation-poi codec: payload is not a CorrelationPoiPayload");
                     }
-                    std::vector<std::uint16_t> byte_indexes;
-                    byte_indexes.reserve(poi->result_count());
+                    std::vector<std::int64_t> unit_indexes;
+                    unit_indexes.reserve(poi->unit_count());
                     const auto& results = poi->results();
                     for (std::size_t index = 0; index < results.size(); ++index) {
-                        byte_indexes.push_back(results[index].unit);
+                        unit_indexes.push_back(results[index].unit_index);
                         archive.write_tensor("result_" + std::to_string(index), results[index].result);
                     }
-                    archive.write_tensor("byte_indexes", byte_indexes_to_tensor(byte_indexes));
-                    archive.write_int("result_count", static_cast<std::int64_t>(results.size()));
+                    archive.write_tensor("unit_indexes", unit_indexes_to_tensor(unit_indexes));
+                    archive.write_int("unit_count", static_cast<std::int64_t>(results.size()));
                     archive.write_string("score_name", poi->score_name());
                 },
             .load =
                 [](const leakflow::base::BufferArchiveReader& archive) -> std::shared_ptr<Payload> {
-                    const auto byte_indexes = byte_indexes_from_tensor(archive.read_tensor("byte_indexes"));
-                    const auto result_count = static_cast<std::size_t>(archive.read_int("result_count"));
+                    const auto unit_indexes = unit_indexes_from_tensor(archive.read_tensor("unit_indexes"));
+                    const auto unit_count = static_cast<std::size_t>(archive.read_int("unit_count"));
                     std::vector<CorrelationPoiResult> results;
-                    results.reserve(result_count);
-                    for (std::size_t index = 0; index < result_count; ++index) {
+                    results.reserve(unit_count);
+                    for (std::size_t index = 0; index < unit_count; ++index) {
                         results.push_back(CorrelationPoiResult{
-                            .unit = byte_indexes.at(index),
+                            .unit_index = unit_indexes.at(index),
                             .result = archive.read_tensor("result_" + std::to_string(index)),
                         });
                     }

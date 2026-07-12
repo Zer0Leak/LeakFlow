@@ -29,8 +29,8 @@ Tests:
 
 - `Caps`: lightweight type plus deterministic string parameters.
 - `Buffer`: caps, metadata, and optional shared payload.
-- `Payload`: polymorphic data body with `type_name()` and optional
-  `describe(...)`.
+- `Payload`: polymorphic data body with `type_name()`, a required non-empty
+  logical `layout()`, and optional `describe(...)`.
 - `Element`: lifecycle, pads, properties, and `process(optional<Buffer>)`.
 - `Element` always has a writable string `name` property synchronized with
   `Element::name()`.
@@ -63,6 +63,9 @@ Tests:
   increment on emission, `merge_provenance` fold-match at joins,
   `provenance_generation` for UI. Replaces the removed `Buffer::epoch()`. See
   `docs/design/dataflow_sync_model.md`.
+- `Buffer::set_payload(...)` owns the reserved `payload.layout` metadata key:
+  setting a payload replaces it with `Payload::layout()`, an empty layout is
+  rejected, and clearing the payload erases the key.
 - `Element::can_replay()`: replay-safety signal (default true).
 - `Element::is_live()` / `at_end_of_stream()` / `set_stop_token()`: liveness +
   3-state stream result + cooperative stop.
@@ -114,6 +117,12 @@ registration so `name` appears consistently before element-specific properties.
 
 Core must not depend on Torch, NumPy, AES, Kyber, GUI, YAML, plotting, hardware,
 or dynamic plugin loading.
+
+Every concrete payload declares its logical layout. Dense axes are
+slash-separated (`axis_0/axis_1`), a scalar is `scalar`, and structured payloads
+use semicolon-separated named members (`name=axes;other=scalar`). The layout is
+not wrapped in the payload type name. `Buffer::set_payload(...)` publishes this
+value as `payload.layout`, making the payload implementation the source of truth.
 
 Offline execution is synchronous; live execution is threaded (segments cut at
 every `Queue`). Elements stay synchronous and thread-unaware — only the engine and

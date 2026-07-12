@@ -19,6 +19,7 @@ inline constexpr auto cpu_device_caps_value = "cpu";
 
 [[nodiscard]] std::string shape_caps_value(const std::int64_t* values, std::size_t count);
 [[nodiscard]] std::string shape_caps_value(const std::uint64_t* values, std::size_t count);
+[[nodiscard]] std::string generic_rank_layout(std::uint64_t rank);
 
 [[nodiscard]] Caps numeric_array_caps(
     std::string type,

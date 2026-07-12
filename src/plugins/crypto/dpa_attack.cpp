@@ -407,14 +407,6 @@ void require_binary_hypotheses(const torch::Tensor& tensor)
         }
         return indexes;
     }
-    if (hypotheses.has_metadata("payload.leakage.byte_indexes")) {
-        auto indexes = parse_int_list(hypotheses.metadata("payload.leakage.byte_indexes"));
-        if (indexes.size() != static_cast<std::size_t>(unit_count)) {
-            throw std::invalid_argument("DpaAttack payload.leakage.byte_indexes metadata must match hypothesis unit axis");
-        }
-        return indexes;
-    }
-
     std::vector<std::int64_t> indexes;
     indexes.reserve(static_cast<std::size_t>(unit_count));
     for (std::int64_t index = 0; index < unit_count; ++index) {
@@ -587,7 +579,6 @@ void copy_hypothesis_semantic_metadata(const Buffer& hypotheses, Buffer& output)
     static const std::vector<std::string_view> keys{
         "payload.leakage.model",
         "payload.leakage.hypothesis",
-        "payload.leakage.byte_indexes",
         "payload.leakage.channels",
         "payload.crypto.algorithm",
         "payload.crypto.state_bytes",
@@ -595,6 +586,7 @@ void copy_hypothesis_semantic_metadata(const Buffer& hypotheses, Buffer& output)
         "attack.hypothesis.round",
         "attack.unit.kind",
         "attack.unit.indexes",
+        "attack.unit.count",
         "attack.guess.kind",
         "attack.guess.count",
         "attack.guess.order",
@@ -793,6 +785,8 @@ ElementDescriptor DpaAttack::descriptor()
             make_element_metadata_descriptor(
                 "attack.ranking.values", std::string(), "ranking tensor value meaning", {"guess_index"}),
             make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
+            make_element_metadata_descriptor(
                 "payload.dpa.trace",
                 std::string(),
                 "DPA trace payload kind emitted by the best_difference pad",
@@ -802,6 +796,9 @@ ElementDescriptor DpaAttack::descriptor()
                 std::string(),
                 "selection used to reduce the DPA difference surface to rank-2 traces",
                 {"best_guess,best_channel"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"unit/sample", "scores=unit/guess;ranking=unit/rank;best_guess=unit"}),
         },
     };
 }
@@ -905,6 +902,7 @@ ElementOutputs DpaAttack::process_pads(ElementInputs inputs)
         "attack.accumulation.mode",
         active_mode == AccumulationMode::Recompute ? "recompute" : "incremental");
     output.set_metadata("attack.observation_count", std::to_string(observation_count));
+    output.set_metadata("attack.unit.count", std::to_string(prepared.unit_count));
     output.set_metadata("attack.feature.count", std::to_string(prepared.sample_count));
     output.set_metadata("attack.score.method", score_method_text);
     output.set_metadata("attack.score.channels", score_channels_text);
@@ -929,6 +927,7 @@ ElementOutputs DpaAttack::process_pads(ElementInputs inputs)
         "attack.accumulation.mode",
         active_mode == AccumulationMode::Recompute ? "recompute" : "incremental");
     best_difference_output.set_metadata("attack.observation_count", std::to_string(observation_count));
+    best_difference_output.set_metadata("attack.unit.count", std::to_string(prepared.unit_count));
     best_difference_output.set_metadata("attack.feature.count", std::to_string(prepared.sample_count));
     best_difference_output.set_metadata("attack.score.method", score_method_text);
     best_difference_output.set_metadata("attack.score.channels", score_channels_text);
@@ -936,6 +935,7 @@ ElementOutputs DpaAttack::process_pads(ElementInputs inputs)
     best_difference_output.set_metadata("attack.best_difference.selection", "best_guess,best_channel");
     best_difference_output.set_metadata("tensor.axes", "attack_unit,sample");
     best_difference_output.set_payload(std::move(best_difference_payload));
+    best_difference_output.set_metadata("payload.layout", "unit/sample");
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "computed DPA attack ranking");
     record.fields.emplace("attack.method", dpa_attack_method_id);

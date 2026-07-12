@@ -249,6 +249,7 @@ process_plaintexts(AesLeakageHypothesis &element, const Buffer &input,
   output.set_metadata("attack.hypothesis.round", "first");
   output.set_metadata("attack.unit.kind", "byte");
   output.set_metadata("attack.unit.indexes", size_indexes_metadata(byte_indexes));
+  output.set_metadata("attack.unit.count", std::to_string(byte_indexes.size()));
   output.set_metadata("attack.guess.kind", "byte");
   output.set_metadata("attack.guess.count", std::to_string(guess_values.size(0)));
   output.set_metadata("attack.guess.order", "domain");
@@ -260,6 +261,7 @@ process_plaintexts(AesLeakageHypothesis &element, const Buffer &input,
                       "attack_unit,guess,trace,leakage_channel");
   output.set_payload(
       std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+  output.set_metadata("payload.layout", "unit/guess/trace/channel");
 
   auto record = element.make_log_record(
       log::LogLevel::Debug, "element", "computed AES leakage hypotheses");
@@ -381,6 +383,9 @@ ElementDescriptor AesLeakageHypothesis::descriptor() {
                   "attack.unit.indexes", IntList{},
                   "attack unit indexes in output order", {"[0]", "[3,5]"}),
               make_element_metadata_descriptor(
+                  "attack.unit.count", std::int64_t{},
+                  "number of attack units represented", {"16"}),
+              make_element_metadata_descriptor(
                   "attack.guess.kind", std::string(),
                   "kind of guess domain", {"byte"}),
               make_element_metadata_descriptor(
@@ -401,6 +406,9 @@ ElementDescriptor AesLeakageHypothesis::descriptor() {
                   "tensor.axes", std::string(),
                   "semantic tensor axes",
                   {"attack_unit,guess,trace,leakage_channel"}),
+              make_element_metadata_descriptor(
+                  "payload.layout", std::string(), "semantic payload layout",
+                  {"unit/guess/trace/channel"}),
           },
   };
 }

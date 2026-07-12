@@ -6,6 +6,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <sstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -19,9 +20,9 @@ namespace {
     return summary_list_from_int_array(vector_values.data(), vector_values.size());
 }
 
-[[nodiscard]] std::string byte_result_summary(const CorrelationPoiResult& result)
+[[nodiscard]] std::string unit_result_summary(const CorrelationPoiResult& result)
 {
-    return "(unit: " + std::to_string(result.unit)
+    return "(unit: " + std::to_string(result.unit_index)
         + ", shape: " + shape_to_string(result.result.sizes()) + ")";
 }
 
@@ -56,8 +57,23 @@ CorrelationPoiPayload::CorrelationPoiPayload(std::vector<CorrelationPoiResult> r
         throw std::invalid_argument("CorrelationPoiPayload score name cannot be empty");
     }
 
+    const auto field_count = results_.front().result.defined() && results_.front().result.dim() == 3
+        ? results_.front().result.size(2)
+        : std::int64_t{0};
     for (const auto& result : results_) {
         validate_result(result);
+        if (result.unit_index < 0) {
+            throw std::invalid_argument("CorrelationPoiPayload unit indexes must be non-negative");
+        }
+        if (result.result.size(2) != field_count) {
+            throw std::invalid_argument("CorrelationPoiPayload units must use a consistent result field axis");
+        }
+    }
+    std::set<std::int64_t> unit_indexes;
+    for (const auto& result : results_) {
+        if (!unit_indexes.insert(result.unit_index).second) {
+            throw std::invalid_argument("CorrelationPoiPayload unit indexes must be unique");
+        }
     }
 }
 
@@ -66,20 +82,29 @@ std::string CorrelationPoiPayload::type_name() const
     return correlation_poi_caps_type;
 }
 
+std::string CorrelationPoiPayload::layout() const
+{
+    const auto field_axis = results_.front().result.size(2);
+    if (field_axis == 1) {
+        return "unit/channel/poi/[" + score_name_ + "]";
+    }
+    return "unit/channel/poi/[sample_index," + score_name_ + "]";
+}
+
 void CorrelationPoiPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
-    section.add_field("result groups", summary_integer(static_cast<std::int64_t>(results_.size())),
+    section.add_field("units", summary_integer(static_cast<std::int64_t>(results_.size())),
         SummaryValueRole::Number);
     section.add_field("score", score_name_, SummaryValueRole::Text);
 
     if (summary_level >= 1) {
         for (const auto& result : results_) {
-            auto& field = section.add_field("result", byte_result_summary(result), SummaryValueRole::Size);
+            auto& field = section.add_field("result", unit_result_summary(result), SummaryValueRole::Size);
             if (summary_level >= 2) {
                 field.add_child(
                     "unit",
-                    summary_integer(static_cast<std::int64_t>(result.unit)),
+                    summary_integer(static_cast<std::int64_t>(result.unit_index)),
                     SummaryValueRole::Number);
                 field.add_child(
                     "dtype", leakflow::base::torch_dtype_name(result.result.scalar_type()), SummaryValueRole::TypeName);
@@ -99,7 +124,7 @@ const CorrelationPoiResult& CorrelationPoiPayload::result(std::size_t index) con
     return results_.at(index);
 }
 
-std::size_t CorrelationPoiPayload::result_count() const
+std::size_t CorrelationPoiPayload::unit_count() const
 {
     return results_.size();
 }

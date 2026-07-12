@@ -102,6 +102,9 @@ ElementDescriptor ClusteringStats::descriptor()
         .keywords = {"clustering", "evaluation", "confusion", "ari", "nmi", "accuracy", "ml"},
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
+                "payload.layout", std::string(), "logical axes of the reordered confusion tensor",
+                {"true_class/cluster", "unit/true_class/cluster"}),
+            make_element_metadata_descriptor(
                 "payload.cluster_stats.accuracy", std::string(), "mean matched accuracy over units", {"0.68"}),
             make_element_metadata_descriptor(
                 "payload.cluster_stats.ari", std::string(), "mean adjusted Rand index", {"0.62"}),
@@ -163,6 +166,8 @@ std::optional<Buffer> ClusteringStats::process_inputs(ElementInputs inputs)
     output.set_metadata("payload.cluster_stats.n_classes", std::to_string(n_classes));
     output.set_metadata("payload.cluster_stats.n_clusters", std::to_string(n_clusters));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+    output.set_metadata("payload.layout",
+        reordered.dim() == 2 ? "true_class/cluster" : "unit/true_class/cluster");
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "scored clustering vs truth");
     record.fields.emplace("accuracy", format(accuracy_per_unit.mean().item<double>()));

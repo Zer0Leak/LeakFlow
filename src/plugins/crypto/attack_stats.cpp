@@ -318,6 +318,11 @@ ElementDescriptor AttackStats::descriptor()
                 StringList{},
                 "selected confidence metrics shown for each top-K guess",
                 {"relative_margin,z_score,robust_z_score"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"top1_guess=unit;topk_guess=unit/rank;topk_score=unit/rank"}),
         },
     };
 }
@@ -499,6 +504,7 @@ std::optional<Buffer> AttackStats::process_inputs(ElementInputs inputs)
     output.set_metadata("attack.stats.has_truth", has_truth ? "true" : "false");
     output.set_metadata("attack.stats.score_gap", "relative_margin");
     output.set_metadata("attack.stats.top_k", std::to_string(top_k));
+    output.set_metadata("attack.unit.count", std::to_string(unit_count));
     output.set_metadata("attack.stats.confidence_metrics", join_metrics(confidence_metrics));
     if (has_truth) {
         output.set_metadata("attack.stats.rank_base", "1");

@@ -16,6 +16,15 @@
 namespace leakflow::plugins::crypto {
 namespace {
 
+void copy_unit_metadata(const Buffer& input, Buffer& output)
+{
+    for (const auto key : {"attack.unit.kind", "attack.unit.indexes"}) {
+        if (input.has_metadata(key)) {
+            output.set_metadata(key, input.metadata(key));
+        }
+    }
+}
+
 [[nodiscard]] std::int64_t int_property_or(const Element& element, std::string_view name, std::int64_t fallback)
 {
     if (const auto value = element.property_as<std::int64_t>(name)) {
@@ -51,6 +60,10 @@ ElementDescriptor HwClass::descriptor()
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
                 "payload.class.count", std::int64_t{}, "number of distinct classes", {"81"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout", {"unit/trace"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
         },
     };
 }
@@ -87,8 +100,11 @@ std::optional<Buffer> HwClass::process(std::optional<Buffer> input)
     auto class_payload = leakflow::base::TorchTensorPayload(classes);
     Buffer output{class_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "leakage", name());
+    copy_unit_metadata(*input, output);
+    output.set_metadata("attack.unit.count", std::to_string(classes.size(0)));
     output.set_metadata("payload.class.count", std::to_string(radix * radix));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(class_payload)));
+    output.set_metadata("payload.layout", "unit/trace");
     return output;
 }
 

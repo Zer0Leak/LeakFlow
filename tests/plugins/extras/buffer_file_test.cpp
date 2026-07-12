@@ -64,6 +64,7 @@ int main()
         buffer.set_metadata("capture.source", "ChipWhisperer");
         buffer.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
         buffer.set_payload(payload);
+        buffer.set_metadata("payload.layout", "trace/sample");
         const auto original_caps = buffer.caps().to_string();
 
         const auto file = (root / "tensor.h5").string();
@@ -92,6 +93,10 @@ int main()
                 "leakage metadata did not round-trip")) {
             fail();
         }
+        if (!expect(loaded->metadata("payload.layout") == "trace/sample",
+                "semantic payload layout did not round-trip")) {
+            fail();
+        }
         const auto loaded_payload = loaded->payload_as<leakflow::base::TorchTensorPayload>();
         if (!expect(loaded_payload != nullptr && torch::equal(loaded_payload->tensor(), tensor),
                 "tensor payload did not round-trip")) {
@@ -103,11 +108,11 @@ int main()
     {
         auto results = std::vector<crypto_plugin::CorrelationPoiResult>{
             crypto_plugin::CorrelationPoiResult{
-                .unit = 3,
+                .unit_index = 3,
                 .result = torch::tensor({{{7.0, 0.625}, {2.0, -0.5}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             },
             crypto_plugin::CorrelationPoiResult{
-                .unit = 5,
+                .unit_index = 5,
                 .result = torch::tensor({{{1.0, 0.9}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             },
         };
@@ -126,13 +131,18 @@ int main()
         src.set_property("path", file);
         const auto loaded = src.process(std::nullopt);
         const auto loaded_payload = loaded->payload_as<crypto_plugin::CorrelationPoiPayload>();
-        if (!expect(loaded_payload != nullptr && loaded_payload->result_count() == 2,
-                "PoI payload result count did not round-trip")) {
+        if (!expect(loaded_payload != nullptr && loaded_payload->unit_count() == 2,
+                "PoI payload unit count did not round-trip")) {
             return 1;
         }
-        if (!expect(loaded_payload->result(0).unit == 3
-                    && loaded_payload->result(1).unit == 5,
-                "PoI byte indexes did not round-trip")) {
+        if (!expect(loaded_payload->result(0).unit_index == 3
+                    && loaded_payload->result(1).unit_index == 5,
+                "PoI unit indexes did not round-trip")) {
+            fail();
+        }
+        if (!expect(loaded->metadata("payload.layout")
+                    == "unit/channel/poi/[sample_index,correlation]",
+                "PoI semantic payload layout did not round-trip")) {
             fail();
         }
         if (!expect(loaded_payload->score_name() == "correlation", "PoI score name did not round-trip")) {

@@ -53,6 +53,11 @@ ElementDescriptor FeatureSelect::descriptor()
             Pad("selected", PadDirection::Output, Caps(leakflow::base::torch_tensor_caps_type)),
         },
         .keywords = {"feature", "select", "gather", "poi", "truncate", "ml"},
+        .metadata_set_by_element = {
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "logical axes of the selected feature tensor",
+                {"observation/feature", "unit/observation/feature"}),
+        },
     };
 }
 
@@ -103,6 +108,8 @@ std::optional<Buffer> FeatureSelect::process_inputs(ElementInputs inputs)
     forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     output.set_metadata("payload.feature.selected_count", std::to_string(selected.size(-1)));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+    output.set_metadata("payload.layout",
+        selected.dim() == 2 ? "observation/feature" : "unit/observation/feature");
     return output;
 }
 

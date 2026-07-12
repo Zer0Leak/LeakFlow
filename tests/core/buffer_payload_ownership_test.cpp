@@ -19,6 +19,11 @@ public:
         return "test/payload";
     }
 
+    [[nodiscard]] std::string layout() const override
+    {
+        return "scalar";
+    }
+
     std::string value;
 };
 
@@ -27,6 +32,11 @@ public:
     [[nodiscard]] std::string type_name() const override
     {
         return "test/other-payload";
+    }
+
+    [[nodiscard]] std::string layout() const override
+    {
+        return "scalar";
     }
 };
 

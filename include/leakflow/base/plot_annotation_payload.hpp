@@ -36,6 +36,7 @@ public:
     explicit PlotAnnotationPayload(std::vector<PlotAnnotation> annotations);
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     [[nodiscard]] const std::vector<PlotAnnotation>& annotations() const;

@@ -33,6 +33,22 @@ std::string shape_caps_value(const std::uint64_t* values, std::size_t count)
     return shape_caps_value_from(values, count);
 }
 
+std::string generic_rank_layout(std::uint64_t rank)
+{
+    if (rank == 0) {
+        return "scalar";
+    }
+
+    std::ostringstream output;
+    for (std::uint64_t axis = 0; axis < rank; ++axis) {
+        if (axis != 0) {
+            output << '/';
+        }
+        output << "axis_" << axis;
+    }
+    return output.str();
+}
+
 Caps numeric_array_caps(
     std::string type,
     std::string dtype,

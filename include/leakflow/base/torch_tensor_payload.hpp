@@ -14,6 +14,7 @@ public:
     explicit TorchTensorPayload(torch::Tensor tensor);
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     [[nodiscard]] const torch::Tensor& tensor() const;

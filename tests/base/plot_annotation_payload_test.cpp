@@ -63,6 +63,12 @@ int main()
             "PlotAnnotationPayload type name was wrong")) {
         return 1;
     }
+    const auto annotation_layout =
+        "annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]";
+    if (!expect(payload.layout() == annotation_layout,
+            "PlotAnnotationPayload layout was wrong")) {
+        return 1;
+    }
     if (!expect(payload.annotation_count() == 3, "PlotAnnotationPayload annotation count was wrong")) {
         return 1;
     }
@@ -165,6 +171,10 @@ int main()
     buffer.set_payload(std::make_shared<leakflow::base::PlotAnnotationPayload>(payload));
     if (!expect(buffer.payload_as<leakflow::base::PlotAnnotationPayload>() != nullptr,
             "Buffer did not preserve PlotAnnotationPayload type")) {
+        return 1;
+    }
+    if (!expect(buffer.metadata("payload.layout") == annotation_layout,
+            "Buffer did not publish PlotAnnotationPayload layout")) {
         return 1;
     }
 

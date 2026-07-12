@@ -244,7 +244,9 @@ Core:
   property.
 - `Caps`
 - `Buffer`
-- `Payload`
+- `Payload` with a required non-empty logical `layout()`; attaching one through
+  `Buffer::set_payload(...)` replaces the reserved `payload.layout` metadata,
+  while clearing it removes that metadata.
 - `Element`
 - `Pad`
 - `Pipeline`
@@ -368,6 +370,12 @@ Crypto plugin elements:
 - `PearsonCorrelator`
 - `PoiSelect`
 - `CorrelationPoiToPlotAnnotations`
+
+`CorrelationPayload` uses the generic dense layout
+`unit/channel/feature`. `CorrelationPoiPayload` is organized by unit, with each
+unit carrying `channel/poi/[sample_index,score]` (or score-only) results. Generic
+correlation/PoI APIs and archive fields use `unit_indexes`; AES-specific byte
+selection remains confined to the AES leakage elements.
 
 Logging:
 

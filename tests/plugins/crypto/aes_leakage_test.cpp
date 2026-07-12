@@ -116,6 +116,15 @@ int main() {
               "AesLeakage did not report connected traces input")) {
     return 1;
   }
+  if (!expect(output->metadata("attack.unit.indexes") == "[0,2]"
+                  && output->metadata("attack.unit.count") == "2",
+              "AesLeakage did not stamp generic unit metadata")) {
+    return 1;
+  }
+  if (!expect(output->metadata("payload.layout") == "unit/trace/channel",
+              "AesLeakage payload layout was wrong")) {
+    return 1;
+  }
 
   const auto payload = output->payload_as<leakflow::base::TorchTensorPayload>();
   if (!expect(payload != nullptr, "AesLeakage output payload type was wrong")) {

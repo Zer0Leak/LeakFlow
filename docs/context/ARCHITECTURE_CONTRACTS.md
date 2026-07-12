@@ -54,6 +54,15 @@ Queues store `Buffer` objects, not payloads inside one buffer.
 
 `set_payload(nullptr)` clears the payload.
 
+Every concrete `Payload` implements `layout()` and returns a non-empty logical
+layout. Dense axes use slash-separated names (`axis_0/axis_1`), scalars use
+`scalar`, and structured payloads use semicolon-separated named members
+(`name=axes;other=scalar`); the payload type is not wrapped around the layout.
+`Buffer::set_payload(...)` is the source-of-truth boundary for the reserved
+`payload.layout` metadata key: setting a payload replaces the key with
+`Payload::layout()`, an empty layout is rejected, and clearing the payload erases
+the key.
+
 Use `payload_as<T>()` for read-only typed access.
 
 Use `mutable_payload_if_unique<T>()` before in-place mutation. If the payload is

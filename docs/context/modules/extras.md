@@ -59,7 +59,8 @@ Tests:
   the full payload dtype range (`float32/64`, `int8/16/32/64`, `uint8`); HDF5 is
   hidden behind a pimpl so the header stays HDF5-free. Drives
   `BufferFileSink`/`BufferFileSrc`. Payload tensors reload on CPU.
-- `NumpyPayload`: thin wrapper around `cnpypp::NpyArray`.
+- `NumpyPayload`: thin wrapper around `cnpypp::NpyArray`; its layout is the
+  rank-derived generic fallback (`scalar` or `axis_0/axis_1/...`).
 - `load_npy(path)`: loads one `.npy` file into `NumpyPayload`.
 - `NumpyPayload::caps()`: exposes concrete runtime caps metadata using the
   shared numeric caps vocabulary.

@@ -1,6 +1,7 @@
 #include "leakflow/core/buffer.hpp"
 
 #include <cstdint>
+#include <stdexcept>
 #include <utility>
 
 namespace leakflow {
@@ -67,6 +68,18 @@ bool Buffer::payload_is_unique() const
 
 void Buffer::set_payload(std::shared_ptr<Payload> payload)
 {
+    if (!payload) {
+        payload_.reset();
+        metadata_.erase("payload.layout");
+        return;
+    }
+
+    auto layout = payload->layout();
+    if (layout.empty()) {
+        throw std::invalid_argument("payload layout must not be empty");
+    }
+
+    metadata_.insert_or_assign("payload.layout", std::move(layout));
     payload_ = std::move(payload);
 }
 

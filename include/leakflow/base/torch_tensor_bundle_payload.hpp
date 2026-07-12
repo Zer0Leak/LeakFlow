@@ -17,6 +17,7 @@ public:
     using TensorMap = std::map<std::string, std::shared_ptr<TorchTensorPayload>, std::less<>>;
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     void set(std::string name, std::shared_ptr<TorchTensorPayload> payload);

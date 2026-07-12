@@ -56,6 +56,9 @@ public:
             if (input->has_metadata("capture.sample_rate_hz")) {
                 saw_capture_sample_rate = true;
             }
+            if (input->has_metadata("payload.layout")) {
+                last_layout = input->metadata("payload.layout");
+            }
         }
         return std::nullopt;
     }
@@ -65,6 +68,7 @@ public:
     std::int64_t last_rows = 0;
     std::int64_t last_cols = 0;
     bool saw_capture_sample_rate = false;
+    std::string last_layout;
 };
 
 // A one-run (non-live) Torch source, for the liveness-propagation negative case.
@@ -114,6 +118,10 @@ int main()
         return 1;
     }
     if (!expect(!sink->saw_capture_sample_rate, "FakeLiveSrc stamped capture.sample_rate_hz metadata")) {
+        return 1;
+    }
+    if (!expect(sink->last_layout == "axis_0/axis_1",
+            "FakeLiveSrc did not publish the generic streamed tensor layout")) {
         return 1;
     }
 

@@ -60,6 +60,11 @@ ElementDescriptor FileSrc::descriptor()
                 "input file size in bytes",
                 {"4096"}),
             make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "logical structure of the emitted byte payload",
+                {"byte"}),
+            make_element_metadata_descriptor(
                 "routing.element",
                 std::string(),
                 "element instance name that produced the buffer",

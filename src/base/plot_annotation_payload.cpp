@@ -72,6 +72,11 @@ std::string PlotAnnotationPayload::type_name() const
     return plot_annotation_caps_type;
 }
 
+std::string PlotAnnotationPayload::layout() const
+{
+    return "annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]";
+}
+
 void PlotAnnotationPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);

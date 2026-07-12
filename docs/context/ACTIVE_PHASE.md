@@ -246,7 +246,8 @@ Phase 24 has added `leakflow_plugins_crypto`:
 - `AesLeakage` for AES Hamming-weight leakage targets,
 - `AesLeakageHypothesis` for AES Hamming-weight key-guess leakage hypotheses,
 - `PearsonCorrelator` (correlation) + `PoiSelect` (top-k) with named `features`/`targets` pads,
-- `CorrelationPoiPayload` for correlation PoI results,
+- unit-oriented `CorrelationPayload` (`unit/channel/feature`) and
+  `CorrelationPoiPayload` (`unit/channel/poi/[sample_index,score]`) contracts,
 - target-label, AES byte-index, and channel metadata such as
   `poi.target.0.label`, `poi.target.0.byte_index`, and
   `poi.target.0.channel`,

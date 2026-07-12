@@ -227,6 +227,13 @@ int main() {
   if (!expect(
           outputs.at("traces").metadata("capture.source") == "ChipWhisperer" &&
               outputs.at("traces").metadata("tensor.axes") == "trace,sample" &&
+              outputs.at("traces").metadata("payload.layout") ==
+                  "trace/sample" &&
+              outputs.at("plaintexts").metadata("payload.layout") ==
+                  "trace/byte" &&
+              outputs.at("keys").metadata("payload.layout") == "key_byte" &&
+              outputs.at("ciphertexts").metadata("payload.layout") ==
+                  "trace/byte" &&
               outputs.at("traces").metadata("payload.leakage.inverted") ==
                   "false" &&
               !outputs.at("traces").has_metadata("payload.leakage.polarity") &&
@@ -271,9 +278,9 @@ int main() {
                   "payload.countermeasure.jitter.loop_iterations."
                   "provenance") &&
               jitter_outputs.at("countermeasures")
-                      .metadata("payload.countermeasure.dims") ==
+                      .metadata("payload.layout") ==
                   "jitter.parameters.loop_iterations=trace",
-          "HDF5 source countermeasure dimensions were wrong")) {
+          "HDF5 source countermeasure layout was wrong")) {
     return 1;
   }
 
@@ -356,7 +363,11 @@ int main() {
   auto first = live.process_pads({});
   if (!expect(!live.at_end_of_stream() &&
                   first.at("traces").metadata("origin.row.begin") == "1" &&
-                  first.at("traces").metadata("origin.row.count") == "2",
+                  first.at("traces").metadata("origin.row.count") == "2" &&
+                  first.at("traces").metadata("payload.layout") ==
+                      "trace/sample" &&
+                  first.at("countermeasures").metadata("payload.layout") ==
+                      "jitter.parameters.loop_iterations=trace",
               "fake-live first HDF5 batch metadata was wrong")) {
     return 1;
   }

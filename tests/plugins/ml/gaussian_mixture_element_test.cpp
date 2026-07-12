@@ -105,6 +105,10 @@ int main()
     if (!expect(output->metadata_or("payload.cluster.converged", "") == "true", "converged metadata wrong")) {
         return 1;
     }
+    if (!expect(output->metadata_or("payload.layout", "") == "observation",
+            "labels payload layout wrong")) {
+        return 1;
+    }
     if (!expect(progress.reports.size() >= 2, "fit did not report progress start and completion")) {
         return 1;
     }

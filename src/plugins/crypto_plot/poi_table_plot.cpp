@@ -60,13 +60,13 @@ using leakflow::plugins::crypto::CorrelationPoiResult;
     return fallback;
 }
 
-[[nodiscard]] const CorrelationPoiResult* result_for(const CorrelationPoiPayload* payload, std::uint16_t unit)
+[[nodiscard]] const CorrelationPoiResult* result_for(const CorrelationPoiPayload* payload, std::int64_t unit_index)
 {
     if (payload == nullptr) {
         return nullptr;
     }
     for (const auto& result : payload->results()) {
-        if (result.unit == unit) {
+        if (result.unit_index == unit_index) {
             return &result;
         }
     }
@@ -224,7 +224,7 @@ std::optional<Buffer> PoiTablePlot::process_inputs(ElementInputs inputs)
     }
     const auto& primary = reference ? *reference : *current;
     if (primary.results().empty()) {
-        throw std::invalid_argument("PoiTablePlot: PoI payload has no result groups");
+        throw std::invalid_argument("PoiTablePlot: PoI payload has no units");
     }
 
     const auto precision = static_cast<int>(int_property_or(*this, "precision", 3));
@@ -234,9 +234,9 @@ std::optional<Buffer> PoiTablePlot::process_inputs(ElementInputs inputs)
     std::vector<std::int64_t> unit_ids;
     std::vector<leakflow::plot::PoiTableGroup> groups; // unit-major: [unit * channels + channel]
     for (const auto& base_result : primary.results()) {
-        unit_ids.push_back(static_cast<std::int64_t>(base_result.unit));
-        const auto* reference_result = result_for(reference.get(), base_result.unit);
-        const auto* current_result = result_for(current.get(), base_result.unit);
+        unit_ids.push_back(base_result.unit_index);
+        const auto* reference_result = result_for(reference.get(), base_result.unit_index);
+        const auto* current_result = result_for(current.get(), base_result.unit_index);
         const auto k = base_result.result.size(1);
         for (std::int64_t channel = 0; channel < channels; ++channel) {
             const auto samples = column_samples(base_result, channel);

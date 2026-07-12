@@ -133,6 +133,9 @@ ElementDescriptor GaussianMixtureElement::descriptor()
         .keywords = {"gmm", "gaussian", "mixture", "cluster", "em", "ml"},
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
+                "payload.layout", std::string(), "logical axes of the emitted cluster labels",
+                {"observation", "unit/observation"}),
+            make_element_metadata_descriptor(
                 "payload.cluster.method", std::string(), "clustering method", {"gaussian-mixture"}),
             make_element_metadata_descriptor(
                 "payload.cluster.n_components", std::int64_t{}, "number of clusters", {"81"}),
@@ -233,6 +236,7 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
         options.covariance_type == leakflow::ml::GmmCovarianceType::Full ? "full" : "diagonal");
     output.set_metadata("payload.cluster.converged", converged ? "true" : "false");
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(label_payload)));
+    output.set_metadata("payload.layout", labels.dim() == 1 ? "observation" : "unit/observation");
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "fit gaussian mixture");
     record.fields.emplace("clusters", std::to_string(options.n_components));

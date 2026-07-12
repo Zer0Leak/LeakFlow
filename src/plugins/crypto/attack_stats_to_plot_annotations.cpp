@@ -284,6 +284,9 @@ ElementDescriptor AttackStatsToPlotAnnotations::descriptor()
                 "source of the success marker (stats when truth is present: square=success, "
                 "x=failure; none -> circle)",
                 {"stats", "none"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]"}),
         },
     };
 }

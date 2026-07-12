@@ -82,6 +82,9 @@ semantics, NumPy dtype semantics, GUI, plotting, or hardware capture.
 
 `FileSrc` and `FileSink` are raw-byte elements only.
 
+`BytesPayload::layout()` is `byte`; `Buffer::set_payload()` therefore stamps
+`payload.layout=byte` on every `FileSrc` output.
+
 `Tee` must avoid deep-copying large payloads.
 
 ## Common Tests

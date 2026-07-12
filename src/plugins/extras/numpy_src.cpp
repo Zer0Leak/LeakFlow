@@ -54,6 +54,11 @@ ElementDescriptor NumpySrc::descriptor()
                 std::int64_t{},
                 "input file size in bytes",
                 {"40000000"}),
+            make_element_metadata_descriptor(
+                "payload.layout",
+                std::string(),
+                "ordered axes of the loaded NumPy payload",
+                {"axis_0/axis_1", "axis_0"}),
         },
         .metadata_suggestions = {
             make_element_metadata_descriptor(

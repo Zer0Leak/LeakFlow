@@ -36,6 +36,9 @@ bool throws_exception(Function function)
 int main()
 {
     leakflow::base::TorchTensorBundlePayload bundle;
+    if (!expect(bundle.layout() == "empty", "empty bundle payload layout mismatch")) {
+        return 1;
+    }
     auto traces = std::make_shared<leakflow::base::TorchTensorPayload>(
         torch::zeros({4, 8}, torch::TensorOptions().dtype(torch::kFloat32)));
 
@@ -47,6 +50,10 @@ int main()
         return 1;
     }
     if (!expect(bundle.size() == 3, "bundle size mismatch")) {
+        return 1;
+    }
+    if (!expect(bundle.layout() == "key=axis_0;plaintexts=axis_0/axis_1;traces=axis_0/axis_1",
+            "bundle payload layout mismatch")) {
         return 1;
     }
     if (!expect(bundle.has("traces"), "bundle missing traces tensor")) {
@@ -116,6 +123,11 @@ int main()
         return 1;
     }
     if (!expect(roundtrip->has("key"), "buffer bundle payload lost named tensor")) {
+        return 1;
+    }
+    if (!expect(buffer.metadata("payload.layout") ==
+                "key=axis_0;plaintexts=axis_0/axis_1;traces=axis_0/axis_1",
+            "buffer did not publish bundle payload layout")) {
         return 1;
     }
 

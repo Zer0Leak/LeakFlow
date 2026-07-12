@@ -18,6 +18,28 @@
 namespace leakflow::plugins::crypto {
 namespace {
 
+void copy_unit_metadata(const Buffer& input, Buffer& output)
+{
+    for (const auto key : {"attack.unit.kind"}) {
+        if (input.has_metadata(key)) {
+            output.set_metadata(key, input.metadata(key));
+        }
+    }
+}
+
+[[nodiscard]] std::string unit_indexes_metadata(const std::vector<std::int64_t>& unit_indexes)
+{
+    auto value = std::string("[");
+    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+        if (index != 0) {
+            value += ",";
+        }
+        value += std::to_string(unit_indexes[index]);
+    }
+    value += "]";
+    return value;
+}
+
 [[nodiscard]] IntList int_list_property_or(const Element& element, std::string_view name, IntList fallback)
 {
     if (const auto value = element.property_as<IntList>(name)) {
@@ -26,12 +48,12 @@ namespace {
     return fallback;
 }
 
-// Result for a specific target byte index, or throw if the payload has no such unit.
+// Result for a specific unit index, or throw if the payload has no such unit.
 [[nodiscard]] const CorrelationPoiResult& result_for_unit(
     const CorrelationPoiPayload& payload, std::int64_t unit)
 {
     for (const auto& result : payload.results()) {
-        if (static_cast<std::int64_t>(result.unit) == unit) {
+        if (static_cast<std::int64_t>(result.unit_index) == unit) {
             return result;
         }
     }
@@ -61,7 +83,7 @@ ElementDescriptor CorrelationPoiToIndexes::descriptor()
             Pad("indexes", PadDirection::Output, Caps(leakflow::base::torch_tensor_caps_type)),
         },
         .property_specs = {
-            PropertySpec("units", IntList{}, "byte units (target byte indexes) to keep; [] = all, in payload order",
+            PropertySpec("units", IntList{}, "unit indexes to keep; [] = all, in payload order",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
@@ -73,6 +95,10 @@ ElementDescriptor CorrelationPoiToIndexes::descriptor()
         .metadata_set_by_element = {
             make_element_metadata_descriptor(
                 "payload.feature.selected_count", std::int64_t{}, "PoI columns per unit", {"100"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout", {"unit/feature"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
         },
     };
 }
@@ -96,22 +122,27 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
         throw std::invalid_argument("CorrelationPoiToIndexes requires a CorrelationPoiPayload");
     }
     if (payload->results().empty()) {
-        throw std::invalid_argument("CorrelationPoiToIndexes: PoI payload has no result groups");
+        throw std::invalid_argument("CorrelationPoiToIndexes: PoI payload has no units");
     }
 
     const auto units = int_list_property_or(*this, "units", {});
     std::vector<torch::Tensor> per_unit;
+    std::vector<std::int64_t> selected_units;
     if (units.empty()) {
         // All units, in payload order.
         per_unit.reserve(payload->results().size());
+        selected_units.reserve(payload->results().size());
         for (const auto& result : payload->results()) {
             per_unit.push_back(unit_indexes(result));
+            selected_units.push_back(result.unit_index);
         }
     } else {
-        // Only the requested byte units, in the requested order.
+        // Only the requested units, in the requested order.
         per_unit.reserve(units.size());
+        selected_units.reserve(units.size());
         for (const auto unit : units) {
             per_unit.push_back(unit_indexes(result_for_unit(*payload, unit)));
+            selected_units.push_back(unit);
         }
     }
     const auto indexes = torch::stack(per_unit, 0).contiguous(); // [len(units), N_sel]
@@ -119,8 +150,12 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
     auto index_payload = leakflow::base::TorchTensorPayload(indexes);
     Buffer output{index_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "poi", name());
+    copy_unit_metadata(*input, output);
+    output.set_metadata("attack.unit.count", std::to_string(indexes.size(0)));
+    output.set_metadata("attack.unit.indexes", unit_indexes_metadata(selected_units));
     output.set_metadata("payload.feature.selected_count", std::to_string(indexes.size(1)));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(index_payload)));
+    output.set_metadata("payload.layout", "unit/feature");
     return output;
 }
 

@@ -12,7 +12,7 @@ namespace leakflow::plugins::crypto {
 // CorrelationPoiToPlotAnnotations converter checks payload.poi.method against this.
 inline constexpr auto pearson_poi_method_id = "pearson-correlation";
 
-// Selects the top-k points of interest per (byte, channel) from a CorrelationPayload
+// Selects the top-k points of interest per (unit, channel) from a CorrelationPayload
 // and emits a CorrelationPoiPayload. This is the *stateless* half of the old
 // PearsonPoiFinder: its output is a pure function of (correlation, top_k, rank_by),
 // so it is replayable (can_replay() default true) -- changing top_k / rank_by in Idle

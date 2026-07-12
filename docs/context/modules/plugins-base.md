@@ -37,7 +37,8 @@ CLI/inspect files if affected:
   axis-0 row (`[1, M]`), then EOS. Declares itself live; `trace_rate` paces it
   (one trace per `1/rate` s); honors the cooperative stop token. Drives the live
   phase in tests/CLI without hardware. It does not stamp `capture.sample_rate_hz`;
-  add that as explicit user metadata when the trace sampling rate matters.
+  add that as explicit user metadata when the trace sampling rate matters. Each
+  emitted row carries the rank-derived generic `payload.layout`.
 - `AppSrc`: application-fed live source. Instead of reading a file or device, the
   application supplies frames — via a producer callback (pull mode) or `push_frame`
   (push mode); each frame is an aligned set of buffers routed to `src_0..src_{n-1}`
@@ -65,6 +66,8 @@ descriptor and registers matching element factories with
 - emits a `Buffer` with concrete runtime numeric caps parameters such as
   `dtype`, `device`, `rank`, and `shape`,
 - attaches `TorchTensorPayload`,
+- publishes the rank-derived generic `payload.layout` (`scalar` or
+  `axis_0/axis_1/...`),
 - stamps minimal provenance metadata:
   - `origin.file.format=torch-tensor`,
   - `origin.file.path`,
@@ -105,7 +108,8 @@ property; pipelines should set it explicitly through source metadata when needed
 - has a `dtype` property, default `preserve`,
 - has a `device` property, default `preserve`,
 - emits a new `TorchTensorPayload` with updated concrete caps,
-- preserves input metadata,
+- preserves input metadata, including an exact semantic `payload.layout`
+  override such as `trace/sample`,
 - stamps `conversion.id=torch-convert` and `conversion.element`,
 - remains explicit and does not imply generic `Convert` or a conversion
   registry.
@@ -115,6 +119,11 @@ property; pipelines should set it explicitly through source metadata when needed
 `AppSrc` is the generic application-fed source. Two things it deliberately does
 **not** own — progress semantics and per-instance configuration — the framework
 exposes so the *application* driving it supplies them, elegantly and generically:
+
+Application-provided buffers must already satisfy the core payload-layout
+contract. Calling `Buffer::set_payload(...)` does this automatically. `AppSrc`
+forwards the buffer as supplied and neither infers nor overwrites
+`payload.layout`.
 
 - **Pull frame producer**: `set_frame_producer(FrameProducer)`, where
   `FrameProducer = std::optional<std::vector<Buffer>>(std::size_t index, const

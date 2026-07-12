@@ -33,6 +33,7 @@ public:
 class TestPayload final : public leakflow::Payload {
 public:
     [[nodiscard]] std::string type_name() const override { return "test/payload"; }
+    [[nodiscard]] std::string layout() const override { return "unit/channel/field"; }
 
     void describe(leakflow::SummarySection &section, std::int64_t) const override {
         section.add_field("payload", type_name(), leakflow::SummaryValueRole::TypeName);

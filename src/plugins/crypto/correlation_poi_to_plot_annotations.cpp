@@ -133,18 +133,18 @@ namespace {
     return fallback_channel_label(channel_index);
 }
 
-[[nodiscard]] std::string annotation_label_for(std::uint16_t unit, std::string_view channel)
+[[nodiscard]] std::string annotation_label_for(std::int64_t unit, std::string_view channel)
 {
     return "unit_" + std::to_string(unit) + "." + std::string(channel);
 }
 
-[[nodiscard]] std::string annotation_field_label_for(std::uint16_t unit, std::string_view channel)
+[[nodiscard]] std::string annotation_field_label_for(std::int64_t unit, std::string_view channel)
 {
     return std::string(channel) + "[" + std::to_string(unit) + "]";
 }
 
 [[nodiscard]] leakflow::base::PlotAnnotationFields annotation_fields_for(
-    std::uint16_t unit,
+    std::int64_t unit,
     std::string_view channel,
     std::string_view score_name,
     std::string_view value_text)
@@ -184,7 +184,7 @@ namespace {
 
         for (auto channel_index = std::int64_t{0}; channel_index < channel_count; ++channel_index) {
             const auto channel = channel_label_for(channels, channel_index);
-            const auto label = annotation_label_for(result.unit, channel);
+            const auto label = annotation_label_for(result.unit_index, channel);
             const auto target_index =
                 static_cast<std::int64_t>(group_ordinal) * channel_count + channel_index;
             for (auto row = std::int64_t{0}; row < rows; ++row) {
@@ -195,7 +195,7 @@ namespace {
                     .sample_index = sample_index,
                     .norm_value = normalized_score_for(input, value),
                     .fields = annotation_fields_for(
-                        result.unit,
+                        result.unit_index,
                         channel,
                         payload.score_name(),
                         value_text),
@@ -280,6 +280,9 @@ ElementDescriptor CorrelationPoiToPlotAnnotations::descriptor()
                 std::int64_t{},
                 "number of plot annotations emitted",
                 {"50"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]"}),
         },
     };
 }

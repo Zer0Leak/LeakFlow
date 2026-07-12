@@ -65,6 +65,7 @@ int main()
     if (!expect(numpy_buffer.has_value(), "NumpySrc did not produce a buffer")) {
         return 1;
     }
+    numpy_buffer->set_metadata("payload.layout", "trace/sample");
 
     extras_plugin::NumpyToTorch converter;
     auto output = converter.process(std::move(numpy_buffer));
@@ -100,6 +101,10 @@ int main()
     }
     if (!expect(output->metadata("payload.conversion.element") == "numpytotorch0",
                 "NumpyToTorch did not stamp conversion.element")) {
+        return 1;
+    }
+    if (!expect(output->metadata("payload.layout") == "trace/sample",
+                "NumpyToTorch did not preserve the semantic input layout")) {
         return 1;
     }
     if (!expect(converter.input_pads().size() == 1, "NumpyToTorch input pad count changed")) {
@@ -150,6 +155,10 @@ int main()
         return 1;
     }
     if (!expect(float_payload->shape()[0] == 16, "NumpyToTorch key fixture shape mismatch")) {
+        return 1;
+    }
+    if (!expect(float_output->metadata("payload.layout") == "axis_0",
+                "NumpyToTorch did not preserve the generic key layout")) {
         return 1;
     }
 

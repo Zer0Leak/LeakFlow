@@ -150,6 +150,11 @@ std::string NumpyPayload::type_name() const
     return numpy_array_caps_type;
 }
 
+std::string NumpyPayload::layout() const
+{
+    return leakflow::base::generic_rank_layout(rank());
+}
+
 void NumpyPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);

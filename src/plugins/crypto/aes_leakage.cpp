@@ -306,6 +306,14 @@ ElementDescriptor AesLeakage::descriptor() {
                   "payload.trace.input", std::string(),
                   "whether the required traces pad was connected",
                   {"connected", "unconnected"}, {}, "connected or unconnected"),
+              make_element_metadata_descriptor(
+                  "attack.unit.kind", std::string(), "kind of attack unit represented", {"byte"}),
+              make_element_metadata_descriptor(
+                  "attack.unit.indexes", IntList{}, "attack unit indexes represented", {"[0,1,2,3]"}),
+              make_element_metadata_descriptor(
+                  "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
+              make_element_metadata_descriptor(
+                  "payload.layout", std::string(), "semantic payload layout", {"unit/trace/channel"}),
           },
   };
 }
@@ -365,8 +373,12 @@ std::optional<Buffer> AesLeakage::process_inputs(ElementInputs inputs) {
                       std::to_string(aes_state_bytes));
   output.set_metadata("payload.trace.count", std::to_string(trace_count));
   output.set_metadata("payload.trace.input", "connected");
+  output.set_metadata("attack.unit.kind", "byte");
+  output.set_metadata("attack.unit.indexes", byte_indexes_metadata(byte_indexes));
+  output.set_metadata("attack.unit.count", std::to_string(byte_indexes.size()));
   output.set_payload(
       std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+  output.set_metadata("payload.layout", "unit/trace/channel");
 
   auto record = make_log_record(log::LogLevel::Debug, "element",
                                 "computed AES leakage model");

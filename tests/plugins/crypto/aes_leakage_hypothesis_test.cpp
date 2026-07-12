@@ -107,6 +107,10 @@ int main() {
               "AesLeakageHypothesis did not stamp attack unit metadata")) {
     return 1;
   }
+  if (!expect(output->metadata("attack.unit.count") == "2",
+              "AesLeakageHypothesis unit count was wrong")) {
+    return 1;
+  }
   if (!expect(output->metadata("attack.guess.count") == "256",
               "AesLeakageHypothesis default guess count was wrong")) {
     return 1;
@@ -122,6 +126,10 @@ int main() {
   if (!expect(output->metadata("tensor.axes") ==
                   "attack_unit,guess,trace,leakage_channel",
               "AesLeakageHypothesis tensor axis metadata was wrong")) {
+    return 1;
+  }
+  if (!expect(output->metadata("payload.layout") == "unit/guess/trace/channel",
+              "AesLeakageHypothesis payload layout was wrong")) {
     return 1;
   }
 

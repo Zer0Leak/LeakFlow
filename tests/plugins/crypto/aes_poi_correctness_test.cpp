@@ -251,12 +251,12 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
     }
 
     const auto poi_payload = poi_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
-    if (!expect(poi_payload != nullptr && poi_payload->result_count() == 1,
+    if (!expect(poi_payload != nullptr && poi_payload->unit_count() == 1,
             label + ": PoiSelect result count was wrong")) {
         return false;
     }
     const auto& result = poi_payload->result(0);
-    if (!expect(result.unit == byte_index, label + ": PoiSelect reported wrong byte index")) {
+    if (!expect(result.unit_index == byte_index, label + ": PoiSelect reported wrong unit index")) {
         return false;
     }
     // result tensor is [channel, top_k, 2]: pair is (sample_index, correlation).

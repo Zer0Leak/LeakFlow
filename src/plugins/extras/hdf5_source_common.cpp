@@ -61,6 +61,18 @@ split_axes(const std::string &axes) {
   }
 }
 
+[[nodiscard]] std::string payload_layout_for_axes(const std::string &axes) {
+  const auto split = split_axes(axes);
+  std::ostringstream output;
+  for (std::size_t index = 0; index < split.size(); ++index) {
+    if (index != 0) {
+      output << '/';
+    }
+    output << split[index];
+  }
+  return output.str();
+}
+
 void validate_array_contract(
     const leakflow::extras::TensorArrayDescriptor &array,
     leakflow::extras::TensorDatasetDType dtype, std::size_t rank,
@@ -301,7 +313,7 @@ selected_arrays(const leakflow::extras::TensorDatasetDescriptor &descriptor) {
   return result;
 }
 
-[[nodiscard]] std::string countermeasure_dims(
+[[nodiscard]] std::string countermeasure_layout(
     const std::vector<std::pair<const leakflow::extras::TensorArrayDescriptor *,
                                 std::string>> &arrays) {
   std::ostringstream stream;
@@ -313,7 +325,7 @@ selected_arrays(const leakflow::extras::TensorDatasetDescriptor &descriptor) {
     const auto axes = descriptor->attributes.contains("tensor.axes")
                           ? descriptor->attributes.at("tensor.axes")
                           : default_axes_for(descriptor->path);
-    stream << arrays[index].second << '=' << axes;
+    stream << arrays[index].second << '=' << payload_layout_for_axes(axes);
   }
   return stream.str();
 }
@@ -459,6 +471,8 @@ read_hdf5_outputs(const leakflow::extras::TensorDatasetReader &reader,
       buffer.set_metadata("tensor.axes", default_axes_for(array->path));
     }
     buffer.set_payload(std::move(payload));
+    buffer.set_metadata("payload.layout",
+                        payload_layout_for_axes(buffer.metadata("tensor.axes")));
     outputs.emplace(std::string(output_pad_for(array->path)),
                     std::move(buffer));
   }
@@ -472,8 +486,6 @@ read_hdf5_outputs(const leakflow::extras::TensorDatasetReader &reader,
     }
     buffer.set_metadata("origin.role", "countermeasures");
     buffer.set_metadata("origin.hdf5.dataset", "/countermeasures");
-    buffer.set_metadata("payload.countermeasure.dims",
-                        countermeasure_dims(countermeasure_arrays));
     std::ostringstream names;
     const auto bundle_names = countermeasure_bundle->names();
     for (std::size_t index = 0; index < bundle_names.size(); ++index) {
@@ -484,6 +496,8 @@ read_hdf5_outputs(const leakflow::extras::TensorDatasetReader &reader,
     }
     buffer.set_metadata("payload.countermeasure.tensors", names.str());
     buffer.set_payload(std::move(countermeasure_bundle));
+    buffer.set_metadata("payload.layout",
+                        countermeasure_layout(countermeasure_arrays));
     outputs.emplace("countermeasures", std::move(buffer));
   }
 

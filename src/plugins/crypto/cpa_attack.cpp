@@ -425,14 +425,6 @@ void require_numeric_tensor(const torch::Tensor& tensor, std::string_view name)
         }
         return indexes;
     }
-    if (hypotheses.has_metadata("payload.leakage.byte_indexes")) {
-        auto indexes = parse_int_list(hypotheses.metadata("payload.leakage.byte_indexes"));
-        if (indexes.size() != static_cast<std::size_t>(unit_count)) {
-            throw std::invalid_argument("CpaAttack payload.leakage.byte_indexes metadata must match hypothesis unit axis");
-        }
-        return indexes;
-    }
-
     std::vector<std::int64_t> indexes;
     indexes.reserve(static_cast<std::size_t>(unit_count));
     for (std::int64_t index = 0; index < unit_count; ++index) {
@@ -588,7 +580,6 @@ void copy_hypothesis_semantic_metadata(const Buffer& hypotheses, Buffer& output)
     static const std::vector<std::string_view> keys{
         "payload.leakage.model",
         "payload.leakage.hypothesis",
-        "payload.leakage.byte_indexes",
         "payload.leakage.channels",
         "payload.crypto.algorithm",
         "payload.crypto.state_bytes",
@@ -596,6 +587,7 @@ void copy_hypothesis_semantic_metadata(const Buffer& hypotheses, Buffer& output)
         "attack.hypothesis.round",
         "attack.unit.kind",
         "attack.unit.indexes",
+        "attack.unit.count",
         "attack.guess.kind",
         "attack.guess.count",
         "attack.guess.order",
@@ -809,6 +801,11 @@ ElementDescriptor CpaAttack::descriptor()
                 "attack.ranking.order", std::string(), "ranking tensor order", {"descending_score"}),
             make_element_metadata_descriptor(
                 "attack.ranking.values", std::string(), "ranking tensor value meaning", {"guess_index"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
+            make_element_metadata_descriptor(
+                "payload.layout", std::string(), "semantic payload layout",
+                {"scores=unit/guess;ranking=unit/rank;best_guess=unit"}),
         },
     };
 }
@@ -910,6 +907,7 @@ std::optional<Buffer> CpaAttack::process_inputs(ElementInputs inputs)
         "attack.correlation.mode",
         active_mode == CorrelationMode::Recompute ? "recompute" : "incremental");
     output.set_metadata("attack.observation_count", std::to_string(observation_count));
+    output.set_metadata("attack.unit.count", std::to_string(prepared.unit_count));
     output.set_metadata("attack.feature.count", std::to_string(prepared.sample_count));
     output.set_metadata("attack.score.method", score_method_text);
     output.set_metadata("attack.score.channels", score_channels_text);

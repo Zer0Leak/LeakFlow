@@ -47,7 +47,6 @@ leakflow::Buffer hypothesis_buffer(torch::Tensor tensor)
     auto buffer = torch_buffer(std::move(tensor));
     buffer.set_metadata("payload.leakage.model", "aes-first-round");
     buffer.set_metadata("payload.leakage.hypothesis", "aes-first-round-leakage-hypothesis");
-    buffer.set_metadata("payload.leakage.byte_indexes", "[3]");
     buffer.set_metadata("payload.leakage.channels", "y(0)");
     buffer.set_metadata("payload.crypto.algorithm", "AES");
     buffer.set_metadata("payload.crypto.state_bytes", "16");
@@ -55,6 +54,7 @@ leakflow::Buffer hypothesis_buffer(torch::Tensor tensor)
     buffer.set_metadata("attack.hypothesis.round", "first");
     buffer.set_metadata("attack.unit.kind", "byte");
     buffer.set_metadata("attack.unit.indexes", "[3]");
+    buffer.set_metadata("attack.unit.count", "1");
     buffer.set_metadata("attack.guess.kind", "byte");
     buffer.set_metadata("attack.guess.count", "2");
     buffer.set_metadata("attack.guess.order", "domain");
@@ -105,6 +105,12 @@ int main()
     }
     if (!expect(attack_output->metadata("attack.difference.method") == "mean(group1)-mean(group0)",
             "DpaAttack did not stamp difference method metadata")) {
+        return 1;
+    }
+    if (!expect(attack_output->metadata("payload.layout")
+                    == "scores=unit/guess;ranking=unit/rank;best_guess=unit;best_guess_index=unit;"
+                       "best_score=unit;best_channel=unit;best_sample=unit;guess_values=guess",
+                "DpaAttack score payload layout was wrong")) {
         return 1;
     }
 
@@ -178,6 +184,10 @@ int main()
     }
     if (!expect(pad_best_difference->second.metadata("tensor.axes") == "attack_unit,sample",
             "DpaAttack best_difference axes metadata was wrong")) {
+        return 1;
+    }
+    if (!expect(pad_best_difference->second.metadata("payload.layout") == "unit/sample",
+            "DpaAttack best_difference payload layout was wrong")) {
         return 1;
     }
     const auto best_difference_payload =

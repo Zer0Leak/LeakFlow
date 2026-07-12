@@ -64,6 +64,10 @@ int main()
     if (!expect(bytes_payload->bytes() == "hello leakflow", "FileSrc bytes were wrong")) {
         return 1;
     }
+    if (!expect(file_buffer->metadata_or("payload.layout", "") == "byte",
+            "FileSrc payload layout was wrong")) {
+        return 1;
+    }
 
     core::FileSink file_sink;
     file_sink.set_property("path", output_path.string());

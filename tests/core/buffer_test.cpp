@@ -25,6 +25,11 @@ public:
         return "test/payload";
     }
 
+    [[nodiscard]] std::string layout() const override
+    {
+        return "item";
+    }
+
 private:
     std::string value_;
 };
@@ -34,6 +39,24 @@ public:
     [[nodiscard]] std::string type_name() const override
     {
         return "test/other-payload";
+    }
+
+    [[nodiscard]] std::string layout() const override
+    {
+        return "other_item";
+    }
+};
+
+class EmptyLayoutPayload final : public leakflow::Payload {
+public:
+    [[nodiscard]] std::string type_name() const override
+    {
+        return "test/empty-layout-payload";
+    }
+
+    [[nodiscard]] std::string layout() const override
+    {
+        return {};
     }
 };
 
@@ -106,6 +129,7 @@ int main()
         return 1;
     }
 
+    buffer.set_metadata("payload.layout", "stale/layout");
     auto payload = std::make_shared<TestPayload>("payload-value");
     buffer.set_payload(payload);
 
@@ -113,6 +137,10 @@ int main()
         return 1;
     }
     if (!expect(buffer.payload() == payload, "payload did not return the stored pointer")) {
+        return 1;
+    }
+    if (!expect(buffer.metadata("payload.layout") == "item",
+            "set_payload did not replace payload.layout metadata")) {
         return 1;
     }
 
@@ -127,11 +155,33 @@ int main()
         return 1;
     }
 
+    bool empty_layout_threw = false;
+    try {
+        buffer.set_payload(std::make_shared<EmptyLayoutPayload>());
+    } catch (const std::invalid_argument&) {
+        empty_layout_threw = true;
+    }
+    if (!expect(empty_layout_threw, "set_payload accepted an empty payload layout")) {
+        return 1;
+    }
+    if (!expect(buffer.payload() == payload,
+            "rejected empty payload layout replaced the existing payload")) {
+        return 1;
+    }
+    if (!expect(buffer.metadata("payload.layout") == "item",
+            "rejected empty payload layout changed payload.layout metadata")) {
+        return 1;
+    }
+
     buffer.set_payload(nullptr);
     if (!expect(!buffer.has_payload(), "set_payload(nullptr) did not clear has_payload")) {
         return 1;
     }
     if (!expect(buffer.payload() == nullptr, "set_payload(nullptr) did not clear payload")) {
+        return 1;
+    }
+    if (!expect(!buffer.has_metadata("payload.layout"),
+            "set_payload(nullptr) did not erase payload.layout metadata")) {
         return 1;
     }
 

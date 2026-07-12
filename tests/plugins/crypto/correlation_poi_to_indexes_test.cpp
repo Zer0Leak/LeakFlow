@@ -57,6 +57,12 @@ int main()
     if (!expect(out->metadata_or("payload.feature.selected_count", "") == "6", "selected_count metadata wrong")) {
         return 1;
     }
+    if (!expect(out->metadata_or("payload.layout", "") == "unit/feature"
+                    && out->metadata_or("attack.unit.indexes", "") == "[0,1]"
+                    && out->metadata_or("attack.unit.count", "") == "2",
+                "index payload unit/layout metadata wrong")) {
+        return 1;
+    }
 
     // --- units filter: keep only byte unit 1 -> [1, 6] ---
     {

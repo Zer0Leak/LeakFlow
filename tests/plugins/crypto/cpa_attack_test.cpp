@@ -48,7 +48,6 @@ leakflow::Buffer hypothesis_buffer(torch::Tensor tensor)
     auto buffer = torch_buffer(std::move(tensor));
     buffer.set_metadata("payload.leakage.model", "aes-first-round");
     buffer.set_metadata("payload.leakage.hypothesis", "aes-first-round-leakage-hypothesis");
-    buffer.set_metadata("payload.leakage.byte_indexes", "[3]");
     buffer.set_metadata("payload.leakage.channels", "HW(y)");
     buffer.set_metadata("payload.crypto.algorithm", "AES");
     buffer.set_metadata("payload.crypto.state_bytes", "16");
@@ -56,6 +55,7 @@ leakflow::Buffer hypothesis_buffer(torch::Tensor tensor)
     buffer.set_metadata("attack.hypothesis.round", "first");
     buffer.set_metadata("attack.unit.kind", "byte");
     buffer.set_metadata("attack.unit.indexes", "[3]");
+    buffer.set_metadata("attack.unit.count", "1");
     buffer.set_metadata("attack.guess.kind", "byte");
     buffer.set_metadata("attack.guess.count", "2");
     buffer.set_metadata("attack.guess.order", "domain");
@@ -107,6 +107,13 @@ int main()
     }
     if (!expect(attack_output->metadata("attack.correlations.emitted") == "true",
             "CpaAttack did not report emitted correlations")) {
+        return 1;
+    }
+    if (!expect(attack_output->metadata("payload.layout")
+                    == "scores=unit/guess;ranking=unit/rank;best_guess=unit;best_guess_index=unit;"
+                       "best_score=unit;best_channel=unit;best_sample=unit;guess_values=guess;"
+                       "correlations=unit/guess/channel/sample",
+                "CpaAttack payload layout was wrong")) {
         return 1;
     }
 
@@ -261,6 +268,15 @@ int main()
             "AttackStats did not preserve attack score metadata")) {
         return 1;
     }
+    if (!expect(stats_output->metadata("payload.layout")
+                    == "true_rank=unit;true_guess=unit;true_score=unit;success=unit;top1_guess=unit;"
+                       "top2_guess=unit;score_gap=unit;best_channel=unit;best_sample=unit;"
+                       "topk_guess=unit/rank;topk_score=unit/rank;topk_margin=unit/rank;"
+                       "topk_relative_margin=unit/rank;topk_z_score=unit/rank;"
+                       "topk_robust_z_score=unit/rank;topk_separation=unit/rank",
+                "AttackStats payload layout was wrong")) {
+        return 1;
+    }
 
     crypto_plugin::AttackStats custom_stats;
     custom_stats.set_property("top_k", std::int64_t{1});
@@ -322,6 +338,11 @@ int main()
     }
     if (!expect(annotation_output->metadata("payload.annotation.success_source") == "stats",
             "AttackStatsToPlotAnnotations success source metadata was wrong")) {
+        return 1;
+    }
+    if (!expect(annotation_output->metadata("payload.layout")
+                    == "annotation/[sample_index,value?,norm_value?,fields,label,text,kind,target_index?,marker]",
+                "AttackStatsToPlotAnnotations payload layout was wrong")) {
         return 1;
     }
     if (!expect(annotation_output->metadata("attack.method") == crypto_plugin::cpa_attack_method_id,
@@ -410,6 +431,11 @@ int main()
         return 1;
     }
     if (!expect(!no_truth_payload->has_truth(), "AttackStats without truth still reported truth diagnostics")) {
+        return 1;
+    }
+    if (!expect(no_truth_output->metadata("payload.layout").starts_with("top1_guess=unit;")
+                    && no_truth_output->metadata("payload.layout").find("true_rank") == std::string::npos,
+                "AttackStats without truth payload layout exposed truth fields")) {
         return 1;
     }
     if (!expect(!no_truth_payload->true_rank().has_value() && !no_truth_payload->true_guess().has_value()

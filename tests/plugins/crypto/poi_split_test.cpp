@@ -170,18 +170,24 @@ int main()
             "PoiSelect did not carry recompute observation count metadata")) {
         return 1;
     }
+    if (!expect(output->metadata("payload.layout") == "unit/channel/poi/[sample_index,correlation]"
+                    && output->metadata("payload.poi.unit_count") == "2"
+                    && output->metadata("attack.unit.indexes") == "[0,1]",
+                "PoiSelect unit/layout metadata was wrong")) {
+        return 1;
+    }
 
     const auto payload = output->payload_as<crypto_plugin::CorrelationPoiPayload>();
     if (!expect(payload != nullptr, "PoiSelect payload type was wrong")) {
         return 1;
     }
-    if (!expect(payload->result_count() == 2, "per-target result count was wrong")) {
+    if (!expect(payload->unit_count() == 2, "per-target unit count was wrong")) {
         return 1;
     }
     if (!expect(payload->score_name() == "correlation", "per-target score name was wrong")) {
         return 1;
     }
-    if (!expect(payload->result(0).unit == 0, "first generic target byte index was wrong")) {
+    if (!expect(payload->result(0).unit_index == 0, "first generic target unit index was wrong")) {
         return 1;
     }
     if (!expect_near(payload->result(0).result[0][0][0].item<double>(), 0.0, "first target selected wrong feature")) {
@@ -212,8 +218,14 @@ int main()
             return 1;
         }
         if (!expect(correlation_payload->feature_count() == 3 && correlation_payload->channel_count() == 1
-                    && correlation_payload->byte_indexes().size() == 2,
+                    && correlation_payload->unit_indexes().size() == 2,
                 "CorrelationPayload layout was wrong")) {
+            return 1;
+        }
+        if (!expect(correlation_buffer->metadata("payload.layout") == "unit/channel/feature"
+                        && correlation_buffer->metadata("payload.correlation.unit_count") == "2"
+                        && correlation_buffer->metadata("attack.unit.indexes") == "[0,1]",
+                    "PearsonCorrelator unit/layout metadata was wrong")) {
             return 1;
         }
         if (!expect(correlation_buffer->metadata("payload.correlation.method")
@@ -362,13 +374,29 @@ int main()
     {
         auto exact = crypto_plugin::CorrelationPoiPayload(
             std::vector<crypto_plugin::CorrelationPoiResult>{crypto_plugin::CorrelationPoiResult{
-                .unit = 0,
+                .unit_index = 0,
                 .result = torch::tensor({{{7.0, 0.625}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             }},
             "custom-score");
         leakflow::Buffer exact_buffer{leakflow::Caps(crypto_plugin::correlation_poi_caps_type)};
         exact_buffer.set_metadata("payload.poi.method", crypto_plugin::pearson_poi_method_id);
         exact_buffer.set_payload(std::make_shared<crypto_plugin::CorrelationPoiPayload>(std::move(exact)));
+        if (!expect(exact_buffer.metadata("payload.layout")
+                        == "unit/channel/poi/[sample_index,custom-score]",
+                    "PoI pair payload layout did not use its score name")) {
+            return 1;
+        }
+        auto score_only_buffer = leakflow::Buffer{leakflow::Caps(crypto_plugin::correlation_poi_caps_type)};
+        score_only_buffer.set_payload(std::make_shared<crypto_plugin::CorrelationPoiPayload>(
+            std::vector<crypto_plugin::CorrelationPoiResult>{crypto_plugin::CorrelationPoiResult{
+                .unit_index = 0,
+                .result = torch::tensor({{{0.625}}}, torch::TensorOptions().dtype(torch::kFloat64)),
+            }},
+            "custom-score"));
+        if (!expect(score_only_buffer.metadata("payload.layout") == "unit/channel/poi/[custom-score]",
+                    "PoI score-only payload layout was wrong")) {
+            return 1;
+        }
         crypto_plugin::CorrelationPoiToPlotAnnotations converter;
         const auto out = converter.process(exact_buffer);
         const auto ann = out->payload_as<leakflow::base::PlotAnnotationPayload>();
@@ -379,7 +407,7 @@ int main()
 
         auto bad = crypto_plugin::CorrelationPoiPayload(
             std::vector<crypto_plugin::CorrelationPoiResult>{crypto_plugin::CorrelationPoiResult{
-                .unit = 0,
+                .unit_index = 0,
                 .result = torch::tensor({{{7.0, 1.25}}}, torch::TensorOptions().dtype(torch::kFloat64)),
             }},
             "correlation");
@@ -400,7 +428,7 @@ int main()
         bpoi.set_property("top_k", leakflow::IntList{1});
         const auto out = select(bcorr, bpoi, torch_buffer(features), torch_buffer(broadcast_targets));
         const auto p = out->payload_as<crypto_plugin::CorrelationPoiPayload>();
-        if (!expect(p->result_count() == 4, "did not flatten broadcast target groups")) {
+        if (!expect(p->unit_count() == 4, "did not flatten broadcast target units")) {
             return 1;
         }
     }
@@ -412,14 +440,18 @@ int main()
     aes_target_buffer.set_metadata("payload.leakage.byte_indexes", "[3,5]");
     aes_target_buffer.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
     aes_target_buffer.set_metadata("payload.crypto.algorithm", "AES");
+    aes_target_buffer.set_metadata("attack.unit.kind", "byte");
+    aes_target_buffer.set_metadata("attack.unit.indexes", "[3,5]");
+    aes_target_buffer.set_metadata("attack.unit.count", "2");
 
     crypto_plugin::PearsonCorrelator aes_corr;
     crypto_plugin::PoiSelect aes_poi;
     aes_poi.set_property("top_k", leakflow::IntList{1});
     aes_poi.set_property("rank_by", leakflow::StringList{"abs", "abs"});
     const auto aes_output = select(aes_corr, aes_poi, torch_buffer(features), aes_target_buffer);
-    if (!expect(aes_output->metadata("payload.leakage.byte_indexes") == "[3,5]",
-            "did not forward AES byte-index metadata")) {
+    if (!expect(!aes_output->has_metadata("payload.leakage.byte_indexes")
+                    && aes_output->metadata("attack.unit.indexes") == "[3,5]",
+            "did not replace AES-specific byte metadata with generic unit metadata")) {
         return 1;
     }
     if (!expect(aes_output->metadata("payload.leakage.channels") == "HW(m),HW(y)",
@@ -431,12 +463,12 @@ int main()
         return 1;
     }
     const auto aes_payload = aes_output->payload_as<crypto_plugin::CorrelationPoiPayload>();
-    if (!expect(aes_payload != nullptr && aes_payload->result_count() == 2,
-            "AES byte-group count was wrong")) {
+    if (!expect(aes_payload != nullptr && aes_payload->unit_count() == 2,
+            "AES unit count was wrong")) {
         return 1;
     }
-    if (!expect(aes_payload->result(0).unit == 3 && aes_payload->result(1).unit == 5,
-            "AES byte indexes were wrong")) {
+    if (!expect(aes_payload->result(0).unit_index == 3 && aes_payload->result(1).unit_index == 5,
+            "AES unit indexes were wrong")) {
         return 1;
     }
     if (!expect(aes_payload->result(0).result.dim() == 3 && aes_payload->result(0).result.size(0) == 2

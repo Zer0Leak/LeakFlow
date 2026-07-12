@@ -152,6 +152,11 @@ std::string TorchTensorPayload::type_name() const
     return torch_tensor_caps_type;
 }
 
+std::string TorchTensorPayload::layout() const
+{
+    return generic_rank_layout(static_cast<std::uint64_t>(rank()));
+}
+
 void TorchTensorPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);

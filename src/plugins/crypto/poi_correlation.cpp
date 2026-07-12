@@ -42,14 +42,13 @@ namespace {
     return payload->tensor();
 }
 
-// The byte/unit index for each row of the AesLeakage `[B, N, C]` tensor, from its
-// payload.leakage.byte_indexes metadata (empty when absent -> caller falls back to positional).
-[[nodiscard]] std::vector<std::int64_t> leakage_units(const Buffer& buffer)
+// The semantic unit index for each row of the target `[U, N, C]` tensor.
+[[nodiscard]] std::vector<std::int64_t> target_unit_indexes(const Buffer& buffer)
 {
-    if (!buffer.has_metadata("payload.leakage.byte_indexes")) {
+    if (!buffer.has_metadata("attack.unit.indexes")) {
         return {};
     }
-    auto text = buffer.metadata("payload.leakage.byte_indexes");
+    auto text = buffer.metadata("attack.unit.indexes");
     const auto begin = text.find_first_not_of(" \t[");
     const auto end = text.find_last_not_of(" \t]");
     if (begin == std::string::npos) {
@@ -68,6 +67,19 @@ namespace {
         }
     }
     return units;
+}
+
+[[nodiscard]] std::string unit_indexes_metadata(const std::vector<CorrelationPoiResult>& results)
+{
+    auto value = std::string("[");
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        if (index != 0) {
+            value += ",";
+        }
+        value += std::to_string(results[index].unit_index);
+    }
+    value += "]";
+    return value;
 }
 
 } // namespace
@@ -91,8 +103,12 @@ ElementDescriptor PoiCorrelation::descriptor()
             make_element_metadata_descriptor(
                 "payload.poi.rescored", std::string(), "PoI scores recomputed on the input traces", {"true"}),
             make_element_metadata_descriptor(
-                "payload.poi.dims", std::string(), "axis description of the PoI payload",
+                "payload.layout", std::string(), "semantic payload layout",
                 {"unit/channel/poi/[sample_index,correlation]"}),
+            make_element_metadata_descriptor(
+                "payload.poi.unit_count", std::int64_t{}, "number of units represented", {"16"}),
+            make_element_metadata_descriptor(
+                "attack.unit.count", std::int64_t{}, "number of attack units represented", {"16"}),
         },
     };
 }
@@ -122,21 +138,21 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
         throw std::invalid_argument("PoiCorrelation poi input must carry a CorrelationPoiPayload");
     }
     const auto traces = tensor_input(traces_buffer, "traces").to(torch::kFloat64); // [T, S]
-    const auto leakage = tensor_input(targets_buffer, "targets").to(torch::kFloat64); // [B, N, C]
+    const auto leakage = tensor_input(targets_buffer, "targets").to(torch::kFloat64); // [U, N, C]
     if (traces.dim() != 2) {
         throw std::invalid_argument("PoiCorrelation traces must be [T, S]");
     }
     if (leakage.dim() != 3) {
-        throw std::invalid_argument("PoiCorrelation targets must be an AesLeakage [B, N, C] tensor");
+        throw std::invalid_argument("PoiCorrelation targets must be a [U, N, C] tensor");
     }
 
     leakflow::base::PearsonCorrelationOptions options;
     options.compute_dtype = leakflow::base::PearsonComputeDtype::Float64;
 
-    // Map each PoI unit to its leakage row. With byte_indexes metadata we match by unit id (so a
-    // leakage over a byte subset only re-scores those PoIs); without it, we fall back to positional
+    // Map each PoI unit to its target row. With attack.unit.indexes metadata we match by unit id;
+    // without it, we fall back to positional
     // alignment. Either way we stay in range of the leakage tensor.
-    const auto units = leakage_units(targets_buffer);
+    const auto units = target_unit_indexes(targets_buffer);
     std::map<std::int64_t, std::int64_t> unit_to_row;
     for (std::size_t row = 0; row < units.size(); ++row) {
         unit_to_row.emplace(units[row], static_cast<std::int64_t>(row));
@@ -148,7 +164,7 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
         const auto& original = poi->results()[index];
         std::int64_t row = static_cast<std::int64_t>(index);
         if (!unit_to_row.empty()) {
-            const auto found = unit_to_row.find(static_cast<std::int64_t>(original.unit));
+            const auto found = unit_to_row.find(static_cast<std::int64_t>(original.unit_index));
             if (found == unit_to_row.end()) {
                 continue; // no leakage row for this unit -> drop it from the output
             }
@@ -166,19 +182,24 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
             const auto correlation = leakflow::base::pearson_correlation(features, target, options); // [1, k]
             rescored[channel].select(1, 1).copy_(correlation.reshape({-1}));          // overwrite scores
         }
-        results.push_back(CorrelationPoiResult{.unit = original.unit, .result = rescored});
+        results.push_back(CorrelationPoiResult{.unit_index = original.unit_index, .result = rescored});
     }
     if (results.empty()) {
-        throw std::invalid_argument("PoiCorrelation: no PoI units match the leakage byte_indexes");
+        throw std::invalid_argument("PoiCorrelation: no PoI units match the target unit indexes");
     }
 
+    const auto output_unit_indexes = unit_indexes_metadata(results);
+    const auto output_unit_count = results.size();
     auto payload = std::make_shared<CorrelationPoiPayload>(std::move(results), poi->score_name());
     Buffer output{Caps(correlation_poi_caps_type)};
     forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
     output.set_metadata("payload.poi.rescored", "true");
-    // Self-documenting axis description: the payload is one result per unit, each result a
-    // [channel, poi, 2] tensor whose last axis is the (sample_index, correlation) pair.
-    output.set_metadata("payload.poi.dims", "unit/channel/poi/[sample_index,correlation]");
+    output.set_metadata("payload.poi.unit_count", std::to_string(output_unit_count));
+    output.set_metadata("attack.unit.count", std::to_string(output_unit_count));
+    output.set_metadata("attack.unit.indexes", output_unit_indexes);
+    if (targets_buffer.has_metadata("attack.unit.kind")) {
+        output.set_metadata("attack.unit.kind", targets_buffer.metadata("attack.unit.kind"));
+    }
     output.set_payload(payload);
     return output;
 }

@@ -34,6 +34,7 @@ public:
         std::int64_t top_k);
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     [[nodiscard]] const torch::Tensor& scores() const;
@@ -96,6 +97,7 @@ public:
         std::vector<std::string> confidence_metrics);
 
     [[nodiscard]] std::string type_name() const override;
+    [[nodiscard]] std::string layout() const override;
     void describe(SummarySection& section, std::int64_t summary_level) const override;
 
     // Known-key (truth) diagnostics are only available when AttackStats was given

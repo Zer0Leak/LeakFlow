@@ -4,6 +4,7 @@
 
 #include <c10/core/ScalarType.h>
 
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -23,6 +24,24 @@ void validate_name(std::string_view name)
 std::string TorchTensorBundlePayload::type_name() const
 {
     return "leakflow/torch-tensor-bundle";
+}
+
+std::string TorchTensorBundlePayload::layout() const
+{
+    if (tensors_.empty()) {
+        return "empty";
+    }
+
+    std::ostringstream output;
+    auto first = true;
+    for (const auto& [name, payload] : tensors_) {
+        if (!first) {
+            output << ';';
+        }
+        first = false;
+        output << name << '=' << payload->layout();
+    }
+    return output.str();
 }
 
 void TorchTensorBundlePayload::describe(SummarySection& section, std::int64_t summary_level) const

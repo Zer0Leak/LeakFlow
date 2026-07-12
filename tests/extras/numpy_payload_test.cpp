@@ -58,6 +58,9 @@ int main()
     if (!expect(payload.rank() == 2, "NumPy payload rank mismatch")) {
         return 1;
     }
+    if (!expect(payload.layout() == "axis_0/axis_1", "NumPy payload layout mismatch")) {
+        return 1;
+    }
     if (!expect(payload.shape() == std::vector<std::uint64_t>{2, 3}, "NumPy payload shape mismatch")) {
         return 1;
     }
@@ -132,11 +135,18 @@ int main()
     if (!expect(roundtrip->shape() == std::vector<std::uint64_t>{2, 3}, "buffer NumPy payload shape mismatch")) {
         return 1;
     }
+    if (!expect(buffer.metadata("payload.layout") == "axis_0/axis_1",
+            "buffer did not publish NumPy payload layout")) {
+        return 1;
+    }
 
     const std::vector<std::uint8_t> bytes{1, 2, 3, 4};
     cnpypp::npy_save(uint8_path.string(), bytes.begin(), {4});
     auto byte_payload = leakflow::extras::load_npy(uint8_path);
     if (!expect(byte_payload.rank() == 1, "uint8 NumPy payload rank mismatch")) {
+        return 1;
+    }
+    if (!expect(byte_payload.layout() == "axis_0", "rank-one NumPy payload layout mismatch")) {
         return 1;
     }
     if (!expect(byte_payload.word_size() == sizeof(std::uint8_t), "uint8 NumPy payload word size mismatch")) {

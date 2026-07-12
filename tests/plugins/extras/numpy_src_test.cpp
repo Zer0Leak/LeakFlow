@@ -95,6 +95,10 @@ int main()
                 "NumpySrc did not stamp file.size metadata")) {
         return 1;
     }
+    if (!expect(output->metadata("payload.layout") == "axis_0/axis_1",
+                "NumpySrc did not publish the generic array layout")) {
+        return 1;
+    }
 
     const auto payload = output->payload_as<leakflow::extras::NumpyPayload>();
     if (!expect(payload != nullptr, "NumpySrc payload type was wrong")) {
