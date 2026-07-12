@@ -1,6 +1,7 @@
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/pipeline.hpp"
+#include "leakflow/core/progress_sink.hpp"
 #include "leakflow/plugins/base/app_src.hpp"
 
 #include <cstdint>
@@ -149,14 +150,15 @@ int run_tests()
     // source emits nothing and a fresh sweep fails "missing upstream output").
     {
         AppSrc pull("pull");
-        pull.set_frame_producer([](std::size_t index) -> std::optional<std::vector<leakflow::Buffer>> {
-            if (index >= 2) {
-                return std::nullopt;
-            }
-            std::vector<leakflow::Buffer> frame;
-            frame.push_back(marker_buffer(static_cast<std::int64_t>(index)));
-            return frame;
-        });
+        pull.set_frame_producer(
+            [](std::size_t index, const auto&) -> std::optional<std::vector<leakflow::Buffer>> {
+                if (index >= 2) {
+                    return std::nullopt;
+                }
+                std::vector<leakflow::Buffer> frame;
+                frame.push_back(marker_buffer(static_cast<std::int64_t>(index)));
+                return frame;
+            });
 
         const auto drain = [&pull]() {
             std::vector<std::int64_t> seen;
@@ -178,6 +180,53 @@ int run_tests()
             return 1;
         }
         if (!expect(second == std::vector<std::int64_t>{0, 1}, "restart should re-stream frames 0,1 after start()")) {
+            return 1;
+        }
+    }
+
+    // Application-driven progress: the reporter handed to the pull producer reaches
+    // this element's progress channel, so an application can drive the source's
+    // --graph bar without touching the protected API. The framework owns the
+    // plumbing; the app supplies only the fraction/message it alone knows.
+    {
+        struct CapturingProgressSink final : leakflow::ProgressSink {
+            void report(leakflow::Element&, const leakflow::ElementProgress& progress) override
+            {
+                reports.push_back(progress);
+            }
+            std::vector<leakflow::ElementProgress> reports;
+        } progress_sink;
+
+        AppSrc progress_src("progress_src");
+        progress_src.set_progress_sink(&progress_sink);
+        progress_src.set_frame_producer(
+            [](std::size_t index, const auto& report) -> std::optional<std::vector<leakflow::Buffer>> {
+                if (index >= 3) {
+                    report(1.0, "done", 3, 3);
+                    return std::nullopt;
+                }
+                report(static_cast<double>(index) / 3.0, "frame", index, 3);
+                std::vector<leakflow::Buffer> frame;
+                frame.push_back(marker_buffer(static_cast<std::int64_t>(index)));
+                return frame;
+            });
+
+        progress_src.start();
+        while (!progress_src.at_end_of_stream()) {
+            if (progress_src.process_pads({}).empty()) {
+                break;
+            }
+        }
+
+        // The first report (frame-0 prefetch in start()) and the terminal 1.0 always
+        // flush; intermediate ticks may be coalesced by the ~30 Hz throttle. Reaching
+        // the sink at all proves the app-driven channel is wired; the terminal report
+        // proves fraction 1.0 is promoted to Completed.
+        if (!expect(!progress_sink.reports.empty()
+                    && progress_sink.reports.front().fraction == 0.0
+                    && progress_sink.reports.back().fraction == 1.0
+                    && progress_sink.reports.back().status == leakflow::ProgressStatus::Completed,
+                    "AppSrc pull producer progress should reach the sink and complete")) {
             return 1;
         }
     }

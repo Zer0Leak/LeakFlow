@@ -223,11 +223,17 @@ int main(int argc, char** argv)
         // PoI accumulates across frames. AppSrc owns the index and resets it to 0 on
         // start(), so Stop -> Start re-streams. nullopt = end of stream.
         app_src->set_frame_producer(
-            [files](std::size_t index) -> std::optional<std::vector<leakflow::Buffer>> {
+            [files](std::size_t index, const auto& report) -> std::optional<std::vector<leakflow::Buffer>> {
                 if (index >= files.size()) {
+                    report(1.0, "done", files.size(), files.size());
                     return std::nullopt;
                 }
                 const auto& file = files[index];
+                // Drive this AppSrc's --graph progress bar: the app is the only place
+                // that knows the file count, so it reports; AppSrc relays it to the
+                // generic element progress channel (per instance). See report(...).
+                report(static_cast<double>(index) / static_cast<double>(files.size()),
+                       "streaming " + file.stem().string(), index, files.size());
                 // One key_NN.h5 per fold: read its aligned /traces, /plaintexts, /keys
                 // through the same HDF5 reader Hdf5FileSrc uses. Whole-array reads
                 // (default options) mirror the old one-tensor-per-.pt-file loads.

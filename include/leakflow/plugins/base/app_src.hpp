@@ -5,11 +5,13 @@
 
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace leakflow::plugins::base {
@@ -39,11 +41,22 @@ public:
 
     [[nodiscard]] static ElementDescriptor descriptor();
 
+    // A progress reporter handed to the frame producer so the application can surface
+    // progress on THIS AppSrc's --graph node bar (and the observer stream), per
+    // instance. AppSrc binds it to its own Element::report_progress, so the
+    // application never touches the protected progress API and needs no knowledge of
+    // the progress bus. fraction is in [0, 1] (1.0 marks completion); message is a
+    // human-readable stage; index/total are optional step counters.
+    using ProgressReport = std::function<void(
+        double fraction, std::string_view message, std::uint64_t index, std::uint64_t total)>;
+
     // Returns frame `index` (aligned buffers for src_0..src_N), or nullopt for
     // end-of-stream. Called on the pipeline worker thread. AppSrc owns the index
     // (0-based, advancing per pump step) and resets it to 0 in start(), so a
-    // Stop -> Start cycle re-streams from the beginning.
-    using FrameProducer = std::function<std::optional<std::vector<Buffer>>(std::size_t index)>;
+    // Stop -> Start cycle re-streams from the beginning. The application may call
+    // `report(...)` to drive this source's progress; ignoring it is fine.
+    using FrameProducer = std::function<std::optional<std::vector<Buffer>>(
+        std::size_t index, const ProgressReport& report)>;
 
     // Pull / lazy mode (preferred for streaming many large frames): the source asks
     // the application for the next frame when it needs one, instead of holding them
@@ -61,6 +74,12 @@ public:
     // at_end_of_stream() reports true and the pump stops.
     void end_of_stream();
 
+    // Application-driven progress: expose the element progress channel publicly so a
+    // push-mode driver thread can report on this node's --graph bar too (pull-mode
+    // producers get the `report` argument instead). Thread-safe -- the observer emit
+    // path is serialized. Reports nothing on its own; ignoring it is fine.
+    using Element::report_progress;
+
     void start() override;
     [[nodiscard]] std::optional<Buffer> process(std::optional<Buffer> input) override;
     [[nodiscard]] ElementOutputs process_pads(ElementInputs inputs) override;
@@ -68,6 +87,10 @@ public:
 
 private:
     [[nodiscard]] static ElementOutputs frame_to_outputs(std::vector<Buffer> frame);
+
+    // A reporter bound to this element's progress channel, passed to the frame
+    // producer so the application can report without touching the protected API.
+    [[nodiscard]] ProgressReport make_progress_report();
 
     // Pull mode: worker-thread only (start() + process_pads() + at_end_of_stream()
     // all run on the pump thread), so these need no lock.

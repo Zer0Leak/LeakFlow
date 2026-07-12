@@ -49,6 +49,13 @@ ElementOutputs AppSrc::frame_to_outputs(std::vector<Buffer> frame)
     return outputs;
 }
 
+AppSrc::ProgressReport AppSrc::make_progress_report()
+{
+    return [this](double fraction, std::string_view message, std::uint64_t index, std::uint64_t total) {
+        report_progress(fraction, std::string(message), index, total);
+    };
+}
+
 void AppSrc::start()
 {
     // Pull mode: rewind to frame 0 and prefetch it, so a Stop -> Start cycle
@@ -56,7 +63,7 @@ void AppSrc::start()
     // pump check (an empty producer ends the run before any sweep).
     if (producer_) {
         cursor_ = 0;
-        pending_ = producer_(cursor_++);
+        pending_ = producer_(cursor_++, make_progress_report());
     }
 }
 
@@ -96,7 +103,7 @@ ElementOutputs AppSrc::process_pads(ElementInputs)
             return {};
         }
         auto frame = std::move(*pending_);
-        pending_ = producer_(cursor_++);
+        pending_ = producer_(cursor_++, make_progress_report());
         return frame_to_outputs(std::move(frame));
     }
 
