@@ -9,6 +9,7 @@
 #include "leakflow/log/logger.hpp"
 
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -93,6 +94,11 @@ public:
     // one so long-running elements surface a live progress bar on the observer bus; not owned.
     void set_progress_sink(ProgressSink* sink);
 
+    // Framework-injected pause gate for long-running synchronous process() calls. Elements
+    // cooperate through cooperative_checkpoint(); an unset waiter means pausing is unsupported
+    // by the current runner and the checkpoint remains a cheap stop-token check.
+    void set_pause_waiter(std::function<void(std::stop_token)> waiter);
+
     // Aggregate timing of every duration channel this element accumulated in the
     // current run (the built-in "process" timer plus any declared op scopes).
     // Read after the run (or after threads join); the table renders these rows.
@@ -156,6 +162,9 @@ protected:
     // The cooperative-stop token for this element (see set_stop_token). Subclasses
     // with blocking waits poll it; the default token never reports a stop request.
     [[nodiscard]] const std::stop_token& stop_token() const;
+    // Park while the owning session is paused, then return whether work should continue.
+    // Long-running loops call this between indivisible units of work.
+    [[nodiscard]] bool cooperative_checkpoint();
     [[nodiscard]] RuntimeTelemetrySwitch& runtime_telemetry();
     [[nodiscard]] const RuntimeTelemetrySwitch& runtime_telemetry() const;
 
@@ -169,9 +178,11 @@ protected:
     // Report estimated progress of a long-running process() call (fraction in [0, 1] plus a
     // human-readable message). A cheap no-op when no progress sink is injected, and coalesced to
     // ~30 Hz so a tight inner loop may call it every iteration without flooding the bus (a
-    // fraction of 1.0 always flushes). index/total are optional extra step counters for the UI.
+    // terminal status always flushes). A legacy Active report at 1.0 is promoted to Completed;
+    // explicit Completed/Cancelled reports are normalized to 1.0. index/total are optional extra
+    // step counters for the UI.
     void report_progress(double fraction, std::string message, std::uint64_t index = 0,
-        std::uint64_t total = 0);
+        std::uint64_t total = 0, ProgressStatus status = ProgressStatus::Active);
 
 private:
     friend class Pipeline;
@@ -211,6 +222,7 @@ private:
     std::map<std::string, std::unique_ptr<RuntimeTelemetryDurationStat>> duration_stats_;
     RuntimeTelemetryDurationStat* process_stat_ = nullptr;
     std::stop_token stop_token_;
+    std::function<void(std::stop_token)> pause_waiter_;
 };
 
 } // namespace leakflow

@@ -48,9 +48,10 @@ public:
     }
 
     // report_progress is protected; expose it so the progress-sink test can drive it.
-    void emit_progress(double fraction, std::string message)
+    void emit_progress(double fraction, std::string message,
+        leakflow::ProgressStatus status = leakflow::ProgressStatus::Active)
     {
-        report_progress(fraction, std::move(message));
+        report_progress(fraction, std::move(message), 0, 0, status);
     }
 
     bool started = false;
@@ -118,7 +119,9 @@ int main()
     if (!expect(sink.count == 1 && sink.last_element == "probe", "first progress report did not forward")) {
         return 1;
     }
-    if (!expect(sink.last.fraction == 0.5 && sink.last.message == "half", "progress payload wrong")) {
+    if (!expect(sink.last.fraction == 0.5 && sink.last.message == "half"
+            && sink.last.status == leakflow::ProgressStatus::Active,
+            "progress payload wrong")) {
         return 1;
     }
     element.emit_progress(0.6, "coalesced");
@@ -126,7 +129,15 @@ int main()
         return 1;
     }
     element.emit_progress(1.0, "done");
-    if (!expect(sink.count == 2 && sink.last.fraction == 1.0, "completion should always flush")) {
+    if (!expect(sink.count == 2 && sink.last.fraction == 1.0
+            && sink.last.status == leakflow::ProgressStatus::Completed,
+            "completion should always flush and infer Completed status")) {
+        return 1;
+    }
+    element.emit_progress(0.4, "cancelled", leakflow::ProgressStatus::Cancelled);
+    if (!expect(sink.count == 3 && sink.last.fraction == 1.0
+            && sink.last.status == leakflow::ProgressStatus::Cancelled,
+            "cancellation should always flush as terminal 100%")) {
         return 1;
     }
 

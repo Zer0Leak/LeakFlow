@@ -7,12 +7,19 @@ namespace leakflow {
 
 class Element;
 
+enum class ProgressStatus {
+    Active,
+    Completed,
+    Cancelled,
+};
+
 // Estimated progress from a long-running element, reported from inside process().
 struct ElementProgress {
     double fraction = 0.0;   // estimated completion in [0, 1]
     std::string message;     // human-readable stage, e.g. "restart 2/3 - iter 40/100"
     std::uint64_t index = 0; // optional current step (0 when unused)
     std::uint64_t total = 0; // optional total steps (0 when unused)
+    ProgressStatus status = ProgressStatus::Active;
 };
 
 // Framework-injected push channel for progress, mirroring TelemetryTraceSink: the Pipeline sets

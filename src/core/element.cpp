@@ -398,22 +398,35 @@ void Element::set_progress_sink(ProgressSink* sink)
     progress_sink_ = sink;
 }
 
+void Element::set_pause_waiter(std::function<void(std::stop_token)> waiter)
+{
+    pause_waiter_ = std::move(waiter);
+}
+
 void Element::reset_progress_reporting()
 {
     last_progress_report_ = {};
     progress_reported_ = false;
 }
 
-void Element::report_progress(double fraction, std::string message, std::uint64_t index, std::uint64_t total)
+void Element::report_progress(double fraction, std::string message, std::uint64_t index, std::uint64_t total,
+    ProgressStatus status)
 {
     if (progress_sink_ == nullptr) {
         return;
     }
-    const auto clamped = std::clamp(fraction, 0.0, 1.0);
-    const auto complete = clamped >= 1.0;
-    // Coalesce to ~30 Hz so a tight inner loop can call every iteration; always flush completion.
+    auto clamped = std::clamp(fraction, 0.0, 1.0);
+    if (status == ProgressStatus::Active && clamped >= 1.0) {
+        status = ProgressStatus::Completed;
+    }
+    const auto terminal = status != ProgressStatus::Active;
+    if (terminal) {
+        clamped = 1.0;
+    }
+    // Coalesce to ~30 Hz so a tight inner loop can call every iteration; always flush a terminal
+    // completion/cancellation report.
     const auto now = std::chrono::steady_clock::now();
-    if (!complete && progress_reported_ && now - last_progress_report_ < std::chrono::milliseconds(33)) {
+    if (!terminal && progress_reported_ && now - last_progress_report_ < std::chrono::milliseconds(33)) {
         return;
     }
     last_progress_report_ = now;
@@ -424,6 +437,7 @@ void Element::report_progress(double fraction, std::string message, std::uint64_
             .message = std::move(message),
             .index = index,
             .total = total,
+            .status = status,
         });
 }
 
@@ -580,6 +594,17 @@ void Element::set_live_driven(bool live_driven)
 const std::stop_token& Element::stop_token() const
 {
     return stop_token_;
+}
+
+bool Element::cooperative_checkpoint()
+{
+    if (stop_token_.stop_requested()) {
+        return false;
+    }
+    if (pause_waiter_) {
+        pause_waiter_(stop_token_);
+    }
+    return !stop_token_.stop_requested();
 }
 
 RuntimeTelemetrySwitch& Element::runtime_telemetry()

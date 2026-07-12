@@ -33,6 +33,11 @@ family (klass `Analyze/Clustering/...`, `Analyze/Evaluation/Clustering`,
   **Genevay et al. 2019**; `epsilon` dials soft↔hard. float64; cross-validated vs
   sklearn to ~1e-8 log-likelihood. Deferred: tied/spherical cov, warm_start, caller
   inits, `sample()`, `aic`/`bic`.
+  Its optional progress callback can stop after an EM/constrained iteration; a
+  separate cooperative checkpoint also runs between k-means++ initialization
+  steps and before iterations. Cancellation returns the best partial numeric fit.
+  The pipeline `GaussianMixture` wrapper binds those checkpoints to session Pause
+  and discards the partial fit on Stop, so no canceled labels travel downstream.
 - `sinkhorn.hpp`: `sinkhorn(cost, row_marginal, col_marginal, options)` — log-domain
   entropic-OT Sinkhorn (**Cuturi 2013**), batched over the unit axis; domain-agnostic.
   Cross-validated vs Python POT (`ot.sinkhorn`) to ~1e-13 on the plan.

@@ -50,6 +50,7 @@ bool is_dataflow_effect(PropertyEffectKind kind)
 PipelineSession::PipelineSession(Pipeline pipeline)
     : pipeline_(std::move(pipeline))
 {
+    pipeline_.set_pause_waiter([this](std::stop_token stop) { wait_while_paused(std::move(stop)); });
 }
 
 Pipeline &PipelineSession::pipeline()

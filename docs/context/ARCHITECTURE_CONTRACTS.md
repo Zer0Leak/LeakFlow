@@ -267,6 +267,9 @@ Authoritative design: `docs/design/pipeline_controller.md`. It owns a
 - owns a `Stopped/Running/Paused/Idle` player state machine (pause/resume wired;
   only `preroll` reserved) and session controls (restart, re-run-from-sources,
   caching toggle, pause/resume);
+- injects `Element::cooperative_checkpoint()` pause/stop gates into long
+  synchronous work; outputs returned after Stop are discarded before observation,
+  caching, or downstream routing;
 - emits copied `CommandAccepted/Rejected/Applied` events on the observer stream.
 
 The graph runner uses a persistent worker loop. The `OneShotDrive`/`StreamingDrive`

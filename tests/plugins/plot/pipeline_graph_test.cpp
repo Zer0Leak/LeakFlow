@@ -143,6 +143,31 @@ int main() {
                 "graph runtime did not retain payload summary")) {
         return 1;
     }
+
+    runtime.observe(leakflow::PipelineEvent{
+        .kind = leakflow::PipelineEventKind::ProgressReported,
+        .progress =
+            leakflow::PipelineProgressObservation{
+                .element =
+                    leakflow::PipelineEndpointSnapshot{
+                        .element_name = "source",
+                    },
+                .fraction = 0.4,
+                .message = "cancelled",
+                .index = 4,
+                .total = 10,
+                .status = leakflow::ProgressStatus::Cancelled,
+            },
+    });
+    runtime.drain_events();
+    const auto& cancelled_progress = runtime.element_progress().at("source");
+    if (!expect(cancelled_progress.fraction == 0.4 && cancelled_progress.message == "cancelled"
+                    && cancelled_progress.index == 4 && cancelled_progress.total == 10
+                    && cancelled_progress.status == leakflow::ProgressStatus::Cancelled,
+                "graph runtime did not retain cancelled progress status")) {
+        return 1;
+    }
+
     // Vector-clock provenance aggregation (Phase 27): component-wise max over
     // observed buffers ({0,1,1} then {0,2,1} -> {0,2,1}).
     if (!expect(runtime.max_provenance().size() >= 3 && runtime.max_provenance()[1] == 2 &&

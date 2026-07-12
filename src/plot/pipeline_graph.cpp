@@ -1509,6 +1509,7 @@ void PipelineGraphRuntime::apply_event(const PipelineEvent &event) {
                 .message = event.progress->message,
                 .index = event.progress->index,
                 .total = event.progress->total,
+                .status = event.progress->status,
                 .updated = std::chrono::steady_clock::now(),
             };
         }
@@ -2100,15 +2101,15 @@ void draw_arrowhead(ImDrawList *draw_list, ImVec2 tip, ImU32 color) {
     draw_list->AddTriangleFilled(ImVec2(tip.x - length, tip.y - half), ImVec2(tip.x - length, tip.y + half), tip, color);
 }
 
-// Progress display gate + fade: a bar shows while a fit is in flight, then lingers ~1.5 s after
-// it completes (fraction == 1) and fades out, so a finished element does not vanish instantly.
+// Progress display gate + fade: a bar shows while work is in flight, then lingers ~1.5 s after
+// it completes or is cancelled and fades out, so a terminal outcome does not vanish instantly.
 struct ProgressDisplay {
     bool show = false;
     float alpha = 1.0F;
 };
 
 [[nodiscard]] ProgressDisplay progress_display(const PipelineGraphRuntime::ElementProgressState &state) {
-    if (state.fraction < 1.0) {
+    if (state.status == ProgressStatus::Active && state.fraction < 1.0) {
         return {true, 1.0F};
     }
     static constexpr auto linger = 1.5F;
@@ -2128,18 +2129,22 @@ struct ProgressDisplay {
 // highlight band sweeps left->right across the filled portion each ~1.1 s to signal live activity;
 // `alpha` fades the whole bar out once complete. Uses ImGui::GetTime(), which advances every frame
 // (the plot loop renders continuously), so the sweep is smooth.
-void draw_progress_bar(ImDrawList *draw_list, ImVec2 min, ImVec2 max, double fraction, float alpha, bool running) {
+void draw_progress_bar(ImDrawList *draw_list, ImVec2 min, ImVec2 max, double fraction, float alpha, bool running,
+                       ProgressStatus status) {
     const auto rounding = std::min(2.0F, (max.y - min.y) * 0.5F);
     const auto track = ImGui::GetColorU32(ImVec4(0.14F, 0.16F, 0.20F, 0.85F * alpha));
-    const auto fill = ImGui::GetColorU32(ImVec4(0.36F, 0.72F, 0.42F, 0.96F * alpha));
+    const auto cancelled = status == ProgressStatus::Cancelled;
+    const auto fill = ImGui::GetColorU32(cancelled ? ImVec4(0.88F, 0.25F, 0.28F, 0.96F * alpha)
+                                                   : ImVec4(0.36F, 0.72F, 0.42F, 0.96F * alpha));
     draw_list->AddRectFilled(min, max, track, rounding);
 
-    const auto frac = static_cast<float>(std::clamp(fraction, 0.0, 1.0));
+    const auto display_fraction = cancelled ? 1.0 : fraction;
+    const auto frac = static_cast<float>(std::clamp(display_fraction, 0.0, 1.0));
     const auto fill_x = min.x + (max.x - min.x) * frac;
     if (fill_x > min.x + 0.5F) {
         draw_list->AddRectFilled(min, ImVec2(fill_x, max.y), fill, rounding);
     }
-    if (!running) {
+    if (!running || cancelled) {
         return;
     }
 
@@ -2186,7 +2191,8 @@ void draw_progress_panel(const PipelineGraphRuntime &runtime, bool animate_progr
         auto *draw_list = ImGui::GetWindowDrawList();
         for (const auto &[name, state] : active) {
             const auto display = progress_display(*state);
-            const auto running = animate_progress && state->fraction < 1.0;
+            const auto running = animate_progress && state->status == ProgressStatus::Active
+                && state->fraction < 1.0;
             ImGui::TextUnformatted(name->c_str());
 
             // Full-width animated bar with the percentage centered over it.
@@ -2196,13 +2202,16 @@ void draw_progress_panel(const PipelineGraphRuntime &runtime, bool animate_progr
             ImGui::Dummy(ImVec2(width, height));
             const ImVec2 bar_min(origin.x, origin.y);
             const ImVec2 bar_max(origin.x + width, origin.y + height);
-            draw_progress_bar(draw_list, bar_min, bar_max, state->fraction, display.alpha, running);
-            const auto percent = progress_percent(state->fraction);
+            draw_progress_bar(draw_list, bar_min, bar_max, state->fraction, display.alpha, running, state->status);
+            const auto percent = progress_percent(state->status == ProgressStatus::Cancelled ? 1.0 : state->fraction);
             const auto text_size = ImGui::CalcTextSize(percent.c_str());
             draw_list->AddText(ImVec2(bar_min.x + (width - text_size.x) * 0.5F, bar_min.y + (height - text_size.y) * 0.5F),
                                ImGui::GetColorU32(ImVec4(1.0F, 1.0F, 1.0F, 0.95F * display.alpha)), percent.c_str());
 
-            if (!state->message.empty()) {
+            if (state->status == ProgressStatus::Cancelled) {
+                const auto message = state->message.empty() ? "cancelled" : state->message.c_str();
+                ImGui::TextColored(ImVec4(0.96F, 0.32F, 0.34F, display.alpha), "%s", message);
+            } else if (!state->message.empty()) {
                 ImGui::TextDisabled("%s", state->message.c_str());
             }
         }
@@ -2452,7 +2461,8 @@ void draw_pipeline_graph(PipelineGraphRuntime &runtime, PipelineControlRuntime *
             if (display.show) {
                 draw_progress_bar(draw_list, ImVec2(min.x + 8.0F, max.y - 7.0F), ImVec2(max.x - 8.0F, max.y - 3.0F),
                                   state.fraction, display.alpha,
-                                  animate_progress && state.fraction < 1.0);
+                                  animate_progress && state.status == ProgressStatus::Active && state.fraction < 1.0,
+                                  state.status);
             }
         }
 

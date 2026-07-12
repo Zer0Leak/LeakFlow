@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <stop_token>
 #include <torch/torch.h>
 #include <vector>
 
@@ -111,8 +112,33 @@ int main()
             "first fit progress report was not the initial 0% state")) {
         return 1;
     }
-    if (!expect(progress.reports.back().fraction == 1.0 && progress.reports.back().message == "done",
+    if (!expect(progress.reports.back().fraction == 1.0 && progress.reports.back().message == "done"
+            && progress.reports.back().status == leakflow::ProgressStatus::Completed,
             "last fit progress report was not completion")) {
+        return 1;
+    }
+
+    leakflow::plugins::ml::GaussianMixtureElement cancelled_element;
+    cancelled_element.set_property("n_components", std::int64_t{k});
+    cancelled_element.set_property("covariance_type", std::string("diagonal"));
+    CapturingProgressSink cancelled_progress;
+    cancelled_element.set_progress_sink(&cancelled_progress);
+    std::stop_source stop;
+    stop.request_stop();
+    cancelled_element.set_stop_token(stop.get_token());
+
+    const auto cancelled_output = cancelled_element.process(torch_buffer(features));
+    if (!expect(!cancelled_output.has_value(), "pre-stopped fit emitted an output")) {
+        return 1;
+    }
+    if (!expect(cancelled_progress.reports.size() == 1,
+            "pre-stopped fit should report only terminal cancellation")) {
+        return 1;
+    }
+    if (!expect(cancelled_progress.reports.back().fraction == 1.0
+            && cancelled_progress.reports.back().message == "cancelled"
+            && cancelled_progress.reports.back().status == leakflow::ProgressStatus::Cancelled,
+            "pre-stopped fit did not report terminal cancellation")) {
         return 1;
     }
 

@@ -2,6 +2,7 @@
 
 #include "leakflow/core/caps.hpp"
 #include "leakflow/core/pad.hpp"
+#include "leakflow/core/progress_sink.hpp"
 #include "leakflow/core/property.hpp"
 #include "leakflow/core/telemetry.hpp"
 
@@ -130,6 +131,7 @@ struct PipelineProgressObservation {
     std::string message;     // human-readable stage, e.g. "restart 2/3 - iter 40/100"
     std::uint64_t index = 0; // optional current step (0 when unused)
     std::uint64_t total = 0; // optional total steps (0 when unused)
+    ProgressStatus status = ProgressStatus::Active;
 };
 
 // Copied, SCA-safe result of a control-plane command (Phase 25). Carries no

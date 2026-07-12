@@ -127,7 +127,7 @@ ElementDescriptor GaussianMixtureElement::descriptor()
             // UX-only: how often the fit pushes a progress report to the --graph bar. Does not
             // affect the labels, so it carries no invalidation effect.
             PropertySpec("progress_every", std::int64_t{10},
-                "report fit progress every N EM iterations (0 disables progress reports)",
+                "report fit progress every N EM iterations (0 disables iteration reports)",
                 "", IntRangeConstraint{0, 100000}, "", PropertyEffect{}),
         },
         .keywords = {"gmm", "gaussian", "mixture", "cluster", "em", "ml"},
@@ -165,13 +165,34 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
 
     const auto options = options_from(*this);
     leakflow::ml::GaussianMixture model(options);
+    bool cancelled = false;
+
+    const auto report_cancelled = [this, &options]() {
+        report_progress(1.0, "cancelled", 0, static_cast<std::uint64_t>(options.max_iter),
+            leakflow::ProgressStatus::Cancelled);
+    };
+
+    if (!cooperative_checkpoint()) {
+        report_cancelled();
+        return std::nullopt;
+    }
 
     // Bridge the ml-lib progress callback to the framework progress bar. We gate on
     // progress_every here (restart boundaries, stage changes, and the final iteration always
     // pass); report_progress further coalesces to ~30 Hz. Returning false cancels the fit, which
     // we wire to the element's stop token so Ctrl+C / window-close interrupts a long fit.
     const auto progress_every = int_property_or(*this, "progress_every", 10);
-    const auto on_progress = [this, progress_every](const leakflow::ml::GmmProgress& p) -> bool {
+    const auto on_checkpoint = [this, &cancelled]() {
+        if (!cooperative_checkpoint()) {
+            cancelled = true;
+            return false;
+        }
+        return true;
+    };
+    const auto on_progress = [this, progress_every, &on_checkpoint](const leakflow::ml::GmmProgress& p) -> bool {
+        if (!on_checkpoint()) {
+            return false;
+        }
         const auto report = progress_every > 0
             && (p.iter <= 1 || p.iter == p.max_iter || (p.iter % progress_every) == 0);
         if (report) {
@@ -187,15 +208,19 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
             report_progress(p.fraction, message.str(), static_cast<std::uint64_t>(p.iter),
                 static_cast<std::uint64_t>(p.max_iter));
         }
-        return !stop_token().stop_requested();
+        return true;
     };
 
     // Initialisation happens before the ML callback's first EM iteration and can take long
     // enough to be visible. Publish 0% immediately so observers can show the progress bar while
     // it runs; report_progress keeps its normal throttling for the callbacks that follow.
     report_progress(0.0, "starting", 0, static_cast<std::uint64_t>(options.max_iter));
-    const auto fit = model.fit(payload->tensor(), on_progress);
-    report_progress(1.0, "done"); // flush the bar to 100% (EM may have converged before max_iter)
+    const auto fit = model.fit(payload->tensor(), on_progress, on_checkpoint);
+    if (cancelled || !cooperative_checkpoint()) {
+        report_cancelled();
+        return std::nullopt;
+    }
+    report_progress(1.0, "done", 0, 0, leakflow::ProgressStatus::Completed);
     const auto labels = fit.labels.to(torch::kInt64).contiguous();
     const bool converged = fit.converged.all().item<bool>();
 

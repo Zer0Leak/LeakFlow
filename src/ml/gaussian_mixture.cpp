@@ -180,22 +180,33 @@ struct MixtureParameters {
     return x.gather(1, indexes.view({u, 1, 1}).expand({u, 1, n})).squeeze(1);
 }
 
-// k-means++ seeding (batched over U), then a few Lloyd iterations. Returns centres [U, K, N].
-[[nodiscard]] torch::Tensor kmeans_plus_plus(
+struct KMeansInitOutcome {
+    torch::Tensor centres;
+    bool cancelled = false;
+};
+
+// k-means++ seeding (batched over U), then a few Lloyd iterations. The checkpoint runs between
+// expensive distance/assignment steps so callers can pause or cancel during initialization.
+[[nodiscard]] KMeansInitOutcome kmeans_plus_plus(
     const torch::Tensor& x,
     std::int64_t k_count,
     torch::Generator& generator,
-    std::int64_t lloyd_iters)
+    std::int64_t lloyd_iters,
+    const GmmCheckpointCallback& on_checkpoint)
 {
     const auto u = x.size(0);
     const auto t = x.size(1);
-    const auto n = x.size(2);
 
     const auto first = torch::randint(t, {u}, generator, torch::TensorOptions().dtype(torch::kLong));
     std::vector<torch::Tensor> centres_list;
     centres_list.push_back(gather_rows(x, first)); // [U, N]
 
+    auto cancelled = false;
     for (std::int64_t c = 1; c < k_count; ++c) {
+        if (on_checkpoint && !on_checkpoint()) {
+            cancelled = true;
+            break;
+        }
         const auto centres = torch::stack(centres_list, 1);        // [U, c, N]
         const auto nearest = std::get<0>(squared_distances(x, centres).min(2)); // [U, T]
         const auto totals = nearest.sum(-1, /*keepdim=*/true);     // [U, 1]
@@ -204,9 +215,19 @@ struct MixtureParameters {
         const auto chosen = torch::multinomial(probabilities, 1, /*replacement=*/false, generator).squeeze(1); // [U]
         centres_list.push_back(gather_rows(x, chosen));
     }
+    // Cancellation still honors fit()'s best-partial-fit contract. Repeating the
+    // last selected center keeps the requested K shape while avoiding more costly
+    // seeding work; the caller will discard this partial result on pipeline Stop.
+    while (static_cast<std::int64_t>(centres_list.size()) < k_count) {
+        centres_list.push_back(centres_list.back());
+    }
 
     auto centres = torch::stack(centres_list, 1); // [U, K, N]
-    for (std::int64_t iter = 0; iter < lloyd_iters; ++iter) {
+    for (std::int64_t iter = 0; iter < lloyd_iters && !cancelled; ++iter) {
+        if (on_checkpoint && !on_checkpoint()) {
+            cancelled = true;
+            break;
+        }
         const auto labels = squared_distances(x, centres).argmin(2);                 // [U, T]
         const auto onehot = torch::one_hot(labels, k_count).to(x.dtype());           // [U, T, K]
         const auto counts = onehot.sum(1);                                           // [U, K]
@@ -214,22 +235,34 @@ struct MixtureParameters {
         const auto updated = sums / counts.clamp_min(1.0).unsqueeze(-1);             // [U, K, N]
         centres = torch::where(counts.unsqueeze(-1) > 0, updated, centres);          // keep empties
     }
-    return centres;
+    return {std::move(centres), cancelled};
 }
 
+struct InitialResponsibilitiesOutcome {
+    torch::Tensor responsibilities;
+    bool cancelled = false;
+};
+
 // Initial responsibilities [U, T, K]; the caller runs one M-step to turn these into params.
-[[nodiscard]] torch::Tensor initial_responsibilities(
+[[nodiscard]] InitialResponsibilitiesOutcome initial_responsibilities(
     const torch::Tensor& x,
     std::int64_t k_count,
     GmmInitMethod method,
-    torch::Generator& generator)
+    torch::Generator& generator,
+    const GmmCheckpointCallback& on_checkpoint)
 {
     const auto u = x.size(0);
     const auto t = x.size(1);
+    const auto uniform = [&]() {
+        return torch::full({u, t, k_count}, 1.0 / static_cast<double>(k_count), x.options());
+    };
+    if (on_checkpoint && !on_checkpoint()) {
+        return {uniform(), true};
+    }
     switch (method) {
     case GmmInitMethod::Random: {
         auto resp = torch::rand({u, t, k_count}, generator, x.options());
-        return resp / resp.sum(-1, /*keepdim=*/true);
+        return {resp / resp.sum(-1, /*keepdim=*/true), false};
     }
     case GmmInitMethod::RandomFromData: {
         // Distinct random seed rows per unit via per-unit argsort of noise.
@@ -238,17 +271,20 @@ struct MixtureParameters {
         std::vector<torch::Tensor> centre_rows;
         centre_rows.reserve(static_cast<std::size_t>(k_count));
         for (std::int64_t k = 0; k < k_count; ++k) {
+            if (on_checkpoint && !on_checkpoint()) {
+                return {uniform(), true};
+            }
             centre_rows.push_back(gather_rows(x, picks.select(1, k)));
         }
         const auto centres = torch::stack(centre_rows, 1);              // [U, K, N]
         const auto labels = squared_distances(x, centres).argmin(2);   // [U, T]
-        return torch::one_hot(labels, k_count).to(x.dtype());
+        return {torch::one_hot(labels, k_count).to(x.dtype()), false};
     }
     case GmmInitMethod::KMeansPlusPlus:
     default: {
-        const auto centres = kmeans_plus_plus(x, k_count, generator, /*lloyd_iters=*/10);
-        const auto labels = squared_distances(x, centres).argmin(2);
-        return torch::one_hot(labels, k_count).to(x.dtype());
+        auto outcome = kmeans_plus_plus(x, k_count, generator, /*lloyd_iters=*/10, on_checkpoint);
+        const auto labels = squared_distances(x, outcome.centres).argmin(2);
+        return {torch::one_hot(labels, k_count).to(x.dtype()), outcome.cancelled};
     }
     }
 }
@@ -305,6 +341,7 @@ struct ConstrainedOutcome {
     GmmCovarianceType cov_type,
     double reg,
     const GmmProgressCallback& on_progress,
+    const GmmCheckpointCallback& on_checkpoint,
     double frac_base,
     double frac_span)
 {
@@ -321,6 +358,9 @@ struct ConstrainedOutcome {
     auto n_iter = torch::full({u}, options.constrained_max_iter, torch::TensorOptions().dtype(torch::kLong));
 
     for (std::int64_t outer = 1; outer <= options.constrained_max_iter; ++outer) {
+        if (on_checkpoint && !on_checkpoint()) {
+            break;
+        }
         const auto log_prob = estimate_log_gaussian_prob(x, means, covariances, cov_type, reg);
         const auto plan = sinkhorn(-log_prob, a, b, sinkhorn_options).plan; // [U, T, K]
         const auto params = m_step(x, plan, cov_type, reg);
@@ -408,7 +448,8 @@ GaussianMixture::GaussianMixture(GaussianMixtureOptions options)
     }
 }
 
-GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProgressCallback& on_progress)
+GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProgressCallback& on_progress,
+    const GmmCheckpointCallback& on_checkpoint)
 {
     const auto prepared = prepare_input(x_in);
     const auto& x = prepared.x; // [U, T, N]
@@ -440,14 +481,22 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProg
     auto best_n_iter = torch::zeros({u}, torch::TensorOptions().dtype(torch::kLong));
 
     for (std::int64_t init = 0; init < options_.n_init; ++init) {
-        const auto resp0 = initial_responsibilities(x, k, options_.init_method, generator);
-        auto params = m_step(x, resp0, cov_type, reg);
+        auto initial = initial_responsibilities(x, k, options_.init_method, generator, on_checkpoint);
+        cancelled = initial.cancelled;
+        if (!cancelled && on_checkpoint && !on_checkpoint()) {
+            cancelled = true;
+        }
+        auto params = m_step(x, initial.responsibilities, cov_type, reg);
 
         auto lower_bound = torch::full({u}, -std::numeric_limits<double>::infinity(), x.options());
         auto converged = torch::zeros({u}, torch::TensorOptions().dtype(torch::kBool));
         auto n_iter = torch::full({u}, options_.max_iter, torch::TensorOptions().dtype(torch::kLong));
 
         for (std::int64_t iteration = 1; iteration <= options_.max_iter; ++iteration) {
+            if (cancelled || (on_checkpoint && !on_checkpoint())) {
+                cancelled = true;
+                break;
+            }
             const auto prev_lower_bound = lower_bound;
             const auto step = e_step(x, params.weights, params.means, params.covariances, cov_type, reg);
             lower_bound = step.log_prob_norm.mean(1); // [U]
@@ -520,7 +569,8 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProg
             throw std::invalid_argument("GaussianMixture target_sizes last dimension must equal n_components");
         }
         const auto outcome = run_constrained_em(
-            x, weights_, means_, covariances_, sizes, options_, cov_type, reg, on_progress, em_span, 1.0 - em_span);
+            x, weights_, means_, covariances_, sizes, options_, cov_type, reg, on_progress, on_checkpoint,
+            em_span, 1.0 - em_span);
         weights_ = weights_.contiguous();
         means_ = means_.contiguous();
         covariances_ = covariances_.contiguous();
@@ -539,7 +589,12 @@ GaussianMixtureFit GaussianMixture::fit(const torch::Tensor& x_in, const GmmProg
         return constrained_fit;
     }
 
-    // Final E-step with the retained parameters for the reported assignment.
+    // Final E-step with the retained parameters for the reported assignment. A
+    // checkpoint may park here after the last iteration; on cancellation the
+    // numeric API still finalizes its documented best partial fit.
+    if (!cancelled && on_checkpoint && !on_checkpoint()) {
+        cancelled = true;
+    }
     const auto final_step = e_step(x, weights_, means_, covariances_, cov_type, reg);
     const auto responsibilities = final_step.log_resp.exp();
 

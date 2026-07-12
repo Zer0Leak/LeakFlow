@@ -92,6 +92,7 @@ struct GmmProgress {
 };
 
 using GmmProgressCallback = std::function<bool(const GmmProgress&)>;
+using GmmCheckpointCallback = std::function<bool()>;
 
 class GaussianMixture {
 public:
@@ -99,9 +100,12 @@ public:
 
     // Fit per unit. x is [T, N] (single unit) or [U, T, N]. Returns the fit and stores
     // the parameters so predict/predict_proba/score_samples can run on new data. When
-    // on_progress is set, it is called each EM / constrained iteration with a progress estimate;
-    // returning false cancels early (the best fit so far is finalized and returned).
-    GaussianMixtureFit fit(const torch::Tensor& x, const GmmProgressCallback& on_progress = {});
+    // on_progress is set, it is called after each EM / constrained iteration with a progress
+    // estimate; returning false cancels early. on_checkpoint runs before expensive initialization
+    // and iteration work so a caller can cooperatively pause or cancel. Cancellation finalizes and
+    // returns the best partial fit.
+    GaussianMixtureFit fit(const torch::Tensor& x, const GmmProgressCallback& on_progress = {},
+        const GmmCheckpointCallback& on_checkpoint = {});
 
     // Apply the fitted model to new data (same N; [T, N] or [U, T, N]).
     [[nodiscard]] torch::Tensor predict(const torch::Tensor& x) const;       // labels

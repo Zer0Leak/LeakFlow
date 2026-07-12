@@ -593,6 +593,7 @@ std::shared_ptr<Element> Pipeline::add(std::shared_ptr<Element> element) {
     elements_.back()->set_runtime_telemetry_enabled(runtime_telemetry_enabled_);
     elements_.back()->set_profiling_enabled(profiling_enabled_);
     elements_.back()->set_trace_sink(trace_sink_);
+    elements_.back()->set_pause_waiter(pause_waiter_);
 
     // Allocate vector-clock provenance slots (Phase 27). 0-slot elements (Tee,
     // sinks) get no base index and forward provenance verbatim.
@@ -993,11 +994,19 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
     if (links_.empty()) {
         std::optional<Buffer> current;
         for (const auto &element : elements_) {
+            if (stop_requested()) {
+                cached_outputs_.clear();
+                return std::nullopt;
+            }
             std::vector<std::uint32_t> provenance;
             if (current) {
                 provenance = current->provenance();
             }
             current = element->process(std::move(current));
+            if (stop_requested()) {
+                cached_outputs_.clear();
+                return std::nullopt;
+            }
             if (current) {
                 provenance.resize(next_slot_, 0u);
                 if (const auto base_it = element_base_.find(element.get()); base_it != element_base_.end()) {
@@ -1023,6 +1032,10 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
     std::set<std::string> logged_routes;
 
     for (const auto &element : order) {
+        if (stop_requested()) {
+            cached_outputs_.clear();
+            return std::nullopt;
+        }
         const auto incoming = incoming_links_for(element);
         const auto outgoing = outgoing_links_for(element);
 
@@ -1071,6 +1084,10 @@ std::optional<Buffer> Pipeline::execute(const std::vector<std::shared_ptr<Elemen
         } catch (const std::exception &error) {
             throw std::runtime_error("element '" + element->name() + "' failed " + input_pad_context(incoming) +
                                      ": " + error.what());
+        }
+        if (stop_requested()) {
+            cached_outputs_.clear();
+            return std::nullopt;
         }
 
         // Stamp provenance on every produced buffer: merged inputs plus this
@@ -1139,6 +1156,7 @@ public:
                     .message = progress.message,
                     .index = progress.index,
                     .total = progress.total,
+                    .status = progress.status,
                 },
         });
     }
@@ -1314,6 +1332,9 @@ std::optional<Buffer> Pipeline::execute_segment(const std::vector<std::shared_pt
     std::set<std::string> logged_routes;
 
     for (const auto &element : order) {
+        if (stop.stop_requested()) {
+            return std::nullopt;
+        }
         const auto incoming = incoming_links_for(element);
         const auto outgoing = outgoing_links_for(element);
         if (incoming.empty() && outgoing.empty()) {
@@ -1355,6 +1376,9 @@ std::optional<Buffer> Pipeline::execute_segment(const std::vector<std::shared_pt
         } catch (const std::exception &error) {
             throw std::runtime_error("element '" + element->name() + "' failed " + input_pad_context(incoming) +
                                      ": " + error.what());
+        }
+        if (stop.stop_requested()) {
+            return std::nullopt;
         }
 
         // Stamp provenance: merged inputs plus this element's own slot, incremented
@@ -1618,6 +1642,9 @@ bool Pipeline::route_runtime_passive_input(const PadLink &link, Buffer buffer,
         } catch (const std::exception &error) {
             throw std::runtime_error("element '" + element.name() + "' failed " + input_pad_context(incoming) +
                                      ": " + error.what());
+        }
+        if (stop.stop_requested()) {
+            return false;
         }
 
         const auto base_it = element_base_.find(&element);
@@ -2429,6 +2456,13 @@ void Pipeline::set_stop_token(std::stop_token token) {
 }
 
 bool Pipeline::stop_requested() const { return stop_token_.stop_requested(); }
+
+void Pipeline::set_pause_waiter(std::function<void(std::stop_token)> waiter) {
+    pause_waiter_ = std::move(waiter);
+    for (const auto &element : elements_) {
+        element->set_pause_waiter(pause_waiter_);
+    }
+}
 
 bool Pipeline::has_live_source() const {
     for (const auto &element : elements_) {

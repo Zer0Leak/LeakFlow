@@ -120,6 +120,10 @@ public:
     void set_stop_token(std::stop_token token);
     [[nodiscard]] bool stop_requested() const;
 
+    // Session-provided pause gate mirrored to elements so long-running synchronous
+    // process() implementations can cooperate between internal work units.
+    void set_pause_waiter(std::function<void(std::stop_token)> waiter);
+
     [[nodiscard]] std::optional<Buffer> run();
 
     // Invoked by each segment thread at a between-buffer safe point with that
@@ -236,6 +240,7 @@ private:
     TelemetryTraceSink *trace_sink_ = nullptr;
     std::size_t started_count_ = 0;
     std::stop_token stop_token_;
+    std::function<void(std::stop_token)> pause_waiter_;
     std::map<const Element *, std::map<std::string, Buffer>> cached_outputs_;
 
     // Vector-clock provenance state (Phase 27). next_slot_ is the monotonic slot

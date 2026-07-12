@@ -274,6 +274,8 @@ Core:
   Held, Latest); live `Pipeline::run()` pump loop; cooperative stop
 - `PipelineSession` `Stopped/Running/Paused/Idle` state machine, pause/resume, and
   safe-point forward-apply control plane
+- cooperative checkpoints for pausing long synchronous elements; Stop suppresses
+  late outputs, and progress distinguishes Active/Completed/Cancelled outcomes
 - `QueueEpochPolicy` enum (documented; drain/flush generation-boundary knob is an
   optional policy, not a correctness requirement)
 - `MetadataGroup` / `ForwardingProfile` / `metadata_group` / `profile_for_klass`

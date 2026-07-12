@@ -306,6 +306,9 @@ lands in **Idle** (held, inspectable). See `docs/design/dataflow_sync_model.md`
 
 The progress-bar activity sweep animates only while the session is **Running**;
 the sweep is suppressed while **Paused**, **Idle**, or **Stopped**.
+Long synchronous elements can park at cooperative internal checkpoints while
+Paused. Cancellation is a distinct terminal progress outcome: the graph shows a
+static red 100% bar briefly, and canceled output is not routed to plot sinks.
 
 Example of a downstream-only rerun:
 

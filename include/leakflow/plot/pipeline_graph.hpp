@@ -45,6 +45,7 @@ public:
         std::string message;
         std::uint64_t index = 0;
         std::uint64_t total = 0;
+        ProgressStatus status = ProgressStatus::Active;
         std::chrono::steady_clock::time_point updated{};
     };
 

@@ -66,6 +66,12 @@ Tests:
 - `Element::can_replay()`: replay-safety signal (default true).
 - `Element::is_live()` / `at_end_of_stream()` / `set_stop_token()`: liveness +
   3-state stream result + cooperative stop.
+- `Element::cooperative_checkpoint()`: session-injected pause/stop checkpoint for
+  long synchronous `process()` loops. The executor discards any output returned
+  after Stop before observing, caching, or routing it.
+- `ProgressStatus` (`Active` / `Completed` / `Cancelled`) travels with element
+  progress observations; terminal statuses are normalized to 100% and bypass
+  progress throttling.
 - `BufferQueue` (`buffer_queue.hpp`): thread-safe bounded FIFO with
   Block/DropOldest/DropNewest; `pipeline_segments.hpp` decomposition and
   `Pipeline::run_threaded` (one `std::jthread` per segment).

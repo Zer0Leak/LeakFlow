@@ -206,10 +206,12 @@ int main() {
         if (!expect(event.progress->element.element_name == "transform", "progress event from wrong element")) {
             return 1;
         }
-        if (event.progress->fraction == 0.5 && event.progress->message == "halfway") {
+        if (event.progress->fraction == 0.5 && event.progress->message == "halfway"
+            && event.progress->status == leakflow::ProgressStatus::Active) {
             saw_progress_half = true;
         }
-        if (event.progress->fraction == 1.0 && event.progress->message == "done") {
+        if (event.progress->fraction == 1.0 && event.progress->message == "done"
+            && event.progress->status == leakflow::ProgressStatus::Completed) {
             saw_progress_done = true;
             saw_first_completion = true;
         }

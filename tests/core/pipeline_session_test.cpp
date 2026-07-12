@@ -4,11 +4,14 @@
 #include "leakflow/core/pipeline_observer.hpp"
 #include "leakflow/core/provenance.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -145,6 +148,33 @@ public:
 
 private:
     bool replay_;
+};
+
+// Models a long synchronous numeric element: it cooperates at internal work-unit
+// boundaries but deliberately returns a late buffer after cancellation. The executor
+// must discard that buffer before it reaches the sink.
+class CooperativeLongSource final : public Element {
+public:
+    CooperativeLongSource()
+        : Element("long")
+    {
+        add_output_pad(Pad("src", PadDirection::Output, Caps("test/buf")));
+    }
+
+    std::optional<Buffer> process(std::optional<Buffer>) override
+    {
+        while (cooperative_checkpoint()) {
+            ++steps;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        cancelled = true;
+        Buffer late(Caps("test/buf"));
+        late.set_metadata("value", "late");
+        return late;
+    }
+
+    std::atomic<int> steps = 0;
+    std::atomic<bool> cancelled = false;
 };
 
 class RecordingObserver final : public leakflow::PipelineObserver {
@@ -530,6 +560,65 @@ int main()
         }
         if (!expect(observer->accepted == 1 && observer->applied == 1 && observer->rejected == 0,
                     "Idle replayable change did not emit accepted+applied")) {
+            return 1;
+        }
+    }
+
+    // A long synchronous process() cooperates with Pause at its internal checkpoints.
+    // Stop wakes a paused checkpoint, and any buffer returned after cancellation is
+    // discarded by the executor rather than routed downstream.
+    {
+        leakflow::Pipeline pipeline;
+        auto source = std::make_shared<CooperativeLongSource>();
+        auto sink = std::make_shared<CapturingSink>("sink", true);
+        pipeline.add(source);
+        pipeline.add(sink);
+        pipeline.link(source, "src", sink, "sink");
+
+        leakflow::PipelineSession session(std::move(pipeline));
+        std::stop_source run_stop;
+        session.set_stop_token(run_stop.get_token());
+        std::optional<Buffer> output;
+        std::thread worker([&]() { output = session.run_sweep(); });
+
+        const auto wait_for_steps = [&](int target) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (source->steps.load() < target && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            return source->steps.load() >= target;
+        };
+
+        const auto started = wait_for_steps(5);
+        session.request_pause();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const auto paused_steps = source->steps.load();
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        const auto stayed_paused = source->steps.load() == paused_steps;
+        session.request_resume();
+        const auto resumed = wait_for_steps(paused_steps + 3);
+
+        run_stop.request_stop();
+        session.request_resume();
+        worker.join();
+        session.stop();
+
+        if (!expect(started, "cooperative long element did not start")) {
+            return 1;
+        }
+        if (!expect(stayed_paused, "cooperative long element kept running while Paused")) {
+            return 1;
+        }
+        if (!expect(resumed, "cooperative long element did not resume")) {
+            return 1;
+        }
+        if (!expect(source->cancelled.load(), "cooperative long element did not observe Stop")) {
+            return 1;
+        }
+        if (!expect(!output.has_value(), "cancelled sweep returned a late buffer")) {
+            return 1;
+        }
+        if (!expect(sink->process_count == 0, "late cancelled buffer reached the downstream sink")) {
             return 1;
         }
     }

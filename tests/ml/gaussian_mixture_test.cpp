@@ -356,6 +356,23 @@ int main()
         if (!expect(cancelled.labels.sizes() == torch::IntArrayRef({u, t}), "progress: cancelled fit still valid")) {
             return 1;
         }
+
+        // The separate cooperative checkpoint also runs inside k-means++ initialization,
+        // before EM progress begins. Cancel on its third call to prove initialization has
+        // internal boundaries while preserving the numeric best-partial-fit contract.
+        auto checkpoint_calls = 0;
+        leakflow::ml::GaussianMixture checkpoint_model(options);
+        const auto checkpoint_cancelled = checkpoint_model.fit(data.x, {}, [&]() {
+            ++checkpoint_calls;
+            return checkpoint_calls < 3;
+        });
+        if (!expect(checkpoint_calls == 3, "checkpoint: initialization did not stop at the requested boundary")) {
+            return 1;
+        }
+        if (!expect(checkpoint_cancelled.labels.sizes() == torch::IntArrayRef({u, t}),
+                    "checkpoint: cancelled initialization did not return a valid partial fit")) {
+            return 1;
+        }
     }
 
     std::cout << "gaussian_mixture tests passed\n";
