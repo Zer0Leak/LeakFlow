@@ -1,4 +1,6 @@
 add_library(leakflow_plugins_extras SHARED
+    buffer_file_sink.cpp
+    buffer_file_src.cpp
     descriptor_catalog.cpp
     fake_live_hdf5_src.cpp
     hdf5_file_src.cpp

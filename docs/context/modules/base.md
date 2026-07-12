@@ -39,6 +39,13 @@ Tests:
 - `TorchTensorPayload`: wraps one dense strided `torch::Tensor`.
 - `TorchTensorBundlePayload`: deterministic named map of
   `shared_ptr<TorchTensorPayload>`.
+- `buffer_archive.hpp`: abstract `BufferArchiveWriter`/`BufferArchiveReader` — a
+  storage-neutral, Torch-aware (but HDF5-agnostic) sink/source for a `Buffer`'s
+  payload body (`write_tensor`/`write_int`/`write_string` + the read mirror).
+  Payload codecs (base/crypto) serialize through it; the concrete backend (HDF5
+  today via `leakflow_extras`, Zarr later) implements it. It lives here so codecs
+  never depend on the storage backend. `leakflow_core`'s `PayloadCodec` names these
+  types only by forward declaration.
 - `statistics.hpp`: `pearson_correlation` and the stateful
   `InteractivePearsonCorrelation` accumulator.
 Note: GMM/EM (`gaussian_mixture.hpp`), entropic-OT Sinkhorn (`sinkhorn.hpp`), and

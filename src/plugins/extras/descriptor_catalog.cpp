@@ -1,5 +1,7 @@
 #include "leakflow/plugins/extras/descriptor_catalog.hpp"
 
+#include "leakflow/plugins/extras/buffer_file_sink.hpp"
+#include "leakflow/plugins/extras/buffer_file_src.hpp"
 #include "leakflow/plugins/extras/fake_live_hdf5_src.hpp"
 #include "leakflow/plugins/extras/hdf5_file_src.hpp"
 #include "leakflow/plugins/extras/numpy_src.hpp"
@@ -25,12 +27,14 @@ std::vector<PluginDescriptor> plugin_descriptors()
             .author = extras_author,
             .license = extras_license,
             .purpose = "shared library with extras file-format, dataset, and conversion pipeline elements",
-            .keywords = {"extras", "numpy", "npy", "hdf5", "h5", "source", "conversion", "torch"},
+            .keywords = {"extras", "numpy", "npy", "hdf5", "h5", "source", "conversion", "torch", "buffer"},
             .elements = {
                 NumpySrc::descriptor(),
                 NumpyToTorch::descriptor(),
                 Hdf5FileSrc::descriptor(),
                 FakeLiveHdf5Src::descriptor(),
+                BufferFileSink::descriptor(),
+                BufferFileSrc::descriptor(),
             },
         }),
     };
@@ -54,8 +58,11 @@ void register_plugin_descriptors(DescriptorRegistry& registry)
     registry.register_plugins(plugin_descriptors());
 }
 
-void register_element_factories(ElementFactoryRegistry& registry)
+void register_element_factories(ElementFactoryRegistry& registry, std::shared_ptr<const PayloadCodecRegistry> codecs)
 {
+    if (!codecs) {
+        codecs = std::make_shared<PayloadCodecRegistry>();
+    }
     registry.register_plugin(
         plugin_descriptors().front(),
         {
@@ -63,6 +70,10 @@ void register_element_factories(ElementFactoryRegistry& registry)
             {"NumpyToTorch", [](std::string name) { return std::make_shared<NumpyToTorch>(std::move(name)); }},
             {"Hdf5FileSrc", [](std::string name) { return std::make_shared<Hdf5FileSrc>(std::move(name)); }},
             {"FakeLiveHdf5Src", [](std::string name) { return std::make_shared<FakeLiveHdf5Src>(std::move(name)); }},
+            {"BufferFileSink",
+             [codecs](std::string name) { return std::make_shared<BufferFileSink>(codecs, std::move(name)); }},
+            {"BufferFileSrc",
+             [codecs](std::string name) { return std::make_shared<BufferFileSrc>(codecs, std::move(name)); }},
         });
 }
 

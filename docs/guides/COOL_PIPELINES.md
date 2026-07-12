@@ -320,10 +320,11 @@ Notes:
 
 ## Save An Expensive Correlation, Re-select PoIs Offline
 
-`BufferFileSink` persists a whole buffer (caps + metadata + payload) to a `.lfbuf`
-directory; `BufferFileSrc` reloads it. Because the expensive step is the
-correlation and `PoiSelect` is cheap, you can compute the correlation once, save it,
-then reload and try any `top_k`/`rank_by` **offline, with no re-streaming**.
+`BufferFileSink` persists a whole buffer (caps + metadata + payload) to a single
+HDF5 file (the `leakflow.buffer` schema); `BufferFileSrc` reloads it. Because the
+expensive step is the correlation and `PoiSelect` is cheap, you can compute the
+correlation once, save it, then reload and try any `top_k`/`rank_by` **offline, with
+no re-streaming**.
 
 Compute and save the correlation:
 
@@ -331,14 +332,15 @@ Compute and save the correlation:
 leakflow --log-level warning run \
   'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); \
    Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],byte_indexes=[]); \
-   PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.lfbuf); \
+   PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.h5); \
    @data.traces ! @tee; @tee.src_0 ! @corr.features; @tee.src_1 ! @lk.traces; \
    @data.plaintexts ! @lk.plaintexts; @data.keys ! @lk.keys; @lk ! @corr.targets; @corr ! @save'
 ```
 
-`out/aes_corr.lfbuf/manifest.txt` is human-readable (`caps.type=leakflow/correlation`,
-the leakage metadata, `payload.correlation.observation_count=50`, ...) and
-`payload.pt` holds the correlation tensor.
+`out/aes_corr.h5` is a self-describing HDF5 file: `h5dump -H` shows the envelope
+attributes (`caps.type=leakflow/correlation`, the leakage metadata,
+`payload.correlation.observation_count=50`, ...) and the correlation tensor as native
+datasets under `/payload`.
 
 ### Streaming a whole profiling set (a folder of keys)
 
@@ -348,7 +350,7 @@ HDF5 files named `key_NN.h5`, 100 000 traces in all. Loading all of that into on
 wasteful, so the replication app streams the retained original `key_*` folders:
 
 ```bash
-leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.lfbuf --graph \
+leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.h5 --graph \
   traces/aes/sync/aes_sync_poi
 ```
 
@@ -359,7 +361,7 @@ Pearson correlation over every key and trace -- an `AppSrc` pulls one folder at 
 so only ~one folder is ever resident in memory. `--graph` opens the live pipeline graph
 (same controls as `leakflow run --graph`) so you watch the aggregate correlation and its
 PoIs build up as folders stream in; drop `--graph` for a headless run, add `--auto-start`
-to begin on open. `--save-correlation PATH` writes the **same** `out/aes_corr.lfbuf` the
+to begin on open. `--save-correlation PATH` writes the **same** `out/aes_corr.h5` the
 reload-and-plot command below consumes -- so a folder-scale, multi-key correlation drops
 straight into the offline PoI-selection workflow.
 
@@ -375,7 +377,7 @@ reloaded only as the cheap backdrop the PoI markers are drawn on:
 ```bash
 leakflow run --graph \
   'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); \
-   BufferFileSrc@corr_src(path=out/aes_corr.lfbuf); \
+   BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[3],rank_by=[abs]); \
    Tee@poi_tee; \
    CorrelationPoiToPlotAnnotations@ann(precision=3); \
@@ -396,7 +398,7 @@ live in `--graph` (which re-selects from the cached correlation in Idle).
 
 PoIs are leakage *locations* — the sample offsets where the implementation leaks —
 so they are selected once during profiling (the correlation saved to
-`out/aes_corr.lfbuf` above) and then reused against a fresh capture. This pipeline
+`out/aes_corr.h5` above) and then reused against a fresh capture. This pipeline
 asks whether that reuse is justified: it re-runs the Pearson correlation **only at
 the saved PoI columns** on new traces (`PoiCorrelation`), then lays the attack
 scores next to the profiling scores in a comparison table (`PoiTablePlot`) with a
@@ -406,7 +408,7 @@ collapsing.
 
 ```bash
 leakflow run --graph \
-  'BufferFileSrc@corr_src(path=out/aes_corr.lfbuf); \
+  'BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[20],rank_by=[abs]); \
    Tee@poi_tee; \
    Hdf5FileSrc@attack(path=traces/aes/sync/aes_sync_poi/key_01.h5); \
@@ -458,7 +460,7 @@ One `Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_05.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
 leakflow --log-level warning run --graph \
-  "BufferFileSrc@corr_src(path=out/aes_corr.lfbuf); \
+  "BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[50],rank_by=[abs]); \
    Tee@poi_tee; \
    CorrelationPoiToIndexes@poi2idx; \

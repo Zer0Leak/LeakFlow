@@ -38,6 +38,19 @@ CLI/inspect files if affected:
   and emits a `NumpyPayload`.
 - `NumpyToTorch`: converts a `NumpyPayload` into a `TorchTensorPayload` through
   `leakflow_extras::convert_numpy_to_torch(...)`.
+- `BufferFileSink` / `BufferFileSrc`: persist and reload a whole `Buffer` (caps +
+  metadata + payload) to/from a single HDF5 file (the `leakflow.buffer` schema).
+  Generic: they never know the concrete payload type. `property path` is the `.h5`
+  file. Both take a `PayloadCodecRegistry` (injected by their factory in
+  `leakflow_cli.cpp`, populated by the base/crypto codecs); the codec writes the
+  payload body through an `Hdf5BufferArchiveWriter`/`Reader` (see
+  `docs/context/modules/extras.md`), while the element writes the caps/metadata
+  envelope as attributes. `any` caps, so they link to anything; the reloaded buffer
+  carries its saved concrete caps. They live here — not in `leakflow_plugins_core` —
+  because only this layer links both Torch and the HDF5 backend. Enables e.g. saving
+  an expensive `PearsonCorrelator` correlation once and reloading it to re-select
+  PoIs (`PoiSelect`) offline. Codecs: `TorchTensorPayload` (base),
+  `CorrelationPayload` / `CorrelationPoiPayload` (crypto).
 
 The descriptor catalog assembles the linked plugin descriptor and registers
 matching element factories with `ElementFactoryRegistry`.

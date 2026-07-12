@@ -51,6 +51,14 @@ Tests:
 - `Hdf5TensorDatasetReader`: recursively discovers HDF5 groups, arrays, and
   attributes; supports `uint8` and `float32`; fills a single preallocated CPU
   Torch tensor through batched hyperslab reads.
+- `Hdf5BufferArchiveWriter` / `Hdf5BufferArchiveReader`: the HDF5 backend for
+  whole-`Buffer` persistence (the `leakflow.buffer` schema), implementing the base
+  `BufferArchiveWriter`/`Reader`. Writes the envelope as attributes (root: schema,
+  `caps.type`, `payload.type`; `/caps` and `/metadata` attribute groups) and the
+  payload body as native datasets plus scalar attributes under `/payload`. Supports
+  the full payload dtype range (`float32/64`, `int8/16/32/64`, `uint8`); HDF5 is
+  hidden behind a pimpl so the header stays HDF5-free. Drives
+  `BufferFileSink`/`BufferFileSrc`. Payload tensors reload on CPU.
 - `NumpyPayload`: thin wrapper around `cnpypp::NpyArray`.
 - `load_npy(path)`: loads one `.npy` file into `NumpyPayload`.
 - `NumpyPayload::caps()`: exposes concrete runtime caps metadata using the

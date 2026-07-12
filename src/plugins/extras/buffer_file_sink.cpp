@@ -1,6 +1,6 @@
-#include "leakflow/plugins/core/buffer_file_sink.hpp"
+#include "leakflow/plugins/extras/buffer_file_sink.hpp"
 
-#include "buffer_file_manifest.hpp"
+#include "leakflow/extras/hdf5_buffer_archive.hpp"
 
 #include <filesystem>
 #include <stdexcept>
@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace leakflow::plugins::core {
+namespace leakflow::plugins::extras {
 namespace {
 
 [[nodiscard]] std::string string_property_or(const Element& element, std::string_view name, std::string fallback)
@@ -26,15 +26,15 @@ ElementDescriptor BufferFileSink::descriptor()
     return {
         .type_name = "BufferFileSink",
         .klass = "Sink/File/Buffer",
-        .purpose = "persist a whole Buffer (caps + metadata + payload) to a directory",
+        .purpose = "persist a whole Buffer (caps + metadata + payload) to a single HDF5 file",
         .input_pads = {
             Pad("sink", PadDirection::Input, Caps(any_caps_type)),
         },
         .output_pads = {},
         .property_specs = {
-            PropertySpec("path", std::string(), "directory to write the buffer into (a .lfbuf folder)"),
+            PropertySpec("path", std::string(), "HDF5 file to write the buffer into (a .h5 file)"),
         },
-        .keywords = {"buffer", "file", "sink", "save", "serialize"},
+        .keywords = {"buffer", "file", "sink", "save", "serialize", "hdf5", "h5"},
     };
 }
 
@@ -69,10 +69,21 @@ std::optional<Buffer> BufferFileSink::process(std::optional<Buffer> input)
         throw std::invalid_argument("BufferFileSink path property must not be empty");
     }
 
-    const std::filesystem::path dir(path);
-    std::filesystem::create_directories(dir);
-    write_manifest(dir / "manifest.txt", *input, payload_type);
-    codec->save(*payload, dir);
+    const std::filesystem::path file(path);
+    if (file.has_parent_path()) {
+        std::filesystem::create_directories(file.parent_path());
+    }
+
+    leakflow::extras::Hdf5BufferArchiveWriter archive(file);
+    archive.set_caps_type(input->caps().type());
+    for (const auto& [key, value] : input->caps().params()) {
+        archive.set_caps_param(key, value);
+    }
+    for (const auto& [key, value] : input->metadata()) {
+        archive.set_metadata(key, value);
+    }
+    archive.set_payload_type(payload_type);
+    codec->save(*payload, archive);
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "wrote buffer");
     record.fields.emplace("path", path);
@@ -83,4 +94,4 @@ std::optional<Buffer> BufferFileSink::process(std::optional<Buffer> input)
     return std::nullopt;
 }
 
-} // namespace leakflow::plugins::core
+} // namespace leakflow::plugins::extras

@@ -1,12 +1,11 @@
-#include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/core/payload_codec.hpp"
 #include "leakflow/plugins/base/descriptor_catalog.hpp"
-#include "leakflow/plugins/core/buffer_file_sink.hpp"
-#include "leakflow/plugins/core/buffer_file_src.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
 #include "leakflow/plugins/crypto/descriptor_catalog.hpp"
 #include "leakflow/plugins/crypto/poi_select.hpp"
+#include "leakflow/plugins/extras/buffer_file_sink.hpp"
+#include "leakflow/plugins/extras/buffer_file_src.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -19,7 +18,7 @@
 
 namespace {
 
-namespace core_plugin = leakflow::plugins::core;
+namespace extras_plugin = leakflow::plugins::extras;
 namespace crypto_plugin = leakflow::plugins::crypto;
 
 bool expect(bool condition, const char* message)
@@ -57,7 +56,7 @@ int main()
     int status = 0;
     const auto fail = [&status] { status = 1; };
 
-    // --- TorchTensorPayload round-trip (envelope + payload) ---
+    // --- TorchTensorPayload round-trip (envelope + native tensor dataset) ---
     {
         auto tensor = torch::arange(0, 6, torch::TensorOptions().dtype(torch::kFloat32)).reshape({2, 3});
         auto payload = std::make_shared<leakflow::base::TorchTensorPayload>(tensor);
@@ -67,18 +66,17 @@ int main()
         buffer.set_payload(payload);
         const auto original_caps = buffer.caps().to_string();
 
-        const auto dir = (root / "tensor.lfbuf").string();
-        core_plugin::BufferFileSink sink(codecs);
-        sink.set_property("path", dir);
+        const auto file = (root / "tensor.h5").string();
+        extras_plugin::BufferFileSink sink(codecs);
+        sink.set_property("path", file);
         (void)sink.process(buffer);
 
-        if (!expect(std::filesystem::exists(root / "tensor.lfbuf" / "manifest.txt"),
-                "BufferFileSink did not write a manifest")) {
+        if (!expect(std::filesystem::exists(file), "BufferFileSink did not write the HDF5 file")) {
             fail();
         }
 
-        core_plugin::BufferFileSrc src(codecs);
-        src.set_property("path", dir);
+        extras_plugin::BufferFileSrc src(codecs);
+        src.set_property("path", file);
         const auto loaded = src.process(std::nullopt);
 
         if (!expect(loaded.has_value(), "BufferFileSrc produced no buffer")) {
@@ -101,7 +99,7 @@ int main()
         }
     }
 
-    // --- CorrelationPoiPayload round-trip (crypto codec) ---
+    // --- CorrelationPoiPayload round-trip (crypto codec, variable-length results) ---
     {
         auto results = std::vector<crypto_plugin::CorrelationPoiResult>{
             crypto_plugin::CorrelationPoiResult{
@@ -119,13 +117,13 @@ int main()
         buffer.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
         buffer.set_payload(payload);
 
-        const auto dir = (root / "poi.lfbuf").string();
-        core_plugin::BufferFileSink sink(codecs);
-        sink.set_property("path", dir);
+        const auto file = (root / "poi.h5").string();
+        extras_plugin::BufferFileSink sink(codecs);
+        sink.set_property("path", file);
         (void)sink.process(buffer);
 
-        core_plugin::BufferFileSrc src(codecs);
-        src.set_property("path", dir);
+        extras_plugin::BufferFileSrc src(codecs);
+        src.set_property("path", file);
         const auto loaded = src.process(std::nullopt);
         const auto loaded_payload = loaded->payload_as<crypto_plugin::CorrelationPoiPayload>();
         if (!expect(loaded_payload != nullptr && loaded_payload->result_count() == 2,
@@ -153,8 +151,8 @@ int main()
     // --- error paths ---
     {
         auto empty_codecs = std::make_shared<leakflow::PayloadCodecRegistry>();
-        core_plugin::BufferFileSink sink(empty_codecs);
-        sink.set_property("path", (root / "unknown.lfbuf").string());
+        extras_plugin::BufferFileSink sink(empty_codecs);
+        sink.set_property("path", (root / "unknown.h5").string());
         auto payload = std::make_shared<leakflow::base::TorchTensorPayload>(torch::zeros({2}));
         leakflow::Buffer buffer(payload->caps());
         buffer.set_payload(payload);
@@ -163,7 +161,7 @@ int main()
             fail();
         }
 
-        core_plugin::BufferFileSink no_path(codecs);
+        extras_plugin::BufferFileSink no_path(codecs);
         auto payload2 = std::make_shared<leakflow::base::TorchTensorPayload>(torch::zeros({2}));
         leakflow::Buffer buffer2(payload2->caps());
         buffer2.set_payload(payload2);

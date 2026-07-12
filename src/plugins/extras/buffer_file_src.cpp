@@ -1,14 +1,13 @@
-#include "leakflow/plugins/core/buffer_file_src.hpp"
+#include "leakflow/plugins/extras/buffer_file_src.hpp"
 
-#include "buffer_file_manifest.hpp"
+#include "leakflow/extras/hdf5_buffer_archive.hpp"
 
-#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace leakflow::plugins::core {
+namespace leakflow::plugins::extras {
 namespace {
 
 [[nodiscard]] std::string string_property_or(const Element& element, std::string_view name, std::string fallback)
@@ -34,9 +33,9 @@ ElementDescriptor BufferFileSrc::descriptor()
             Pad("src", PadDirection::Output, Caps(any_caps_type)),
         },
         .property_specs = {
-            PropertySpec("path", std::string(), "directory to read the buffer from (a .lfbuf folder)"),
+            PropertySpec("path", std::string(), "HDF5 file to read the buffer from (a .h5 file)"),
         },
-        .keywords = {"buffer", "file", "source", "load", "deserialize"},
+        .keywords = {"buffer", "file", "source", "load", "deserialize", "hdf5", "h5"},
     };
 }
 
@@ -60,32 +59,33 @@ std::optional<Buffer> BufferFileSrc::process(std::optional<Buffer> input)
     if (path.empty()) {
         throw std::invalid_argument("BufferFileSrc path property must not be empty");
     }
-    const std::filesystem::path dir(path);
 
-    const auto manifest = read_manifest(dir / "manifest.txt");
-    const auto* codec = codecs_->find(manifest.payload_type);
+    leakflow::extras::Hdf5BufferArchiveReader archive(path);
+    const auto* codec = codecs_->find(archive.payload_type());
     if (codec == nullptr) {
-        throw std::invalid_argument("BufferFileSrc has no payload codec registered for '" + manifest.payload_type + "'");
+        throw std::invalid_argument(
+            "BufferFileSrc has no payload codec registered for '" + archive.payload_type() + "'");
     }
 
-    auto payload = codec->load(dir);
+    auto payload = codec->load(archive);
     if (!payload) {
-        throw std::runtime_error("BufferFileSrc payload codec returned no payload for '" + manifest.payload_type + "'");
+        throw std::runtime_error(
+            "BufferFileSrc payload codec returned no payload for '" + archive.payload_type() + "'");
     }
 
-    Buffer buffer(manifest.caps);
-    for (const auto& [key, value] : manifest.metadata) {
+    Buffer buffer(Caps(archive.caps_type(), archive.caps_params()));
+    for (const auto& [key, value] : archive.metadata()) {
         buffer.set_metadata(key, value);
     }
     buffer.set_payload(std::move(payload));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "loaded buffer");
     record.fields.emplace("path", path);
-    record.fields.emplace("payload.type", manifest.payload_type);
+    record.fields.emplace("payload.type", archive.payload_type());
     record.fields.emplace("caps", buffer.caps().to_string());
     leakflow::log::write(std::move(record));
 
     return buffer;
 }
 
-} // namespace leakflow::plugins::core
+} // namespace leakflow::plugins::extras

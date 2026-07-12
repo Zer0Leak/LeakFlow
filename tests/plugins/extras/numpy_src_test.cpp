@@ -127,7 +127,7 @@ int main()
     if (!expect(descriptors[0].name == "leakflow_plugins_extras", "extras plugin descriptor name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 4, "extras element descriptor count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 6, "extras element descriptor count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].elements[0].type_name == "NumpySrc", "NumpySrc descriptor type name was wrong")) {

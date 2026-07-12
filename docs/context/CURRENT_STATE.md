@@ -218,7 +218,7 @@ remain deferred as low-priority future infrastructure.
 - `leakflow_plugins_core`: linked shared plugin with generic elements.
 - `leakflow_plugins_base`: linked shared plugin with Torch-backed elements.
 - `leakflow_plugins_extras`: linked shared plugin with `Hdf5FileSrc`,
-  `FakeLiveHdf5Src`, `NumpySrc`, and `NumpyToTorch`.
+  `FakeLiveHdf5Src`, `NumpySrc`, `NumpyToTorch`, and `BufferFileSink`/`BufferFileSrc`.
 - `leakflow_plugins_crypto`: linked shared plugin with `AesLeakage`,
   `AesLeakageHypothesis`, `CpaAttack`, `DpaAttack`, `AttackStats`,
   `AttackStatsToPlotAnnotations`, `PearsonCorrelator`, `PoiSelect`, and
@@ -249,8 +249,10 @@ Core:
 - `Pad`
 - `Pipeline`
 - `ElementFactoryRegistry`
-- `PayloadCodecRegistry` (payload save/load callbacks by `type_name`; drives
-  `BufferFileSink`/`BufferFileSrc`)
+- `PayloadCodecRegistry` (payload save/load callbacks by `type_name`, writing
+  through a storage-neutral `BufferArchiveWriter`/`Reader`; drives
+  `BufferFileSink`/`BufferFileSrc`. Core holds only the callbacks and
+  forward-declares the archive types, so it stays Torch/HDF5-free)
 - `PropertyValue` / `PropertySpec`
 - `PropertyEffect`
 - `ElementDescriptor` / `PluginDescriptor`
@@ -297,11 +299,16 @@ Base:
 - `TorchTensorBundlePayload`
 - `PlotAnnotationPayload`
 - `pearson_correlation(...)`
+- `BufferArchiveWriter` / `BufferArchiveReader` (storage-neutral, Torch-aware
+  payload serialization interface used by the payload codecs; HDF5-agnostic)
 
 Extras:
 
 - `TensorDatasetReader` / `TensorDatasetDescriptor`
 - `Hdf5TensorDatasetReader`
+- `Hdf5BufferArchiveWriter` / `Hdf5BufferArchiveReader` (HDF5 backend for the
+  `leakflow.buffer` whole-Buffer format: envelope attributes + native payload
+  datasets; the concrete `BufferArchiveWriter`/`Reader` implementation)
 - `NumpyPayload`
 - `load_npy(path)`
 - `convert_numpy_to_torch(...)`
@@ -325,9 +332,6 @@ Core plugin elements:
 - `Queue`
 - `Sync` (generic `N→N` cross-source pairing; barrier/zip/all-required-once/held/
   latest policies)
-- `BufferFileSink` / `BufferFileSrc` (persist/reload a whole Buffer to a `.lfbuf`
-  directory: readable `manifest.txt` envelope + codec-written `payload.pt`; driven by
-  a `PayloadCodecRegistry`)
 
 Base plugin elements:
 
@@ -343,6 +347,10 @@ Extras plugin elements:
 - `FakeLiveHdf5Src`
 - `NumpySrc`
 - `NumpyToTorch`
+- `BufferFileSink` / `BufferFileSrc` (persist/reload a whole Buffer to a single
+  HDF5 file — the `leakflow.buffer` schema: envelope as attributes, payload body
+  written as native datasets by the `PayloadCodec` registered for the payload's
+  `type_name()` through a `BufferArchiveWriter`/`Reader`)
 
 Plot plugin elements:
 

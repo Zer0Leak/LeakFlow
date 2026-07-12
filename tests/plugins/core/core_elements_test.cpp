@@ -330,7 +330,7 @@ int main()
     if (!expect(descriptors[0].name == "leakflow_plugins_core", "core plugin descriptor name was wrong")) {
         return 1;
     }
-    if (!expect(descriptors[0].elements.size() == 10, "core element descriptor count was wrong")) {
+    if (!expect(descriptors[0].elements.size() == 8, "core element descriptor count was wrong")) {
         return 1;
     }
     if (!expect(descriptors[0].author == "Zer0Leak <edgard.lima@gmail.com>",

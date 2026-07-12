@@ -16,11 +16,12 @@
 #include "leakflow/plugins/crypto/poi_select.hpp"
 #include "crypto_plugin_constants.hpp"
 
+#include "leakflow/base/buffer_archive.hpp"
+
+#include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <torch/torch.h>
 #include <vector>
 
@@ -121,27 +122,6 @@ void register_element_factories(ElementFactoryRegistry& registry)
 
 namespace {
 
-void write_blob(const std::filesystem::path& file, const std::vector<char>& data)
-{
-    std::ofstream out(file, std::ios::binary);
-    if (!out) {
-        throw std::runtime_error("payload codec could not open for writing: " + file.string());
-    }
-    out.write(data.data(), static_cast<std::streamsize>(data.size()));
-    if (!out) {
-        throw std::runtime_error("payload codec failed while writing: " + file.string());
-    }
-}
-
-[[nodiscard]] std::vector<char> read_blob(const std::filesystem::path& file)
-{
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("payload codec could not open for reading: " + file.string());
-    }
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
 [[nodiscard]] torch::Tensor byte_indexes_to_tensor(const std::vector<std::uint16_t>& byte_indexes)
 {
     auto tensor = torch::empty({static_cast<std::int64_t>(byte_indexes.size())}, torch::kInt64);
@@ -174,32 +154,27 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
         correlation_caps_type,
         PayloadCodec{
             .save =
-                [](const Payload& payload, const std::filesystem::path& dir) {
+                [](const Payload& payload, leakflow::base::BufferArchiveWriter& archive) {
                     const auto* correlation = dynamic_cast<const CorrelationPayload*>(&payload);
                     if (correlation == nullptr) {
                         throw std::invalid_argument("correlation codec: payload is not a CorrelationPayload");
                     }
-                    auto tuple = c10::ivalue::Tuple::create({
-                        correlation->grouped_correlation(),
-                        byte_indexes_to_tensor(correlation->byte_indexes()),
-                        correlation->channel_count(),
-                        correlation->feature_count(),
-                        correlation->score_name(),
-                        correlation->observation_count(),
-                    });
-                    write_blob(dir / "payload.pt", torch::pickle_save(c10::IValue(std::move(tuple))));
+                    archive.write_tensor("grouped_correlation", correlation->grouped_correlation());
+                    archive.write_tensor("byte_indexes", byte_indexes_to_tensor(correlation->byte_indexes()));
+                    archive.write_int("channel_count", correlation->channel_count());
+                    archive.write_int("feature_count", correlation->feature_count());
+                    archive.write_string("score_name", correlation->score_name());
+                    archive.write_int("observation_count", correlation->observation_count());
                 },
             .load =
-                [](const std::filesystem::path& dir) -> std::shared_ptr<Payload> {
-                    const auto value = torch::pickle_load(read_blob(dir / "payload.pt"));
-                    const auto& elements = value.toTupleRef().elements();
+                [](const leakflow::base::BufferArchiveReader& archive) -> std::shared_ptr<Payload> {
                     return std::make_shared<CorrelationPayload>(
-                        elements.at(0).toTensor(),
-                        byte_indexes_from_tensor(elements.at(1).toTensor()),
-                        elements.at(2).toInt(),
-                        elements.at(3).toInt(),
-                        elements.at(4).toStringRef(),
-                        elements.at(5).toInt());
+                        archive.read_tensor("grouped_correlation"),
+                        byte_indexes_from_tensor(archive.read_tensor("byte_indexes")),
+                        archive.read_int("channel_count"),
+                        archive.read_int("feature_count"),
+                        archive.read_string("score_name"),
+                        archive.read_int("observation_count"));
                 },
         });
 
@@ -208,40 +183,35 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
         correlation_poi_caps_type,
         PayloadCodec{
             .save =
-                [](const Payload& payload, const std::filesystem::path& dir) {
+                [](const Payload& payload, leakflow::base::BufferArchiveWriter& archive) {
                     const auto* poi = dynamic_cast<const CorrelationPoiPayload*>(&payload);
                     if (poi == nullptr) {
                         throw std::invalid_argument("correlation-poi codec: payload is not a CorrelationPoiPayload");
                     }
                     std::vector<std::uint16_t> byte_indexes;
-                    c10::List<torch::Tensor> result_tensors;
                     byte_indexes.reserve(poi->result_count());
-                    for (const auto& result : poi->results()) {
-                        byte_indexes.push_back(result.unit);
-                        result_tensors.push_back(result.result);
+                    const auto& results = poi->results();
+                    for (std::size_t index = 0; index < results.size(); ++index) {
+                        byte_indexes.push_back(results[index].unit);
+                        archive.write_tensor("result_" + std::to_string(index), results[index].result);
                     }
-                    auto tuple = c10::ivalue::Tuple::create({
-                        byte_indexes_to_tensor(byte_indexes),
-                        result_tensors,
-                        poi->score_name(),
-                    });
-                    write_blob(dir / "payload.pt", torch::pickle_save(c10::IValue(std::move(tuple))));
+                    archive.write_tensor("byte_indexes", byte_indexes_to_tensor(byte_indexes));
+                    archive.write_int("result_count", static_cast<std::int64_t>(results.size()));
+                    archive.write_string("score_name", poi->score_name());
                 },
             .load =
-                [](const std::filesystem::path& dir) -> std::shared_ptr<Payload> {
-                    const auto value = torch::pickle_load(read_blob(dir / "payload.pt"));
-                    const auto& elements = value.toTupleRef().elements();
-                    const auto byte_indexes = byte_indexes_from_tensor(elements.at(0).toTensor());
-                    const auto result_tensors = elements.at(1).toTensorList();
+                [](const leakflow::base::BufferArchiveReader& archive) -> std::shared_ptr<Payload> {
+                    const auto byte_indexes = byte_indexes_from_tensor(archive.read_tensor("byte_indexes"));
+                    const auto result_count = static_cast<std::size_t>(archive.read_int("result_count"));
                     std::vector<CorrelationPoiResult> results;
-                    results.reserve(byte_indexes.size());
-                    for (std::size_t index = 0; index < byte_indexes.size(); ++index) {
+                    results.reserve(result_count);
+                    for (std::size_t index = 0; index < result_count; ++index) {
                         results.push_back(CorrelationPoiResult{
-                            .unit = byte_indexes[index],
-                            .result = result_tensors.get(index),
+                            .unit = byte_indexes.at(index),
+                            .result = archive.read_tensor("result_" + std::to_string(index)),
                         });
                     }
-                    return std::make_shared<CorrelationPoiPayload>(std::move(results), elements.at(2).toStringRef());
+                    return std::make_shared<CorrelationPoiPayload>(std::move(results), archive.read_string("score_name"));
                 },
         });
 }

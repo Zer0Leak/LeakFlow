@@ -198,7 +198,7 @@ int main(int argc, char** argv)
                           << "  --graph              open the live pipeline graph window (player controls),\n"
                           << "                       just like 'leakflow run --graph'\n"
                           << "  --auto-start         with --graph, begin running on open (else Stopped)\n"
-                          << "  --save-correlation P  persist the aggregate correlation to the .lfbuf dir P\n"
+                          << "  --save-correlation P  persist the aggregate correlation to the HDF5 file P\n"
                           << "                       (reload later with BufferFileSrc to re-select PoIs offline)\n"
                           << "  ROOT_DIR             default: " << default_root << " (key_* dirs with "
                           << traces_file << ", " << plaintexts_file << ", " << key_file << ")\n";

@@ -59,6 +59,34 @@ Use `payload_as<T>()` for read-only typed access.
 Use `mutable_payload_if_unique<T>()` before in-place mutation. If the payload is
 shared, a mutating element must create and set a replacement payload.
 
+## Buffer Persistence
+
+A whole `Buffer` (caps + metadata + payload) round-trips through
+`BufferFileSink`/`BufferFileSrc` (in `leakflow_plugins_extras`) to a single HDF5
+file — the `leakflow.buffer` schema, following the trace tensor-dataset
+conventions: the envelope as attributes (root `caps.type`/`payload.type`, `/caps`
+and `/metadata` attribute groups) and the payload body as native datasets under
+`/payload`. Provenance (the vector clock) is **not** persisted; a reloaded buffer is
+a fresh source production the executor re-stamps.
+
+Serialization is layered so no layer learns a foreign domain:
+
+- `PayloadCodecRegistry` (in `leakflow_core`) maps a payload `type_name()` to a
+  `PayloadCodec { save, load }`. Core holds only the callbacks and **forward-declares**
+  the archive types, so it stays free of Torch and HDF5.
+- `BufferArchiveWriter`/`BufferArchiveReader` (in `leakflow_base`) is the
+  storage-neutral, Torch-aware, HDF5-agnostic seam a codec writes through
+  (`write_tensor`/`write_int`/`write_string` + read mirror). Payload codecs in base
+  and crypto serialize their payloads as named tensors/scalars against it, never
+  seeing the storage backend.
+- `Hdf5BufferArchiveWriter`/`Reader` (in `leakflow_extras`) is the concrete HDF5
+  backend. A future Zarr backend is another implementation of the same interface —
+  **no codec changes**.
+
+The elements live in `leakflow_plugins_extras` (not core) because only that layer
+links both Torch (`leakflow_base`) and the HDF5 storage backend. torch-pickle is not
+used: every payload is stored as native, inspectable HDF5 arrays.
+
 ## Caps
 
 `Caps` is currently a lightweight descriptor:

@@ -1,7 +1,5 @@
 #include "leakflow/plugins/core/descriptor_catalog.hpp"
 
-#include "leakflow/plugins/core/buffer_file_sink.hpp"
-#include "leakflow/plugins/core/buffer_file_src.hpp"
 #include "leakflow/plugins/core/fake_sink.hpp"
 #include "leakflow/plugins/core/fake_src.hpp"
 #include "leakflow/plugins/core/file_sink.hpp"
@@ -42,8 +40,6 @@ std::vector<PluginDescriptor> plugin_descriptors()
                 Tee::descriptor(),
                 Queue::descriptor(),
                 Sync::descriptor(),
-                BufferFileSink::descriptor(),
-                BufferFileSrc::descriptor(),
             },
         }),
     };
@@ -67,11 +63,8 @@ void register_plugin_descriptors(DescriptorRegistry& registry)
     registry.register_plugins(plugin_descriptors());
 }
 
-void register_element_factories(ElementFactoryRegistry& registry, std::shared_ptr<const PayloadCodecRegistry> codecs)
+void register_element_factories(ElementFactoryRegistry& registry)
 {
-    if (!codecs) {
-        codecs = std::make_shared<PayloadCodecRegistry>();
-    }
     registry.register_plugin(
         plugin_descriptors().front(),
         {
@@ -83,10 +76,6 @@ void register_element_factories(ElementFactoryRegistry& registry, std::shared_pt
             {"Tee", [](std::string name) { return std::make_shared<Tee>(std::move(name)); }},
             {"Queue", [](std::string name) { return std::make_shared<Queue>(std::move(name)); }},
             {"Sync", [](std::string name) { return std::make_shared<Sync>(std::move(name)); }},
-            {"BufferFileSink",
-             [codecs](std::string name) { return std::make_shared<BufferFileSink>(codecs, std::move(name)); }},
-            {"BufferFileSrc",
-             [codecs](std::string name) { return std::make_shared<BufferFileSrc>(codecs, std::move(name)); }},
         });
 }
 

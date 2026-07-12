@@ -56,6 +56,13 @@ registration remains explicit in each linked plugin catalog. The current
 expression-building helper lives in `leakflow_cli`, which links the built-in
 plugins for `leakflow run` and tutorial applications.
 
+`PayloadCodecRegistry` also lives in `leakflow_core` (callbacks only; it
+forward-declares the base `BufferArchiveWriter`/`Reader`, so core stays
+Torch/HDF5-free). The codecs are registered by the base/crypto plugins and the
+HDF5-backed `BufferFileSink`/`BufferFileSrc` elements live in
+`leakflow_plugins_extras` — the layer that links both Torch and HDF5. See the
+Buffer Persistence contract in `ARCHITECTURE_CONTRACTS.md`.
+
 ## Areas
 
 | Area | Target | Public headers | Sources | Tests | Context |

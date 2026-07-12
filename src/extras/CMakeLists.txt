@@ -19,6 +19,7 @@ set_target_properties(cnpy++ PROPERTIES
 )
 
 add_library(leakflow_extras
+    hdf5_buffer_archive.cpp
     hdf5_tensor_dataset_reader.cpp
     numpy_payload.cpp
     numpy_to_torch.cpp

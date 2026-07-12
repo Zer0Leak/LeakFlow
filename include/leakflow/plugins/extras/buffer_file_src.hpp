@@ -8,13 +8,13 @@
 #include <optional>
 #include <string>
 
-namespace leakflow::plugins::core {
+namespace leakflow::plugins::extras {
 
-// Reloads a Buffer previously written by BufferFileSink: reads the `manifest.txt`
-// envelope (caps + metadata + payload type) and reconstructs the payload via the
-// registered PayloadCodec. Emits one buffer (one-run source). Its `src` pad declares
-// ANY caps, so it links to any concrete sink; the emitted buffer carries the saved
-// concrete caps.
+// Reloads a Buffer previously written by BufferFileSink from a single HDF5 file:
+// reads the envelope attributes (caps + metadata + payload type) and reconstructs the
+// payload via the registered PayloadCodec through a BufferArchiveReader. Emits one
+// buffer (one-run source). Its `src` pad declares ANY caps, so it links to any concrete
+// sink; the emitted buffer carries the saved concrete caps.
 class BufferFileSrc final : public Element {
 public:
     explicit BufferFileSrc(std::shared_ptr<const PayloadCodecRegistry> codecs,
@@ -27,4 +27,4 @@ private:
     std::shared_ptr<const PayloadCodecRegistry> codecs_;
 };
 
-} // namespace leakflow::plugins::core
+} // namespace leakflow::plugins::extras

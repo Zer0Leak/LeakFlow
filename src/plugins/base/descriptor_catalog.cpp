@@ -1,5 +1,6 @@
 #include "leakflow/plugins/base/descriptor_catalog.hpp"
 
+#include "leakflow/base/buffer_archive.hpp"
 #include "leakflow/base/numeric_caps.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/plugins/base/app_src.hpp"
@@ -9,9 +10,6 @@
 #include "leakflow/plugins/base/torch_file_src.hpp"
 #include "base_plugin_constants.hpp"
 
-#include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <torch/torch.h>
@@ -73,30 +71,6 @@ void register_element_factories(ElementFactoryRegistry& registry)
         });
 }
 
-namespace {
-
-void write_blob(const std::filesystem::path& file, const std::vector<char>& data)
-{
-    std::ofstream out(file, std::ios::binary);
-    if (!out) {
-        throw std::runtime_error("payload codec could not open for writing: " + file.string());
-    }
-    out.write(data.data(), static_cast<std::streamsize>(data.size()));
-    if (!out) {
-        throw std::runtime_error("payload codec failed while writing: " + file.string());
-    }
-}
-
-[[nodiscard]] std::vector<char> read_blob(const std::filesystem::path& file)
-{
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("payload codec could not open for reading: " + file.string());
-    }
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
-} // namespace
 
 void register_payload_codecs(PayloadCodecRegistry& codecs)
 {
@@ -104,17 +78,16 @@ void register_payload_codecs(PayloadCodecRegistry& codecs)
         leakflow::base::torch_tensor_caps_type,
         PayloadCodec{
             .save =
-                [](const Payload& payload, const std::filesystem::path& dir) {
+                [](const Payload& payload, leakflow::base::BufferArchiveWriter& archive) {
                     const auto* tensor_payload = dynamic_cast<const leakflow::base::TorchTensorPayload*>(&payload);
                     if (tensor_payload == nullptr) {
                         throw std::invalid_argument("torch-tensor codec: payload is not a TorchTensorPayload");
                     }
-                    write_blob(dir / "payload.pt", torch::pickle_save(torch::IValue(tensor_payload->tensor())));
+                    archive.write_tensor("tensor", tensor_payload->tensor());
                 },
             .load =
-                [](const std::filesystem::path& dir) -> std::shared_ptr<Payload> {
-                    auto value = torch::pickle_load(read_blob(dir / "payload.pt"));
-                    return std::make_shared<leakflow::base::TorchTensorPayload>(value.toTensor());
+                [](const leakflow::base::BufferArchiveReader& archive) -> std::shared_ptr<Payload> {
+                    return std::make_shared<leakflow::base::TorchTensorPayload>(archive.read_tensor("tensor"));
                 },
         });
 }

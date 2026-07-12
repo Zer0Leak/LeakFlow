@@ -47,17 +47,12 @@ CLI/inspect files if affected:
   default barrier pairs originally-independent streams. `policy` =
   `barrier`/`zip`/`all-required-once`/`held`/`latest` (one per element,
   restart-scoped; for `held`/`latest` the driver is `in_0`).
-- `BufferFileSink` / `BufferFileSrc`: persist and reload a whole `Buffer` (caps +
-  metadata + payload) to/from a `.lfbuf` directory — a human-readable `manifest.txt`
-  envelope (`key=value`) plus a `payload.pt` written by the `PayloadCodec` registered
-  for the payload's `type_name()`. Generic: they never know the concrete payload
-  type. `property path` is the directory. Both take a `PayloadCodecRegistry`
-  (injected by their factory, populated by the base/crypto codecs). `any` caps, so
-  they link to anything; the reloaded buffer carries its saved concrete caps.
-  Enables e.g. saving an expensive `PearsonCorrelator` correlation once and reloading
-  it to re-select PoIs (`PoiSelect`) offline. Codec registry:
-  `leakflow/core/payload_codec.hpp`; codecs: `TorchTensorPayload` (base),
-  `CorrelationPayload` / `CorrelationPoiPayload` (crypto).
+
+`BufferFileSink` / `BufferFileSrc` are **not** in this plugin. Whole-Buffer
+persistence became HDF5-backed and moved to `leakflow_plugins_extras` (only that
+layer links both Torch and HDF5). The generic `PayloadCodecRegistry` seam stays in
+`leakflow_core` (`leakflow/core/payload_codec.hpp`), now driving a
+`BufferArchiveWriter`/`Reader` (base). See `docs/context/modules/plugins-extras.md`.
 
 ## Descriptor Catalog
 
