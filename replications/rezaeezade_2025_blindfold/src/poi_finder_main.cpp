@@ -194,8 +194,8 @@ int main(int argc, char** argv)
                           << "                       (reload later with BufferFileSrc to re-select PoIs offline)\n"
                           << "  ROOT_DIR             default: " << default_root
                           << " (key_*.h5 files with /traces, /plaintexts, /keys)\n"
-                          << "  In --graph, the 'src' node exposes live 'path' and 'max_trace_bundles'\n"
-                          << "  controls (this app's AppSrc instance properties).\n";
+                          << "  In --graph, the 'src' node exposes 'path' and 'max_trace_bundles'\n"
+                          << "  controls (this app's AppSrc instance properties; editable when stopped).\n";
                 return 0;
             } else {
                 root = arg;
@@ -220,21 +220,23 @@ int main(int argc, char** argv)
 
         // App-exposed instance properties: the application enriches its own AppSrc
         // instance through the generic Element::add_property seam, so both render as
-        // live controls on the 'src' node in the --graph panel (the panel draws the
-        // element's live property specs). `path` is lifecycle-scoped -- changing it
-        // re-discovers the captures on the next restart. `max_trace_bundles` is a live
-        // knob the producer honors forward, per frame (0 = all).
+        // controls on the 'src' node in the --graph panel (the panel draws the element's
+        // live property specs). Both are Lifecycle-effect, so the panel makes them
+        // editable only in the Stopped state: configure the capture `path` and the
+        // `max_trace_bundles` fold limit while stopped, then Start. The producer reads
+        // them at stream start -- re-discovering `path` and capping by
+        // `max_trace_bundles` (0 = all).
+        const leakflow::PropertyEffect stopped_only_effect{
+            .kind = leakflow::PropertyEffectKind::Lifecycle,
+            .scope = leakflow::PropertyInvalidationScope::FullPipeline,
+        };
         app_src->add_property(leakflow::PropertySpec(
             "path", root.string(), "capture root directory (one key_*.h5 per trace bundle)", "",
-            std::monostate{}, "a directory of key_*.h5 captures",
-            leakflow::PropertyEffect{
-                .kind = leakflow::PropertyEffectKind::Lifecycle,
-                .scope = leakflow::PropertyInvalidationScope::FullPipeline,
-            }));
+            std::monostate{}, "a directory of key_*.h5 captures", stopped_only_effect));
         app_src->add_property(leakflow::PropertySpec(
             "max_trace_bundles", std::int64_t{0}, "fold at most N trace bundles (0 = all)", "bundles",
             leakflow::IntRangeConstraint{0, std::numeric_limits<std::int64_t>::max()}, "",
-            leakflow::PropertyEffect{}));
+            stopped_only_effect));
 
         if (save_correlation_path) {
             built.pipeline.element("save")->set_property("path", *save_correlation_path);
@@ -243,9 +245,10 @@ int main(int argc, char** argv)
 
         // Lazy pull: one aligned (traces, plaintexts, key) trace bundle per frame; the
         // PoI accumulates across bundles. AppSrc rewinds to index 0 on start(), so a
-        // Stop -> Start re-streams. The producer reads the app-exposed properties: it
-        // (re)discovers `path` at stream start (index 0, only when it changed) and caps
-        // the fold count by the live `max_trace_bundles`. nullopt = end of stream.
+        // Stop -> Start re-streams. The producer reads the app-exposed properties at
+        // stream start: it (re)discovers `path` at index 0 (only when it changed) and
+        // caps the fold count by `max_trace_bundles`. Both are edited while stopped, so
+        // each run sees a fixed config. nullopt = end of stream.
         auto bundles = std::make_shared<std::vector<fs::path>>(initial_bundles);
         auto bundles_path = std::make_shared<std::string>(root.string());
         app_src->set_frame_producer(

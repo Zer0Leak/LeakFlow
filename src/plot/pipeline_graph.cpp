@@ -1178,10 +1178,19 @@ void draw_element_controls(PipelineControlRuntime &runtime, const std::shared_pt
     }
 
     ImGui::Separator();
+    // Lifecycle-effect properties change the pipeline's fundamental configuration, so
+    // they are only editable in the Stopped state -- an edit made while Running/Paused/
+    // Idle would not take effect until a restart anyway. Gate them to Stopped using the
+    // bound session's authoritative player state; other properties keep the static
+    // writable / name-lock rules. With no session bound, the older no-gate path stands.
+    const auto *session = runtime.session();
+    const bool stopped = session == nullptr || session->state() == PipelineSessionState::Stopped;
     for (const auto &spec : element->property_specs()) {
         const auto found = element->properties().find(spec.name);
         const auto &value = found == element->properties().end() ? spec.default_value : found->second;
-        const auto read_only = !spec.writable || (spec.name == "name" && element->name_locked());
+        const bool lifecycle_locked = spec.effect.kind == PropertyEffectKind::Lifecycle && !stopped;
+        const auto read_only =
+            !spec.writable || (spec.name == "name" && element->name_locked()) || lifecycle_locked;
 
         ImGui::PushID(spec.name.c_str());
         ImGui::AlignTextToFramePadding();
@@ -1191,6 +1200,10 @@ void draw_element_controls(PipelineControlRuntime &runtime, const std::shared_pt
         ImGui::SetNextItemWidth(260.0F);
         if (read_only) {
             ImGui::TextUnformatted(property_value_to_string(value).c_str());
+            if (lifecycle_locked) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(stop to edit)");
+            }
         } else {
             draw_property_editor(runtime, *element, spec, value);
         }
