@@ -31,6 +31,23 @@ bool throws_invalid_argument(Function function)
     return false;
 }
 
+template <typename Function>
+std::string caught_message(Function function)
+{
+    try {
+        function();
+    } catch (const std::exception& error) {
+        return error.what();
+    }
+
+    return {};
+}
+
+bool contains(const std::string& haystack, const char* needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
 class ProbeElement final : public leakflow::Element {
 public:
     explicit ProbeElement(std::string name)
@@ -271,6 +288,33 @@ int main()
         }),
             "empty element name was not rejected")) {
         return 1;
+    }
+
+    // Framework property errors name the element and the property with no
+    // per-element code, so every element reports failures the same way.
+    {
+        const std::string self = "element '" + element.name() + "'";
+        const auto unknown = caught_message([&element] { element.set_property("missing", std::int64_t{1}); });
+        if (!expect(contains(unknown, self.c_str()) && contains(unknown, "unknown property 'missing'")
+                    && contains(unknown, "settable"),
+                "unknown-property error did not name the element/property or list settable properties")) {
+            return 1;
+        }
+        const auto mismatch = caught_message([&element] { element.set_property("poi_count", std::string("x")); });
+        if (!expect(contains(mismatch, self.c_str()) && contains(mismatch, "property 'poi_count'"),
+                "type-mismatch error did not name the element and property")) {
+            return 1;
+        }
+        const auto range = caught_message([&element] { element.set_property("poi_count", std::int64_t{0}); });
+        if (!expect(contains(range, self.c_str()) && contains(range, "property 'poi_count'"),
+                "range error did not name the element and property")) {
+            return 1;
+        }
+        const auto empty_name = caught_message([&element] { element.set_property("name", std::string()); });
+        if (!expect(contains(empty_name, self.c_str()) && contains(empty_name, "property 'name'"),
+                "name error did not name the element and property")) {
+            return 1;
+        }
     }
     if (!expect(throws_invalid_argument([&element] {
             element.add_property(

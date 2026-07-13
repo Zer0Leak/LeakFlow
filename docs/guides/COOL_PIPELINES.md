@@ -467,13 +467,13 @@ leakflow --log-level warning run --graph \
    Hdf5FileSrc@data(path=$A); \
    Tee@trace_tee; \
    FeatureSelect@featsel; \
-   AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); \
+   AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[0]); \
    Tee@leak_tee; \
    HwClass@hwclass; \
    PoiCorrelation@poicorr; \
+   PoiTablePlot@tbl(title=\"Profiling vs attack PoIs - key_05\",reference_label=profiling,current_label=attack,precision=3); \
    GaussianMixture@gmm(n_components=81,covariance_type=diagonal,n_init=1,max_iter=100,seed=0); \
    ClusteringStats@stats; \
-   PoiTablePlot@tbl(title=\"Profiling vs attack PoIs - key_05\",reference_label=profiling,current_label=attack,precision=3); \
    HeatmapPlot@heatmap(title=\"GMM vs true (hm,hy) - key_05\",normalize=row,row_label=\"true class\",col_label=cluster); \
    @corr_src ! @poi ! @poi_tee; \
    @poi_tee.src_0 ! @tbl.reference; \

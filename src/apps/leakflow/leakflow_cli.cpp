@@ -536,7 +536,7 @@ void skip_spaces(std::string_view text, std::size_t &index) {
         }
     }
 
-    throw std::invalid_argument("unknown property");
+    throw std::invalid_argument(leakflow::unknown_property_error(element, name));
 }
 
 [[nodiscard]] const Pad *find_pad(const Element &element, std::string_view name) {
@@ -679,18 +679,18 @@ enum class NamePropertyMode {
         return std::nullopt;
     }
 
+    // This pass runs before the element exists, only to recover its instance name.
+    // Malformed or unknown assignments are left for apply_properties to report once
+    // the element is created, so those errors can name the element and property.
     std::optional<std::string> name;
     for (const auto assignment : split_top_level(trimmed, ',')) {
         const auto part = trim_view(assignment);
         const auto equals = part.find('=');
         if (equals == std::string_view::npos) {
-            throw std::invalid_argument("property assignment must use key=value");
+            continue;
         }
 
         const auto property_name = trim_view(part.substr(0, equals));
-        if (property_name.empty()) {
-            throw std::invalid_argument("property name cannot be empty");
-        }
         if (property_name != "name") {
             continue;
         }
@@ -714,20 +714,30 @@ void apply_properties(Element &element, std::string_view properties, NamePropert
         const auto part = trim_view(assignment);
         const auto equals = part.find('=');
         if (equals == std::string_view::npos) {
-            throw std::invalid_argument("property assignment must use key=value");
+            throw std::invalid_argument(element.identity_for_error() + ": property assignment '" + std::string(part) +
+                                        "' must use key=value");
         }
 
         const auto property_name = trim_view(part.substr(0, equals));
         const auto property_text = part.substr(equals + 1);
         if (property_name.empty()) {
-            throw std::invalid_argument("property name cannot be empty");
+            throw std::invalid_argument(element.identity_for_error() + ": property name is empty in assignment '" +
+                                        std::string(part) + "'");
         }
         if (property_name == "name" && name_property_mode == NamePropertyMode::Reject) {
-            throw std::invalid_argument("element name cannot be changed after creation");
+            throw std::invalid_argument(element.identity_for_error() +
+                                        ": property 'name' cannot be changed after creation");
         }
 
         const auto &spec = find_property_spec(element, property_name);
-        auto value = parse_property_value(spec, property_text);
+        auto value = [&] {
+            try {
+                return parse_property_value(spec, property_text);
+            } catch (const std::exception &error) {
+                throw std::invalid_argument(element.identity_for_error() + ": property '" +
+                                            std::string(property_name) + "': " + error.what());
+            }
+        }();
         if (property_name == "name" && name_property_mode == NamePropertyMode::Allow && element.name_locked()) {
             const auto *name_value = std::get_if<std::string>(&value);
             if (name_value != nullptr && *name_value == element.name()) {

@@ -109,6 +109,11 @@ public:
     void validate_property_change(std::string_view name, const PropertyValue& value) const;
     void set_property(std::string_view name, PropertyValue value);
 
+    // "element 'name' (Type)" -- or "element 'name'" when the element was built
+    // without a descriptor type. The shared prefix for property/pad error messages,
+    // so every element reports the same way with no per-element code.
+    [[nodiscard]] std::string identity_for_error() const;
+
     template <typename T>
     [[nodiscard]] std::optional<T> property_as(std::string_view name) const
     {
@@ -224,5 +229,11 @@ private:
     std::stop_token stop_token_;
     std::function<void(std::stop_token)> pause_waiter_;
 };
+
+// Canonical "unknown property" message for an element, naming the element and
+// listing its settable property names as a hint. Shared by set_property
+// validation, the CLI parser, and live property edits so the wording is identical
+// wherever an unknown property is reported.
+[[nodiscard]] std::string unknown_property_error(const Element& element, std::string_view name);
 
 } // namespace leakflow

@@ -116,6 +116,15 @@ const std::string& Element::element_type() const
     return element_type_;
 }
 
+std::string Element::identity_for_error() const
+{
+    std::string identity = "element '" + name_ + "'";
+    if (!element_type_.empty()) {
+        identity += " (" + element_type_ + ")";
+    }
+    return identity;
+}
+
 const std::string& Element::element_kclass() const
 {
     return element_kclass_;
@@ -506,20 +515,55 @@ const PropertyValue& Element::property(std::string_view name) const
 
 void Element::validate_property_change(std::string_view name, const PropertyValue& value) const
 {
-    const auto& spec = property_spec_named(property_specs_, name);
-    if (!spec.writable) {
-        throw std::invalid_argument("property is read-only");
+    const PropertySpec* spec = nullptr;
+    for (const auto& candidate : property_specs_) {
+        if (candidate.name == name) {
+            spec = &candidate;
+            break;
+        }
     }
-    validate_property_value(spec, value);
+    if (spec == nullptr) {
+        throw std::invalid_argument(unknown_property_error(*this, name));
+    }
+    if (!spec->writable) {
+        throw std::invalid_argument(identity_for_error() + ": property '" + std::string(name) + "' is read-only");
+    }
+    // validate_property_value reports the kind of mismatch (type / constraint); the
+    // element and property name are added here so every caller gets full context.
+    try {
+        validate_property_value(*spec, value);
+    } catch (const std::invalid_argument& error) {
+        throw std::invalid_argument(identity_for_error() + ": property '" + std::string(name) + "': " + error.what());
+    }
     if (name == "name") {
         if (name_locked_) {
-            throw std::invalid_argument("element name cannot be changed after adding to a pipeline");
+            throw std::invalid_argument(identity_for_error()
+                                        + ": property 'name' cannot be changed after the element is added to a pipeline");
         }
         const auto* new_name = std::get_if<std::string>(&value);
         if (new_name == nullptr || new_name->empty()) {
-            throw std::invalid_argument("element name cannot be empty");
+            throw std::invalid_argument(identity_for_error() + ": property 'name' cannot be empty");
         }
     }
+}
+
+std::string unknown_property_error(const Element& element, std::string_view name)
+{
+    std::string message = element.identity_for_error() + ": unknown property '" + std::string(name) + "'";
+    std::string settable;
+    for (const auto& spec : element.property_specs()) {
+        if (!spec.writable) {
+            continue;
+        }
+        if (!settable.empty()) {
+            settable += ", ";
+        }
+        settable += spec.name;
+    }
+    if (!settable.empty()) {
+        message += " (settable: " + settable + ")";
+    }
+    return message;
 }
 
 void Element::set_property(std::string_view name, PropertyValue value)

@@ -458,7 +458,8 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
         return;
     }
     if (!element->has_property(command.property_name)) {
-        emit_command(PipelineCommandStatus::Rejected, element, command, no_effect, std::string(), "unknown property");
+        emit_command(PipelineCommandStatus::Rejected, element, command, no_effect, std::string(),
+                     unknown_property_error(*element, command.property_name));
         return;
     }
 
@@ -470,7 +471,8 @@ void PipelineSession::apply_command(const SetPropertyCommand &command)
         }
     }
     if (property_spec == nullptr) {
-        emit_command(PipelineCommandStatus::Rejected, element, command, no_effect, std::string(), "unknown property");
+        emit_command(PipelineCommandStatus::Rejected, element, command, no_effect, std::string(),
+                     unknown_property_error(*element, command.property_name));
         return;
     }
     const auto effect = property_spec->effect;
