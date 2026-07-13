@@ -47,7 +47,12 @@ ElementDescriptor FeatureSelect::descriptor()
         .purpose = "gather feature columns by index (e.g. truncate traces to PoI columns per unit)",
         .input_pads = {
             Pad("features", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
-            Pad("indexes", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
+            // The indexes are the PoI sample positions selected on a (profiling)
+            // capture and applied here to select columns of the current features, so
+            // this pad is a Reference: its dataset identity forwards as provenance
+            // (origin.indexes.*), not as the selected features' capture identity.
+            Pad("indexes", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type), PadPresence::Required,
+                PadMetadataRole::Reference),
         },
         .output_pads = {
             Pad("selected", PadDirection::Output, Caps(leakflow::base::torch_tensor_caps_type)),
@@ -105,7 +110,7 @@ std::optional<Buffer> FeatureSelect::process_inputs(ElementInputs inputs)
 
     auto payload = leakflow::base::TorchTensorPayload(selected);
     Buffer output{payload.caps()};
-    forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
+    forward_metadata(*this, inputs, output);
     output.set_metadata("payload.feature.selected_count", std::to_string(selected.size(-1)));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
     output.set_metadata("payload.layout",

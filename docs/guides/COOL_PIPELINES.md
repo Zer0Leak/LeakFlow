@@ -411,7 +411,7 @@ leakflow run --graph \
   'BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[20],rank_by=[abs]); \
    Tee@poi_tee; \
-   Hdf5FileSrc@attack(path=traces/aes/sync/aes_sync_poi/key_01.h5); \
+   Hdf5FileSrc@attack(path=traces/aes/sync/aes_sync_poi/key_05.h5); \
    Tee@trace_tee; \
    AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); \
    PoiCorrelation@poicorr; \
@@ -458,7 +458,7 @@ also re-correlated on the attack traces and shown beside the profiling scores.
 One `Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
 
 ```bash
-A=traces/aes/sync/aes_sync_attack/key_05.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
+A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
 leakflow --log-level warning run --graph \
   "BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[50],rank_by=[abs]); \
