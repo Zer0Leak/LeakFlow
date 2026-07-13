@@ -276,17 +276,26 @@ int main(int argc, char** argv)
                 report(static_cast<double>(index) / static_cast<double>(count),
                        "streaming " + file.stem().string(), index, count);
                 // One key_NN.h5 per fold: read its aligned /traces, /plaintexts, /keys
-                // through the same HDF5 reader Hdf5FileSrc uses.
+                // through the same HDF5 reader Hdf5FileSrc uses. A raw TorchTensorPayload
+                // only knows the generic axis_0/axis_1 layout, so the app -- which knows
+                // the SCA semantics -- overrides payload.layout on each aligned tensor.
                 leakflow::extras::Hdf5TensorDatasetReader reader(file);
                 auto traces = tensor_buffer(reader.read_tensor(traces_dataset));
                 traces.set_metadata("capture.source", "ChipWhisperer");
                 traces.set_metadata("origin.file", file.filename().string());
+                traces.set_metadata("payload.layout", "trace/sample");
+
+                auto plaintexts = tensor_buffer(reader.read_tensor(plaintexts_dataset));
+                plaintexts.set_metadata("payload.layout", "plaintext/unit");
+
+                auto keys = tensor_buffer(reader.read_tensor(keys_dataset));
+                keys.set_metadata("payload.layout", "unit");
 
                 std::vector<leakflow::Buffer> frame;
                 frame.reserve(3);
                 frame.push_back(std::move(traces));
-                frame.push_back(tensor_buffer(reader.read_tensor(plaintexts_dataset)));
-                frame.push_back(tensor_buffer(reader.read_tensor(keys_dataset)));
+                frame.push_back(std::move(plaintexts));
+                frame.push_back(std::move(keys));
                 log_info("streaming trace bundle",
                          {{"file", file.filename().string()}, {"index", std::to_string(index)}});
                 return frame;

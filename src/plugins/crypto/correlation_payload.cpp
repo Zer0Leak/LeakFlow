@@ -66,16 +66,18 @@ std::string CorrelationPayload::layout() const
 void CorrelationPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
-    section.add_field("units", summary_integer(static_cast<std::int64_t>(unit_indexes_.size())),
-        SummaryValueRole::Number);
-    section.add_field("channels", summary_integer(channel_count_), SummaryValueRole::Number);
-    section.add_field("features", summary_integer(feature_count_), SummaryValueRole::Number);
+    section.add_field(
+        "dtype", leakflow::base::torch_dtype_name(grouped_correlation_.scalar_type()), SummaryValueRole::TypeName);
+    section.add_field("device", grouped_correlation_.device().str(), SummaryValueRole::Text);
+    section.add_field("rank", summary_integer(grouped_correlation_.dim()), SummaryValueRole::Number);
+    const std::vector<std::int64_t> sizes(grouped_correlation_.sizes().begin(), grouped_correlation_.sizes().end());
+    section.add_field("shape", summary_list_from_int_array(sizes.data(), sizes.size()), SummaryValueRole::Number);
+    section.add_field("elements", summary_integer(grouped_correlation_.numel()), SummaryValueRole::Size);
     section.add_field("score", score_name_, SummaryValueRole::Text);
     section.add_field("observations", summary_integer(observation_count_), SummaryValueRole::Number);
     if (summary_level >= 2) {
-        section.add_field(
-            "dtype", leakflow::base::torch_dtype_name(grouped_correlation_.scalar_type()), SummaryValueRole::TypeName);
-        section.add_field("device", grouped_correlation_.device().str(), SummaryValueRole::Text);
+        section.add_field("unit_indexes",
+            summary_list_from_int_array(unit_indexes_.data(), unit_indexes_.size()), SummaryValueRole::Number);
     }
 }
 

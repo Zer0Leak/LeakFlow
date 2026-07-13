@@ -94,6 +94,9 @@ std::string CorrelationPoiPayload::layout() const
 void CorrelationPoiPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
+    section.add_field(
+        "dtype", leakflow::base::torch_dtype_name(results_.front().result.scalar_type()), SummaryValueRole::TypeName);
+    section.add_field("device", results_.front().result.device().str(), SummaryValueRole::Text);
     section.add_field("units", summary_integer(static_cast<std::int64_t>(results_.size())),
         SummaryValueRole::Number);
     section.add_field("score", score_name_, SummaryValueRole::Text);
@@ -106,9 +109,6 @@ void CorrelationPoiPayload::describe(SummarySection& section, std::int64_t summa
                     "unit",
                     summary_integer(static_cast<std::int64_t>(result.unit_index)),
                     SummaryValueRole::Number);
-                field.add_child(
-                    "dtype", leakflow::base::torch_dtype_name(result.result.scalar_type()), SummaryValueRole::TypeName);
-                field.add_child("device", result.result.device().str(), SummaryValueRole::Text);
             }
         }
     }

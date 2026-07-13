@@ -295,6 +295,8 @@ std::string AttackScoresPayload::layout() const
 void AttackScoresPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
+    section.add_field("dtype", leakflow::base::torch_dtype_name(scores_.scalar_type()), SummaryValueRole::TypeName);
+    section.add_field("device", scores_.device().str(), SummaryValueRole::Text);
     section.add_field("scores", shape_to_string(scores_.sizes()), SummaryValueRole::Number);
     section.add_field("ranking", shape_to_string(ranking_.sizes()), SummaryValueRole::Number);
     section.add_field("score_method", score_method_, SummaryValueRole::Text);
@@ -451,6 +453,7 @@ std::string AttackStatsPayload::layout() const
 void AttackStatsPayload::describe(SummarySection& section, std::int64_t summary_level) const
 {
     section.add_field("payload", type_name(), SummaryValueRole::TypeName);
+    section.add_field("device", top1_guess_.device().str(), SummaryValueRole::Text);
     section.add_field("units", summary_integer(unit_count()), SummaryValueRole::Number);
     section.add_field("has_truth", summary_bool(has_truth()), SummaryValueRole::Boolean);
     section.add_field("top_k", summary_integer(top_k()), SummaryValueRole::Number);
