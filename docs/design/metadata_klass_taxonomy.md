@@ -144,7 +144,7 @@ stamps its own keys:
 | **Source** | own | own | own | — |
 | **PassThrough** | copy | copy | copy | drop |
 | **Reframe** | copy | copy | **drop** | drop |
-| **Analyze** | **union** (conflict → error) | **`origin.<pad>.<key>`** | drop | drop |
+| **Analyze** | **union** (conflict → error; Reference pads excluded) | **`origin.<pad>.<key>`** | drop | drop |
 | **Sink** | — | — | — | — |
 
 Rules and rationale:
@@ -157,6 +157,19 @@ Rules and rationale:
 - **Analyze unions capture** across all connected inputs and **throws** on a
   conflicting value (for example two different `sample_rate_hz`). Capture values
   are non-secret, so the error names them.
+- **A `Reference` input pad is excluded from the capture union.** Some Analyze
+  elements combine a primary data input with a *parameter carried from another
+  experiment* — `PoiCorrelation` re-scores profiling PoIs on attack traces, and a
+  profiled template/model attack applies a model trained on a profiling set to
+  attack traces. The output is *guided by* that input but is not *about* it, so by
+  the capture test its facts are provenance, not capture. A pad declared
+  `PadMetadataRole::Reference` therefore contributes nothing to the capture union;
+  all its durable facts (capture **and** origin) forward as `origin.<pad>.<key>` —
+  e.g. the profiling `capture.dataset.name` lands at
+  `origin.poi.capture.dataset.name`. The conflict check stays in force for the
+  primary pads, which must still agree. `forward_metadata(element, inputs, output)`
+  reads the pad roles from the element's descriptor, so the pads remain the single
+  source of truth.
 - **Analyze relabels origin** as `origin.<pad>.<key>` so multiple inputs cannot
   collide and the output schema is stable. Example: the traces input's
   `file.path` becomes `origin.traces.file.path`. When an input's origin key is

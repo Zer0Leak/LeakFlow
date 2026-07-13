@@ -3,6 +3,7 @@
 #include "leakflow/core/buffer.hpp"
 #include "leakflow/core/element.hpp"
 
+#include <set>
 #include <string_view>
 
 namespace leakflow {
@@ -48,13 +49,29 @@ enum class ForwardingProfile {
 //                     values across inputs); relabel origin as origin.<pad>.<key>;
 //                     drop payload, routing.
 //
+// reference_pads names input pads whose data is a parameter carried from another
+// experiment (e.g. profiling PoIs re-scored on attack traces). A Reference pad is
+// excluded from the capture union entirely: all its durable facts (capture and
+// origin) forward as provenance under origin.<pad>.<key>, so a cross-experiment
+// input never conflicts with, or is mistaken for, the output's own capture identity.
+//
 // Routing is never forwarded by any profile; producers stamp element/branch
 // separately. Capture conflicts are reported with their (non-secret) values.
 void forward_metadata(
     const ElementInputs& inputs,
     ForwardingProfile profile,
     Buffer& output,
-    std::string_view element_name = {});
+    std::string_view element_name = {},
+    const std::set<std::string_view>& reference_pads = {});
+
+// Preferred overload for multi-input elements: derives the forwarding profile from
+// element.element_kclass() and the Reference pad set from element.input_pads(), so
+// the pad descriptors stay the single source of truth. Call as
+// forward_metadata(*this, inputs, output).
+void forward_metadata(
+    const Element& element,
+    const ElementInputs& inputs,
+    Buffer& output);
 
 // Convenience overload for single-input elements that hold one buffer (the common
 // Reframe case). pad_name is only used by the Analyze profile for origin relabeling.

@@ -91,7 +91,12 @@ ElementDescriptor PoiCorrelation::descriptor()
         .klass = "Analyze/SCA/PoiCorrelation",
         .purpose = "re-score PoI positions with their Pearson correlation on new traces",
         .input_pads = {
-            Pad("poi", PadDirection::Input, Caps(correlation_poi_caps_type)),
+            // The PoIs are profiled on a different (profiling) capture and applied
+            // here to the attack traces, so this pad is a Reference: its dataset
+            // identity forwards as provenance (origin.poi.*), not as the output's
+            // capture identity, and never conflicts with the attack traces/targets.
+            Pad("poi", PadDirection::Input, Caps(correlation_poi_caps_type), PadPresence::Required,
+                PadMetadataRole::Reference),
             Pad("traces", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
             Pad("targets", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),
         },
@@ -192,7 +197,7 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
     const auto output_unit_count = results.size();
     auto payload = std::make_shared<CorrelationPoiPayload>(std::move(results), poi->score_name());
     Buffer output{Caps(correlation_poi_caps_type)};
-    forward_metadata(inputs, profile_for_klass(element_kclass()), output, name());
+    forward_metadata(*this, inputs, output);
     output.set_metadata("payload.poi.rescored", "true");
     output.set_metadata("payload.poi.unit_count", std::to_string(output_unit_count));
     output.set_metadata("attack.unit.count", std::to_string(output_unit_count));

@@ -4,11 +4,12 @@
 
 namespace leakflow {
 
-Pad::Pad(std::string name, PadDirection direction, Caps caps, PadPresence presence)
+Pad::Pad(std::string name, PadDirection direction, Caps caps, PadPresence presence, PadMetadataRole metadata_role)
     : name_(std::move(name))
     , direction_(direction)
     , caps_(std::move(caps))
     , presence_(presence)
+    , metadata_role_(metadata_role)
 {
 }
 
@@ -35,6 +36,11 @@ PadPresence Pad::presence() const
 bool Pad::is_required() const
 {
     return presence_ == PadPresence::Required;
+}
+
+PadMetadataRole Pad::metadata_role() const
+{
+    return metadata_role_;
 }
 
 } // namespace leakflow

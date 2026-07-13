@@ -69,6 +69,18 @@ struct CaptureValue {
     std::string value;
 };
 
+// Relabel a forwarded fact as provenance of one input pad: origin.<pad>.<key>,
+// stripping a redundant leading "origin." so an already-forwarded origin key stays
+// flat (origin.<pad>.keys.file.path, not origin.<pad>.origin.keys.file.path).
+[[nodiscard]] std::string prefixed_origin_key(std::string_view pad_name, std::string_view key)
+{
+    std::string_view rest = key;
+    if (rest.starts_with("origin.")) {
+        rest.remove_prefix(std::string_view("origin.").size());
+    }
+    return "origin." + std::string(pad_name) + "." + std::string(rest);
+}
+
 // Apply the per-buffer forwarding rules of profile into output for one input pad,
 // using capture_values to detect conflicting capture facts across inputs.
 void forward_one(
@@ -77,13 +89,28 @@ void forward_one(
     ForwardingProfile profile,
     Buffer& output,
     std::map<std::string, CaptureValue>& capture_values,
-    std::string_view element_name)
+    std::string_view element_name,
+    bool is_reference)
 {
     const bool copy_payload = profile == ForwardingProfile::PassThrough;
     const bool prefix_origin = profile == ForwardingProfile::Analyze;
 
     for (const auto& [key, value] : input.metadata()) {
-        switch (metadata_group(key)) {
+        const auto group = metadata_group(key);
+
+        // A Reference input carries a parameter from another experiment: the output
+        // is guided by it but is not *about* it. Forward its durable facts (capture
+        // and origin alike) as provenance under origin.<pad>.<key>, so they never
+        // join -- or conflict with -- the output's own capture identity. Payload and
+        // routing drop, as they would for any fused input.
+        if (is_reference) {
+            if (group == MetadataGroup::Capture || group == MetadataGroup::Origin) {
+                output.set_metadata(prefixed_origin_key(pad_name, key), value);
+            }
+            continue;
+        }
+
+        switch (group) {
         case MetadataGroup::Capture: {
             const auto seen = capture_values.find(key);
             if (seen == capture_values.end()) {
@@ -103,14 +130,7 @@ void forward_one(
         }
         case MetadataGroup::Origin:
             if (prefix_origin) {
-                // Flatten already-forwarded origin (origin.<prev>.<...>) instead of
-                // nesting a second "origin." segment, yielding a readable provenance
-                // path such as origin.targets.keys.file.path.
-                std::string_view rest = key;
-                if (rest.starts_with("origin.")) {
-                    rest.remove_prefix(std::string_view("origin.").size());
-                }
-                output.set_metadata("origin." + std::string(pad_name) + "." + std::string(rest), value);
+                output.set_metadata(prefixed_origin_key(pad_name, key), value);
             } else {
                 output.set_metadata(key, value);
             }
@@ -133,7 +153,8 @@ void forward_metadata(
     const ElementInputs& inputs,
     ForwardingProfile profile,
     Buffer& output,
-    std::string_view element_name)
+    std::string_view element_name,
+    const std::set<std::string_view>& reference_pads)
 {
     if (profile == ForwardingProfile::Source || profile == ForwardingProfile::Sink) {
         return;
@@ -142,9 +163,21 @@ void forward_metadata(
     std::map<std::string, CaptureValue> capture_values;
     for (const auto& [pad_name, maybe_buffer] : inputs) {
         if (maybe_buffer) {
-            forward_one(pad_name, *maybe_buffer, profile, output, capture_values, element_name);
+            const bool is_reference = reference_pads.contains(std::string_view(pad_name));
+            forward_one(pad_name, *maybe_buffer, profile, output, capture_values, element_name, is_reference);
         }
     }
+}
+
+void forward_metadata(const Element& element, const ElementInputs& inputs, Buffer& output)
+{
+    std::set<std::string_view> reference_pads;
+    for (const auto& pad : element.input_pads()) {
+        if (pad.metadata_role() == PadMetadataRole::Reference) {
+            reference_pads.emplace(pad.name());
+        }
+    }
+    forward_metadata(inputs, profile_for_klass(element.element_kclass()), output, element.name(), reference_pads);
 }
 
 void forward_metadata(
@@ -159,7 +192,7 @@ void forward_metadata(
     }
 
     std::map<std::string, CaptureValue> capture_values;
-    forward_one(pad_name, input, profile, output, capture_values, element_name);
+    forward_one(pad_name, input, profile, output, capture_values, element_name, /*is_reference=*/false);
 }
 
 } // namespace leakflow

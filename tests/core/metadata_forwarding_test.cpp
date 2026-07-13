@@ -2,8 +2,11 @@
 #include "leakflow/core/metadata_forwarding.hpp"
 
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace {
 
@@ -153,6 +156,49 @@ int main()
         expect(has(output, "origin.targets.keys.file.path", "key.pt"), "Analyze did not flatten nested origin");
         expect(has(output, "origin.targets.file.path", "leakage.pt"), "Analyze did not prefix bare origin");
         expect(!output.has_metadata("origin.targets.origin.keys.file.path"), "Analyze double-nested origin");
+    }
+
+    // Analyze with a Reference pad: a parameter carried from another experiment
+    // (profiling PoIs re-scored on attack traces). The poi pad's dataset identity
+    // forwards as provenance instead of joining the capture union, so a legitimate
+    // cross-experiment element does not trip the conflict guard.
+    {
+        auto poi = make_buffer();
+        poi.set_metadata("capture.dataset.name", "aes_sync_poi");
+        poi.set_metadata("origin.file.path", "out/aes_corr.h5");
+        poi.set_metadata("payload.poi.method", "pearson");
+        poi.set_metadata("routing.branch", "poi");
+
+        auto traces = make_buffer();
+        traces.set_metadata("capture.dataset.name", "aes_sync_attack");
+        traces.set_metadata("capture.sample_rate_hz", "29454545.45");
+        traces.set_metadata("origin.file.path", "traces.pt");
+
+        auto targets = make_buffer();
+        targets.set_metadata("capture.dataset.name", "aes_sync_attack");
+        targets.set_metadata("origin.file.path", "leakage.pt");
+
+        leakflow::ElementInputs inputs;
+        inputs.emplace("poi", std::move(poi));
+        inputs.emplace("traces", std::move(traces));
+        inputs.emplace("targets", std::move(targets));
+
+        auto output = make_buffer();
+        forward_metadata(inputs, ForwardingProfile::Analyze, output, "poicorr", std::set<std::string_view>{"poi"});
+
+        // Output capture identity is the attack experiment (both primary pads agree).
+        expect(has(output, "capture.dataset.name", "aes_sync_attack"), "Reference pad polluted capture identity");
+        expect(has(output, "capture.sample_rate_hz", "29454545.45"), "Analyze dropped primary capture");
+        // The profiling identity survives as provenance, never as capture.
+        expect(has(output, "origin.poi.capture.dataset.name", "aes_sync_poi"),
+            "Reference capture not relabeled to provenance");
+        expect(has(output, "origin.poi.file.path", "out/aes_corr.h5"), "Reference origin not relabeled");
+        // Primary pads still relabel origin normally.
+        expect(has(output, "origin.traces.file.path", "traces.pt"), "primary traces origin missing");
+        expect(has(output, "origin.targets.file.path", "leakage.pt"), "primary targets origin missing");
+        // A Reference input's payload/routing drop like any fused input.
+        expect(!output.has_metadata("payload.poi.method"), "Reference pad leaked payload");
+        expect(!output.has_metadata("routing.branch"), "Reference pad leaked routing");
     }
 
     // PassThrough: copy capture + origin + payload; drop routing only.
