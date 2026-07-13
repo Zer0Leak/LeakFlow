@@ -8,10 +8,6 @@ target_link_libraries(leakflow_cli_syntax_tests
 leakflow_configure_test_target(leakflow_cli_syntax_tests)
 add_test(NAME leakflow_cli_syntax COMMAND leakflow_cli_syntax_tests)
 
-set(LEAKFLOW_AES_FIXTURE_DIR "${PROJECT_SOURCE_DIR}/tests/fixtures/aes/sync/key_01")
-set(LEAKFLOW_AES_TRACES "${LEAKFLOW_AES_FIXTURE_DIR}/traces_first_50.pt")
-set(LEAKFLOW_AES_PLAINTEXTS "${LEAKFLOW_AES_FIXTURE_DIR}/plain_texts_first_50.pt")
-set(LEAKFLOW_AES_KEY "${LEAKFLOW_AES_FIXTURE_DIR}/key_first_50.pt")
 set(LEAKFLOW_AES_HDF5 "${PROJECT_SOURCE_DIR}/tests/fixtures/aes/sync/key_01.h5")
 
 add_test(NAME leakflow_cli_help COMMAND leakflow --help)
@@ -59,10 +55,10 @@ set_tests_properties(leakflow_cli_run_no_summaries_forced PROPERTIES
 )
 
 add_test(NAME leakflow_cli_run_log_filter
-    COMMAND leakflow --log-level info --log-color never --log-filter element=TorchFileSrc run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! FakeSink"
+    COMMAND leakflow --log-level info --log-color never --log-filter element=Hdf5FileSrc run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! FakeSink"
 )
 set_tests_properties(leakflow_cli_run_log_filter PROPERTIES
-    PASS_REGULAR_EXPRESSION "TorchFileSrc@torchfilesrc0.src -> FakeSink@fakesink0.sink"
+    PASS_REGULAR_EXPRESSION "Hdf5FileSrc@data.traces -> FakeSink"
 )
 
 add_test(NAME leakflow_cli_run_env_log_level
@@ -74,14 +70,14 @@ set_tests_properties(leakflow_cli_run_env_log_level PROPERTIES
 )
 
 add_test(NAME leakflow_cli_summary_level_full
-    COMMAND leakflow --log-level info --log-color never --summary-level 2 run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! FakeSink"
+    COMMAND leakflow --log-level info --log-color never --summary-level 2 run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! FakeSink"
 )
 set_tests_properties(leakflow_cli_summary_level_full PROPERTIES
     PASS_REGULAR_EXPRESSION "contiguous="
 )
 
 add_test(NAME leakflow_cli_summary_level_terse
-    COMMAND leakflow --log-level info --log-color never --summary-level 1 run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! FakeSink"
+    COMMAND leakflow --log-level info --log-color never --summary-level 1 run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! FakeSink"
 )
 set_tests_properties(leakflow_cli_summary_level_terse PROPERTIES
     PASS_REGULAR_EXPRESSION "shape="
@@ -89,7 +85,7 @@ set_tests_properties(leakflow_cli_summary_level_terse PROPERTIES
 )
 
 add_test(NAME leakflow_cli_summary_level_env
-    COMMAND leakflow --log-level info --log-color never run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! FakeSink"
+    COMMAND leakflow --log-level info --log-color never run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! FakeSink"
 )
 set_tests_properties(leakflow_cli_summary_level_env PROPERTIES
     ENVIRONMENT "LEAKFLOW_SUMMARY_LEVEL=1"
@@ -189,21 +185,21 @@ set_tests_properties(leakflow_cli_run_file_src_summary PROPERTIES
 )
 
 add_test(NAME leakflow_cli_run_torch_file_src_summary_sink
-    COMMAND leakflow run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! Summary ! FakeSink"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! Summary ! FakeSink"
 )
 set_tests_properties(leakflow_cli_run_torch_file_src_summary_sink PROPERTIES
     PASS_REGULAR_EXPRESSION "Buffer@summary"
 )
 
 add_test(NAME leakflow_cli_run_torch_file_src_tensor_summary_sink
-    COMMAND leakflow run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! Summary ! FakeSink"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! Summary ! FakeSink"
 )
 set_tests_properties(leakflow_cli_run_torch_file_src_tensor_summary_sink PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/torch-tensor"
 )
 
 add_test(NAME leakflow_cli_run_torch_convert_summary_sink
-    COMMAND leakflow run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! TorchConvert(dtype=float32,device=cpu) ! Summary(level=3) ! FakeSink"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! TorchConvert(dtype=float32,device=cpu) ! Summary(level=3) ! FakeSink"
 )
 set_tests_properties(leakflow_cli_run_torch_convert_summary_sink PROPERTIES
     PASS_REGULAR_EXPRESSION "conversion.id=torch-convert"
@@ -259,11 +255,11 @@ set_tests_properties(leakflow_cli_run_correlation_poi_to_plot_annotations PROPER
 )
 
 add_test(NAME leakflow_cli_run_torch_file_sink
-    COMMAND leakflow run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! TorchFileSink(path=${PROJECT_BINARY_DIR}/tests/traces_first_50_roundtrip.pt)"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! TorchFileSink(path=${PROJECT_BINARY_DIR}/tests/traces_roundtrip.pt)"
 )
 
 add_test(NAME leakflow_cli_run_torch_file_sink_after_tee
-    COMMAND leakflow run "TorchFileSrc(path=${LEAKFLOW_AES_TRACES}) ! Tee@t; @t.src_0 ! Summary(level=2); @t.src_1 ! TorchFileSink(path=${PROJECT_BINARY_DIR}/tests/traces_first_50_after_tee.pt)"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! Tee@t; @t.src_0 ! Summary(level=2); @t.src_1 ! TorchFileSink(path=${PROJECT_BINARY_DIR}/tests/traces_after_tee.pt)"
 )
 set_tests_properties(leakflow_cli_run_torch_file_sink_after_tee PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/torch-tensor"

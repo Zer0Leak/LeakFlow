@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -27,9 +28,14 @@ bool expect(bool condition, const char* message)
     return true;
 }
 
-std::filesystem::path fixture_path(const char* name)
+// FakeLiveSrc reads a Torch pickle (.pt) via torch::pickle_load, so a temp file
+// written with torch::pickle_save is format-compatible. Generating the streamed
+// tensors here keeps the test self-contained (no on-disk .pt fixture).
+void write_pickle_tensor(const torch::Tensor& tensor, const std::filesystem::path& path)
 {
-    return std::filesystem::path(LEAKFLOW_TORCH_FIXTURE_DIR) / name;
+    const auto data = torch::pickle_save(torch::IValue(tensor));
+    std::ofstream output(path, std::ios::binary);
+    output.write(data.data(), static_cast<std::streamsize>(data.size()));
 }
 
 // Records, per received buffer, its vector-clock slot-1 value (FakeLiveSrc's slot)
@@ -94,12 +100,17 @@ public:
 
 int main()
 {
+    const auto traces_pt = std::filesystem::temp_directory_path() / "leakflow_fake_live_traces.pt";
+    const auto plaintexts_pt = std::filesystem::temp_directory_path() / "leakflow_fake_live_plaintexts.pt";
+    write_pickle_tensor(torch::arange(50 * 5000, torch::kFloat32).reshape({50, 5000}), traces_pt);
+    write_pickle_tensor(torch::arange(50 * 16, torch::kFloat32).reshape({50, 16}), plaintexts_pt);
+
     // Walkthrough Example 4: a single live source streams one Buffer per axis-0
     // row of [50, 5000], run() pumps until EOS, and the provenance index
     // increments per row.
     leakflow::Pipeline pipeline;
     auto src = std::make_shared<leakflow::plugins::base::FakeLiveSrc>("live");
-    src->set_property("path", std::string(fixture_path("traces_first_50.pt").string()));
+    src->set_property("path", std::string(traces_pt.string()));
     auto src_handle = pipeline.add(src);
     auto sink = std::make_shared<CaptureSink>();
     auto sink_handle = pipeline.add(sink);
@@ -137,7 +148,7 @@ int main()
     auto sink2 = std::make_shared<CaptureSink>();
     leakflow::Pipeline pipeline2;
     auto src2 = std::make_shared<leakflow::plugins::base::FakeLiveSrc>("live2");
-    src2->set_property("path", std::string(fixture_path("plain_texts_first_50.pt").string()));
+    src2->set_property("path", std::string(plaintexts_pt.string()));
     auto src2_handle = pipeline2.add(src2);
     auto sink2_handle = pipeline2.add(sink2);
     pipeline2.link(src2_handle, "src", sink2_handle, "in");
@@ -171,7 +182,7 @@ int main()
     {
         leakflow::Pipeline stop_pipeline;
         auto stop_src = std::make_shared<leakflow::plugins::base::FakeLiveSrc>("live_prestop");
-        stop_src->set_property("path", std::string(fixture_path("traces_first_50.pt").string()));
+        stop_src->set_property("path", std::string(traces_pt.string()));
         auto stop_src_handle = stop_pipeline.add(stop_src);
         auto stop_sink = std::make_shared<CaptureSink>();
         auto stop_sink_handle = stop_pipeline.add(stop_sink);
@@ -194,7 +205,7 @@ int main()
     {
         leakflow::Pipeline paced_pipeline;
         auto paced_src = std::make_shared<leakflow::plugins::base::FakeLiveSrc>("live_paced");
-        paced_src->set_property("path", std::string(fixture_path("traces_first_50.pt").string()));
+        paced_src->set_property("path", std::string(traces_pt.string()));
         paced_src->set_property("trace_rate", 4.0);
         auto paced_src_handle = paced_pipeline.add(paced_src);
         auto paced_sink = std::make_shared<CaptureSink>();
@@ -220,5 +231,7 @@ int main()
         }
     }
 
+    std::filesystem::remove(traces_pt);
+    std::filesystem::remove(plaintexts_pt);
     return 0;
 }

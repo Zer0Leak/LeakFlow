@@ -28,7 +28,7 @@ Tests:
   the registry (`ScoreView` and `HeatmapView` live here — display data only,
   domain-free).
 - `leakflow_plugins_plot`: plot plugin family with `TracePlot` and `HeatmapPlot`
-  (`Plot/Heatmap`): renders any `[R,C]`/`[U,R,C]` matrix as an ImPlot `PlotHeatmap`
+  (`Sink/Plot/Heatmap`): renders any `[R,C]`/`[U,R,C]` matrix as an ImPlot `PlotHeatmap`
   (Viridis colormap + colorbar); props `normalize` (none/row/col), `unit`
   (-1 = sum over units), `title`/`row_label`/`col_label`. A sink; fills a
   `HeatmapView` via the shared-view factory pattern. Motivating use: a

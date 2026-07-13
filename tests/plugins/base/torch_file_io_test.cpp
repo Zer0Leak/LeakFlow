@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -38,9 +39,12 @@ bool throws_exception(Function function)
     return false;
 }
 
-std::filesystem::path fixture_path(const char* name)
+leakflow::Buffer make_torch_buffer(torch::Tensor tensor)
 {
-    return std::filesystem::path(LEAKFLOW_TORCH_FIXTURE_DIR) / name;
+    auto payload = leakflow::base::TorchTensorPayload(std::move(tensor));
+    leakflow::Buffer buffer(payload.caps());
+    buffer.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
+    return buffer;
 }
 
 std::filesystem::path temp_path(const char* name)
@@ -86,16 +90,14 @@ int main()
 {
     namespace base_plugin = leakflow::plugins::base;
 
-    const auto traces_path = fixture_path("traces_first_50.pt");
     const auto saved_path = temp_path("leakflow_torch_file_io_roundtrip.pt");
     std::filesystem::remove(saved_path);
 
-    base_plugin::TorchFileSrc fixture_source;
-    fixture_source.set_property("path", traces_path.string());
-    auto torch_buffer = fixture_source.process(std::nullopt);
-    if (!expect(torch_buffer.has_value(), "TorchFileSrc fixture load did not produce a buffer")) {
-        return 1;
-    }
+    // A deterministic in-memory [50, 5000] float32 tensor stands in for a capture.
+    // The TorchFileSink-then-TorchFileSrc round-trip below is what exercises .pt
+    // I/O, so the test needs no on-disk .pt fixture.
+    const auto source_tensor = torch::arange(50 * 5000, torch::kFloat32).reshape({50, 5000});
+    std::optional<leakflow::Buffer> torch_buffer = make_torch_buffer(source_tensor);
 
     const auto saved_payload = torch_buffer->payload_as<leakflow::base::TorchTensorPayload>();
     if (!expect(saved_payload != nullptr, "TorchFileSrc fixture buffer did not carry TorchTensorPayload")) {

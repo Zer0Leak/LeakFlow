@@ -442,7 +442,9 @@ std::optional<Buffer> capture_trace_snapshot(
         view.notify_x_axis(element.name(), leakflow::plot::to_string(leakflow::plot::TracePlotXAxis::Sample));
     }
 
-    return input;
+    // Sink: the snapshot is plot-owned, so the buffer is consumed (no output pad). To
+    // also process the traces downstream, fan out with a Tee before the plot.
+    return std::nullopt;
 }
 
 } // namespace

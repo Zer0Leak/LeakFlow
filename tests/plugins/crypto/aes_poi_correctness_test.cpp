@@ -1,15 +1,14 @@
 #include "leakflow/base/plot_annotation_payload.hpp"
 #include "leakflow/base/torch_tensor_payload.hpp"
 #include "leakflow/crypto/aes.hpp"
+#include "leakflow/extras/hdf5_tensor_dataset_reader.hpp"
 #include "leakflow/plugins/crypto/crypto_elements.hpp"
 
 #include <bit>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -50,15 +49,25 @@ bool expect_near(double actual, double expected, const std::string& message)
     return true;
 }
 
-torch::Tensor load_pickle_tensor(const std::filesystem::path& path)
-{
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("could not open fixture: " + path.string());
-    }
+// One aligned capture read from a key_NN.h5 dataset file: the first trace_count
+// (traces, plaintexts) rows plus the file's single fixed key. Slicing the leading
+// rows preserves the numeric character of the historical *_first_50 fixtures while
+// sourcing the data straight from the tracked HDF5 fixture.
+struct Capture {
+    torch::Tensor traces;     // [trace_count, num_samples] float32
+    torch::Tensor plaintexts; // [trace_count, 16] uint8
+    torch::Tensor key;        // [16] uint8
+};
 
-    std::vector<char> data{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-    return torch::pickle_load(data).toTensor();
+Capture load_capture(const std::filesystem::path& h5_path, std::uint64_t trace_count)
+{
+    leakflow::extras::Hdf5TensorDatasetReader reader(h5_path);
+    const leakflow::extras::TensorReadOptions rows{.rows = {.start = 0, .count = trace_count}};
+    return Capture{
+        .traces = reader.read_tensor("/traces", rows),
+        .plaintexts = reader.read_tensor("/plaintexts", rows),
+        .key = reader.read_tensor("/keys"),
+    };
 }
 
 leakflow::Buffer torch_buffer(torch::Tensor tensor)
@@ -140,15 +149,17 @@ std::string format_fixed(double value, int precision)
     return output.str();
 }
 
-bool run_fixture(const std::string& label, const std::filesystem::path& fixture_dir, std::size_t byte_index)
+bool run_fixture(const std::string& label, const std::filesystem::path& h5_path, std::size_t byte_index,
+                 std::uint64_t trace_count)
 {
-    const auto traces = load_pickle_tensor(fixture_dir / "traces_first_50.pt");
-    const auto plaintexts = load_pickle_tensor(fixture_dir / "plain_texts_first_50.pt");
-    const auto key = load_pickle_tensor(fixture_dir / "key_first_50.pt");
+    const auto capture = load_capture(h5_path, trace_count);
+    const auto& traces = capture.traces;
+    const auto& plaintexts = capture.plaintexts;
+    const auto& key = capture.key;
 
     if (!expect(traces.dim() == 2 && plaintexts.dim() == 2 && plaintexts.size(1) == 16 && key.dim() == 1
                 && key.size(0) == 16 && traces.size(0) == plaintexts.size(0),
-            label + ": fixture shapes were unexpected")) {
+            label + ": capture shapes were unexpected")) {
         return false;
     }
 
@@ -328,12 +339,17 @@ bool run_fixture(const std::string& label, const std::filesystem::path& fixture_
 
 int main()
 {
-    constexpr std::size_t byte_index = 0;
+    // Only key_01.h5 is tracked in the repo. Its aes_sync_poi capture leaks every
+    // key byte, so two independent byte scenarios -- each recomputed from scratch
+    // inside run_fixture -- stand in for the two-capture cross-check the old
+    // key_01/key_02 fixtures gave. 50 traces keeps the ~1/sqrt(50) noise-floor
+    // reasoning behind poi_correlation_threshold valid.
+    constexpr std::uint64_t trace_count = 50;
 
-    if (!run_fixture("key_01", LEAKFLOW_AES_FIXTURE_DIR_KEY_01, byte_index)) {
+    if (!run_fixture("key_01/byte_00", LEAKFLOW_AES_HDF5, /*byte_index=*/0, trace_count)) {
         return 1;
     }
-    if (!run_fixture("key_02", LEAKFLOW_AES_FIXTURE_DIR_KEY_02, byte_index)) {
+    if (!run_fixture("key_01/byte_05", LEAKFLOW_AES_HDF5, /*byte_index=*/5, trace_count)) {
         return 1;
     }
 

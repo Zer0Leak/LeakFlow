@@ -175,7 +175,7 @@ ElementDescriptor PoiTablePlot::descriptor()
 {
     return {
         .type_name = "PoiTablePlot",
-        .klass = "Plot/Table/PoI",
+        .klass = "Sink/Plot/Table/PoI",
         .purpose = "compare a reference PoI set against a current one in a per-(unit,channel) table",
         .input_pads = {
             Pad("reference", PadDirection::Input, Caps(correlation_poi_caps_type), PadPresence::Optional),

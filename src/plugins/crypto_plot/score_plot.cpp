@@ -247,7 +247,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
     record.fields.emplace("x", format_double(x));
     leakflow::log::write(std::move(record));
 
-    return input;
+    return std::nullopt; // sink: the score view owns the snapshot
 }
 
 [[nodiscard]] const Buffer& required_input(const ElementInputs& inputs, std::string_view pad_name)

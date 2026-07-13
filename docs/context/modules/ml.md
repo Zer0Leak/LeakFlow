@@ -16,7 +16,7 @@ AES knowledge lives here.
 
 The pipeline **elements** that wrap these APIs live in the `leakflow_plugins_ml`
 family (klass `Analyze/Clustering/...`, `Analyze/Evaluation/Clustering`,
-`Transform/Feature/Select`, `Plot/Heatmap`).
+`Transform/Feature/Select`, `Sink/Plot/Heatmap`).
 
 Every payload-producing wrapper stamps the core `payload.layout` contract with
 semantic axes after attaching its Torch payload: `FeatureSelect` emits

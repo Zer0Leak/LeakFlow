@@ -94,8 +94,10 @@ aes_sync_attack/
 ```
 
 The original `key_NN/` folders containing `key.pt`, `plain_texts.pt`, and
-`traces.pt` are retained temporarily. They are the identical conversion inputs
-for the current HDF5 files and a future Zarr conversion/benchmark.
+`traces.pt` were the conversion inputs for the HDF5 files (and a future Zarr
+conversion/benchmark). Only the HDF5 form is kept as a checked-in test fixture:
+this repo tracks `sync/key_01.h5`, and the LeakFlow tests read that file
+directly. The `.pt` source folders are not part of the fixtures.
 
 Dataset sizes:
 
@@ -183,8 +185,8 @@ if INVERT_TRACES:
     wave = -wave
 ```
 
-This means `/traces` in each HDF5 file (and `traces.pt` in the retained source
-folder) contains `-trace.wave`, not the raw ChipWhisperer waveform.
+This means `/traces` in each HDF5 file (and the source `traces.pt` it was
+converted from) contains `-trace.wave`, not the raw ChipWhisperer waveform.
 
 Important details:
 

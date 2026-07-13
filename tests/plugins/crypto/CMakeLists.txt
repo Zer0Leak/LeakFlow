@@ -65,11 +65,11 @@ add_executable(leakflow_plugins_crypto_aes_poi_correctness_tests
 target_link_libraries(leakflow_plugins_crypto_aes_poi_correctness_tests
     PRIVATE
         leakflow_plugins_crypto
+        leakflow_extras
 )
 target_compile_definitions(leakflow_plugins_crypto_aes_poi_correctness_tests
     PRIVATE
-        LEAKFLOW_AES_FIXTURE_DIR_KEY_01="${PROJECT_SOURCE_DIR}/tests/fixtures/aes/sync/key_01"
-        LEAKFLOW_AES_FIXTURE_DIR_KEY_02="${PROJECT_SOURCE_DIR}/tests/fixtures/aes/sync/key_02"
+        LEAKFLOW_AES_HDF5="${PROJECT_SOURCE_DIR}/tests/fixtures/aes/sync/key_01.h5"
 )
 leakflow_configure_test_target(leakflow_plugins_crypto_aes_poi_correctness_tests)
 add_test(NAME leakflow_plugins_crypto_aes_poi_correctness COMMAND leakflow_plugins_crypto_aes_poi_correctness_tests)

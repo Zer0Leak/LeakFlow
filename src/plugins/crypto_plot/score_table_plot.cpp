@@ -191,7 +191,7 @@ std::optional<Buffer> capture_table(Element& element, leakflow::plot::TableView&
     record.fields.emplace("N", std::to_string(n));
     leakflow::log::write(std::move(record));
 
-    return input;
+    return std::nullopt; // sink: the scoreboard view owns the snapshot
 }
 
 [[nodiscard]] const Buffer& required_input(const ElementInputs& inputs, std::string_view pad_name)

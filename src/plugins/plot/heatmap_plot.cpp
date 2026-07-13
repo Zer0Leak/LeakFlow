@@ -57,7 +57,7 @@ ElementDescriptor HeatmapPlot::descriptor()
 {
     return {
         .type_name = "HeatmapPlot",
-        .klass = "Plot/Heatmap",
+        .klass = "Sink/Plot/Heatmap",
         .purpose = "render a matrix tensor as an ImPlot heatmap (e.g. a ClusteringStats confusion matrix)",
         .input_pads = {
             Pad("matrix", PadDirection::Input, Caps(leakflow::base::torch_tensor_caps_type)),

@@ -50,8 +50,8 @@ pressing Ctrl+C requests a cooperative stop from the pipeline worker.
 Plain `TracePlot` runs show only the plot windows; the separate controls toolbar
 is reserved for `--graph` runs.
 
-`TracePlot` snapshots incoming tensors into a plot-owned runtime and passes the
-buffer downstream.
+`TracePlot` snapshots incoming tensors into a plot-owned runtime and consumes the
+buffer (it is a sink). To also process the traces downstream, put a `Tee` before it.
 
 ```bash
 ./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES traces",group=aes,label=trace)'

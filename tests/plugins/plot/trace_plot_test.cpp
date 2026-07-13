@@ -120,10 +120,7 @@ int main()
     input.set_payload(payload);
 
     auto output = trace_plot.process(input);
-    if (!expect(output.has_value(), "TracePlot did not pass the buffer through")) {
-        return 1;
-    }
-    if (!expect(output->payload() == input.payload(), "TracePlot did not preserve the payload handle")) {
+    if (!expect(!output.has_value(), "TracePlot should be a sink (no output)")) {
         return 1;
     }
     if (!expect(runtime->has_sessions(), "TracePlot did not register a plot session")) {
@@ -328,7 +325,7 @@ int main()
     annotated_inputs.emplace("sink", input);
     annotated_inputs.emplace("annotations", annotation_buffer);
     const auto annotated_output = annotated_plot.process_inputs(std::move(annotated_inputs));
-    if (!expect(annotated_output.has_value(), "TracePlot with annotations did not pass the buffer through")) {
+    if (!expect(!annotated_output.has_value(), "TracePlot with annotations should be a sink (no output)")) {
         return 1;
     }
     if (!expect(annotated_runtime->trace_view()->trace_snapshots().size() == 1,
