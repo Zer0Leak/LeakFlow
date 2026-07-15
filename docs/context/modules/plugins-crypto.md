@@ -42,7 +42,7 @@ CLI/inspect files if affected:
 - `AesLeakage` (`Analyze/SCA/Leakage/AES`): computes AES first-round S-box
   leakage targets. Required `traces` and `plaintexts` sink pads, an optional
   `keys` sink pad (required at runtime for `HW(m xor k)`/`HW(y)`/`y(n)`). Output
-  is a Torch `uint8` `[B,N,C]` leakage tensor. Properties: `byte_indexes` (default
+  is a Torch `uint8` `[B,N,C]` leakage tensor. Properties: `units` (default
   all 16), `channels` (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and
   `y(0)` through `y(7)`; default `[HW(y)]`; `payload-output`, downstream
   invalidation on `leakage`). Labels the output's leading axis with those bytes as
@@ -51,7 +51,7 @@ CLI/inspect files if affected:
 - `AesLeakageHypothesis` (`Analyze/SCA/Hypothesis/AES`): computes AES
   first-round predicted leakage hypotheses for every selected byte and guess.
   Required `plaintexts` sink pad. Output is a Torch `uint8` `[U,G,N,L]`
-  hypothesis tensor. Properties: `byte_indexes` (default all 16), `channels`
+  hypothesis tensor. Properties: `units` (default all 16), `channels`
   (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and `y(0)` through `y(7)`;
   default `[HW(y)]`), `guess_values` (`[]` means full AES byte domain `0..255`;
   `payload-output`, downstream invalidation on `hypotheses`).

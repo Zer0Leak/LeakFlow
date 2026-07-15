@@ -101,7 +101,7 @@ leakflow --log-level warning run --graph \
       @trace_tee.src_0{routing.branch=raw-trace-plot}; \
       @trace_tee.src_1{routing.branch=cpa-features}; \
    AesLeakageHypothesis@hyp \
-      (channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+      (channels=[HW(y)],units=[],guess_values=[]); \
    CpaAttack@attack \
       (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float64,correlation_mode=recompute,emit_correlations=false,top_k=8); \
    AttackStats@stats \
@@ -133,7 +133,7 @@ leakflow --log-level warning run --graph \
 
 Notes:
 
-- `byte_indexes=[]` and `guess_values=[]` mean all 16 AES bytes and the full
+- `units=[]` and `guess_values=[]` mean all 16 AES bytes and the full
   `0..255` guess domain.
 - `ScorePlot(show_second_score=true)` needs `AttackStats(top_k>=2)`; this command
   uses `top_k=8`, which also controls the scoreboard row budget.
@@ -160,7 +160,7 @@ leakflow --log-level warning run --graph \
       @trace_tee.src_0{routing.branch=raw-trace-plot}; \
       @trace_tee.src_1{routing.branch=cpa-features}; \
    AesLeakageHypothesis@hyp \
-      (channels=[HW(y)],byte_indexes=[],guess_values=[]); \
+      (channels=[HW(y)],units=[],guess_values=[]); \
    CpaAttack@attack \
       (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,correlation_mode=auto,top_k=8); \
    AttackStats@stats \
@@ -215,7 +215,7 @@ leakflow --log-level warning run --graph \
       @trace_tee.src_0{routing.branch=raw-trace-plot}; \
       @trace_tee.src_1{routing.branch=dpa-features}; \
    AesLeakageHypothesis@hyp \
-      (channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
+      (channels=[y(0),y(3),y(7)],units=[],guess_values=[]); \
    DpaAttack@attack \
       (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,accumulation_mode=recompute,top_k=8); \
    AttackStats@stats \
@@ -251,7 +251,7 @@ leakflow --log-level warning run --graph \
 Notes:
 
 - `y(0)`, `y(3)`, and `y(7)` are binary S-box output-bit hypotheses. Narrow to
-  `channels=[y(0)],byte_indexes=[0]` for a faster interactive demo.
+  `channels=[y(0)],units=[0]` for a faster interactive demo.
 - `DpaAttack.best_difference` emits a CPU float32 `[attack_unit,sample]` tensor,
   so `TracePlot(trace_context_label=unit)` gives the slider unit semantics.
 - The raw trace and difference trace share `group=dpa`; `layout=stacked` puts the
@@ -276,7 +276,7 @@ leakflow --log-level warning run --graph \
       @trace_tee.src_0{routing.branch=raw-trace-plot}; \
       @trace_tee.src_1{routing.branch=dpa-features}; \
    AesLeakageHypothesis@hyp \
-      (channels=[y(0),y(3),y(7)],byte_indexes=[],guess_values=[]); \
+      (channels=[y(0),y(3),y(7)],units=[],guess_values=[]); \
    DpaAttack@attack \
       (score_method=max_abs,score_channels=guess_dependent,compute_dtype=float32,accumulation_mode=auto,top_k=8); \
    AttackStats@stats \
@@ -331,7 +331,7 @@ Compute and save the correlation:
 ```bash
 leakflow --log-level warning run \
   'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); \
-   Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],byte_indexes=[]); \
+   Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],units=[]); \
    PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.h5); \
    @data.traces ! @tee; @tee.src_0 ! @corr.features; @tee.src_1 ! @lk.traces; \
    @data.plaintexts ! @lk.plaintexts; @data.keys ! @lk.keys; @lk ! @corr.targets; @corr ! @save'
@@ -413,7 +413,7 @@ leakflow run --graph \
    Tee@poi_tee; \
    Hdf5FileSrc@attack(path=traces/aes/sync/aes_sync_poi/key_05.h5); \
    Tee@trace_tee; \
-   AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[]); \
+   AesLeakage@leakage(channels=[HW(m),HW(y)],units=[]); \
    PoiCorrelation@poicorr; \
    PoiTablePlot@tbl \
       (title="Profiling vs attack PoIs",reference_label=profiling,current_label=attack,precision=3); \
@@ -444,7 +444,7 @@ Notes:
   rows should agree.
 - `PoiCorrelation` recomputes correlation over every unit at each PoI column, so it
   scales with trace count. `key_01` (2 000 traces) is interactive; for a larger
-  attack set, re-score a subset first, or narrow with `AesLeakage(byte_indexes=[0])`
+  attack set, re-score a subset first, or narrow with `AesLeakage(units=[0])`
   and a smaller `top_k`.
 - Both table inputs are optional — feed only `@tbl.reference` (or only
   `@tbl.current`) to inspect one PoI set on its own; the missing row shows `-`.
@@ -467,7 +467,7 @@ leakflow --log-level warning run --graph \
    Hdf5FileSrc@data(path=$A); \
    Tee@trace_tee; \
    FeatureSelect@featsel; \
-   AesLeakage@leakage(channels=[HW(m),HW(y)],byte_indexes=[0]); \
+   AesLeakage@leakage(channels=[HW(m),HW(y)],units=[0]); \
    Tee@leak_tee; \
    HwClass@hwclass; \
    PoiCorrelation@poicorr; \
@@ -496,7 +496,7 @@ leakflow --log-level warning run --graph \
 The GMM `labels` (via `FeatureSelect` → `GaussianMixture`) and the truth (via
 `AesLeakage` → `HwClass`) must describe the **same units**. `ClusteringStats` aligns
 them by unit id, so `CorrelationPoiToIndexes(units=[...])` and
-`AesLeakage(byte_indexes=[...])` need to name the same bytes: disjoint units are an
+`AesLeakage(units=[...])` need to name the same bytes: disjoint units are an
 error (*"labels and truth share no units"*), and a partial overlap warns and scores
 only the shared units. Match them — both `[0]`, or both left at the full range — for
 a meaningful heatmap. The units each buffer carries show as `units=[…]` in a

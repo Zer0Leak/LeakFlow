@@ -105,7 +105,7 @@ selected byte and every key guess.
 Properties:
 
 ```text
-byte_indexes=[0..15]
+units=[0..15]
 channels=[HW(y)]
 guess_values=[]           // default full AES byte domain 0..255
 ```
@@ -149,7 +149,7 @@ HW(y)       -> HW(y)
 For example:
 
 ```text
-AesLeakageHypothesis(channels=[HW(y)],byte_indexes=[0,1,2])
+AesLeakageHypothesis(channels=[HW(y)],units=[0,1,2])
 ```
 
 with `N = 2000` emits:
@@ -560,7 +560,7 @@ Minimum support:
 
 ```text
 plaintexts [N,16]
-byte_indexes=[...]
+units=[...]
 channels=[HW(y)]
 guess_values=0..255 default
 output [U,256,N,L]
@@ -686,7 +686,7 @@ Non-live AES CPA:
 
 ```text
 Hdf5FileSrc@data(path=traces/aes/sync/aes_sync_attack/key_01.h5);
-AesLeakageHypothesis@hyp(channels=[HW(y)],byte_indexes=[0]);
+AesLeakageHypothesis@hyp(channels=[HW(y)],units=[0]);
 CpaAttack@attack(score_method=max_abs,score_channels=guess_dependent);
 Summary@summary(level=2);
 

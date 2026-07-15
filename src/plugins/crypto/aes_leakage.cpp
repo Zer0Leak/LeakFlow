@@ -41,7 +41,7 @@ using AesLeakageChannel = leakflow::crypto::aes::FirstRoundLeakageChannel;
 [[nodiscard]] std::vector<std::size_t>
 selected_byte_indexes(const Element &element) {
   auto property_indexes =
-      element.property_as<Units>("byte_indexes").value_or(Units::none()).to_vector();
+      element.property_as<Units>("units").value_or(Units::none()).to_vector();
   if (property_indexes.empty()) {
     property_indexes = all_byte_indexes();
   }
@@ -245,7 +245,7 @@ ElementDescriptor AesLeakage::descriptor() {
       .property_specs =
           {
               PropertySpec(
-                  "byte_indexes", Units::none(),
+                  "units", Units::none(),
                   "AES state byte indexes to model, e.g. [0] / [0:16] / [0,2:4]; none/[] = all bytes",
                   "", std::monostate{}, "",
                   PropertyEffect{
@@ -388,7 +388,7 @@ std::optional<Buffer> AesLeakage::process_inputs(ElementInputs inputs) {
   record.fields.emplace("payload.leakage.model", aes_leakage_model_id);
   record.fields.emplace("payload.leakage.channels",
                         output.metadata("payload.leakage.channels"));
-  record.fields.emplace("byte_indexes",
+  record.fields.emplace("units",
                         output.metadata("payload.leakage.byte_indexes"));
   record.fields.emplace("payload.trace.count",
                         output.metadata("payload.trace.count"));

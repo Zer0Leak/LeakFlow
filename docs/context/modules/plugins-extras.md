@@ -98,7 +98,7 @@ leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.tr
 Typical aligned multi-input syntax:
 
 ```bash
-leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(byte_indexes=[0]); Summary@summary; @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
+leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); AesLeakage@leakage(units=[0]); Summary@summary; @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @summary'
 ```
 
 Jitter files expose their nested labels as a tensor bundle:

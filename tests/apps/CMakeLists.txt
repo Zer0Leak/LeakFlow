@@ -94,7 +94,7 @@ set_tests_properties(leakflow_cli_summary_level_env PROPERTIES
 )
 
 add_test(NAME leakflow_cli_log_payload_nested_fields
-    COMMAND leakflow --log-level info --log-color never run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(byte_indexes=[3]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[2],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); FakeSink@sink; @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @sink"
+    COMMAND leakflow --log-level info --log-color never run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(units=[3]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[2],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); FakeSink@sink; @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @sink"
 )
 set_tests_properties(leakflow_cli_log_payload_nested_fields PROPERTIES
     PASS_REGULAR_EXPRESSION "sample_index="
@@ -206,49 +206,49 @@ set_tests_properties(leakflow_cli_run_torch_convert_summary_sink PROPERTIES
 )
 
 add_test(NAME leakflow_cli_run_aes_leakage
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakage@leakage(channels=[HW(m)],byte_indexes=[0,1]); Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @leakage ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakage@leakage(channels=[HW(m)],units=[0,1]); Summary@summary(level=3); @data.traces ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @leakage ! @summary"
 )
 set_tests_properties(leakflow_cli_run_aes_leakage PROPERTIES
     PASS_REGULAR_EXPRESSION "payload.leakage.model=aes-first-round"
 )
 
 add_test(NAME leakflow_cli_run_aes_leakage_hypothesis
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); Summary@summary(level=3); @data.plaintexts ! @hyp.plaintexts; @hyp ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(units=[0],guess_values=[0,255]); Summary@summary(level=3); @data.plaintexts ! @hyp.plaintexts; @hyp ! @summary"
 )
 set_tests_properties(leakflow_cli_run_aes_leakage_hypothesis PROPERTIES
     PASS_REGULAR_EXPRESSION "attack.guess.count=2"
 )
 
 add_test(NAME leakflow_cli_run_cpa_attack
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(units=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @summary"
 )
 set_tests_properties(leakflow_cli_run_cpa_attack PROPERTIES
     PASS_REGULAR_EXPRESSION "payload=leakflow/attack-scores"
 )
 
 add_test(NAME leakflow_cli_run_attack_stats
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); AttackStats@stats; Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.scores; @data.keys ! @stats.truth; @stats ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(units=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); AttackStats@stats; Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.scores; @data.keys ! @stats.truth; @stats ! @summary"
 )
 set_tests_properties(leakflow_cli_run_attack_stats PROPERTIES
     PASS_REGULAR_EXPRESSION "payload.stats.id"
 )
 
 add_test(NAME leakflow_cli_run_attack_annotations
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(byte_indexes=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); AttackStats@stats(top_k=2); AttackStatsToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.scores; @data.keys ! @stats.truth; @stats ! @ann ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakageHypothesis@hyp(units=[0],guess_values=[0,255]); CpaAttack@attack(compute_dtype=float64); AttackStats@stats(top_k=2); AttackStatsToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @data.traces ! @attack.features; @data.plaintexts ! @hyp.plaintexts; @hyp ! @attack.hypotheses; @attack ! @stats.scores; @data.keys ! @stats.truth; @stats ! @ann ! @summary"
 )
 set_tests_properties(leakflow_cli_run_attack_annotations PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"
 )
 
 add_test(NAME leakflow_cli_run_poi_select
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(byte_indexes=[0]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); Summary@summary(level=2); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(units=[0]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); Summary@summary(level=2); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @summary"
 )
 set_tests_properties(leakflow_cli_run_poi_select PROPERTIES
     PASS_REGULAR_EXPRESSION "payload.poi.method"
 )
 
 add_test(NAME leakflow_cli_run_correlation_poi_to_plot_annotations
-    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(byte_indexes=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary"
+    COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); Tee@traces; AesLeakage@leakage(units=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=2); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary"
 )
 set_tests_properties(leakflow_cli_run_correlation_poi_to_plot_annotations PROPERTIES
     PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"

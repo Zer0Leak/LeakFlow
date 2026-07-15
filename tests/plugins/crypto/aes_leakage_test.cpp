@@ -82,7 +82,7 @@ int main() {
   const std::vector<std::size_t> byte_indexes{0, 2};
 
   crypto_plugin::AesLeakage leakage;
-  leakage.set_property("byte_indexes", leakflow::Units::of({0, 2}));
+  leakage.set_property("units", leakflow::Units::of({0, 2}));
 
   leakflow::ElementInputs inputs;
   inputs.emplace("traces", torch_buffer(traces));
@@ -152,7 +152,7 @@ int main() {
   }
 
   crypto_plugin::AesLeakage plaintext_leakage;
-  plaintext_leakage.set_property("byte_indexes", leakflow::Units::of({0, 2}));
+  plaintext_leakage.set_property("units", leakflow::Units::of({0, 2}));
   plaintext_leakage.set_property(
       "channels",
       leakflow::StringList{crypto_plugin::aes_leakage_channel_hw_m});
@@ -183,7 +183,7 @@ int main() {
   }
 
   crypto_plugin::AesLeakage add_round_key_leakage;
-  add_round_key_leakage.set_property("byte_indexes", leakflow::Units::of({1}));
+  add_round_key_leakage.set_property("units", leakflow::Units::of({1}));
   add_round_key_leakage.set_property(
       "channels",
       leakflow::StringList{crypto_plugin::aes_leakage_channel_hw_m_xor_k});
@@ -220,7 +220,7 @@ int main() {
   }
 
   crypto_plugin::AesLeakage combined_leakage;
-  combined_leakage.set_property("byte_indexes", leakflow::Units::of({1}));
+  combined_leakage.set_property("units", leakflow::Units::of({1}));
   combined_leakage.set_property(
       "channels", leakflow::StringList{
                       crypto_plugin::aes_leakage_channel_hw_m,

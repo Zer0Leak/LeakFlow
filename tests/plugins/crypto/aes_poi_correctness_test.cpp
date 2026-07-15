@@ -167,7 +167,7 @@ bool run_fixture(const std::string& label, const std::filesystem::path& h5_path,
 
     // ---- AesLeakage numeric correctness: HW(m) and HW(y) for a known byte ----
     crypto_plugin::AesLeakage leakage;
-    leakage.set_property("byte_indexes", leakflow::Units::of({static_cast<std::int64_t>(byte_index)}));
+    leakage.set_property("units", leakflow::Units::of({static_cast<std::int64_t>(byte_index)}));
     leakage.set_property(
         "channels",
         leakflow::StringList{
@@ -223,7 +223,7 @@ bool run_fixture(const std::string& label, const std::filesystem::path& h5_path,
 
     // ---- PoiSelect numeric correctness against an independent recompute ----
     crypto_plugin::AesLeakage target_leakage;
-    target_leakage.set_property("byte_indexes", leakflow::Units::of({static_cast<std::int64_t>(byte_index)}));
+    target_leakage.set_property("units", leakflow::Units::of({static_cast<std::int64_t>(byte_index)}));
     target_leakage.set_property("channels", leakflow::StringList{crypto_plugin::aes_leakage_channel_hw_y});
     leakflow::ElementInputs target_inputs;
     target_inputs.emplace("traces", torch_buffer(traces));
