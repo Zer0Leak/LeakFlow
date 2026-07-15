@@ -67,7 +67,7 @@ int main() {
           default_channels.data(), default_channels.size());
 
   crypto_plugin::AesLeakageHypothesis hypothesis;
-  hypothesis.set_property("byte_indexes", leakflow::IntList{0, 2});
+  hypothesis.set_property("byte_indexes", leakflow::Units::of({0, 2}));
 
   leakflow::ElementInputs inputs;
   inputs.emplace("plaintexts", torch_buffer(plaintexts));
@@ -163,7 +163,7 @@ int main() {
   }
 
   crypto_plugin::AesLeakageHypothesis combined_hypothesis;
-  combined_hypothesis.set_property("byte_indexes", leakflow::IntList{1});
+  combined_hypothesis.set_property("byte_indexes", leakflow::Units::of({1}));
   combined_hypothesis.set_property(
       "channels", leakflow::StringList{
                       crypto_plugin::aes_leakage_channel_hw_m,
@@ -232,7 +232,7 @@ int main() {
   }
 
   crypto_plugin::AesLeakageHypothesis direct_hypothesis;
-  direct_hypothesis.set_property("byte_indexes", leakflow::IntList{0});
+  direct_hypothesis.set_property("byte_indexes", leakflow::Units::of({0}));
   direct_hypothesis.set_property("guess_values", leakflow::IntList{0});
   const auto direct_output = direct_hypothesis.process(torch_buffer(plaintexts));
   if (!expect(direct_output.has_value(),

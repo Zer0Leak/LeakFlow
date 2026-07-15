@@ -111,6 +111,9 @@ std::optional<Buffer> FeatureSelect::process_inputs(ElementInputs inputs)
     auto payload = leakflow::base::TorchTensorPayload(selected);
     Buffer output{payload.caps()};
     forward_metadata(*this, inputs, output);
+    // The selected features inherit the unit identity of the PoI indexes (the units
+    // the PoIs were profiled for), so it travels with the data to the fusion later.
+    output.set_units(indexes_buffer.units());
     output.set_metadata("payload.feature.selected_count", std::to_string(selected.size(-1)));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
     output.set_metadata("payload.layout",

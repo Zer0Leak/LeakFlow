@@ -351,7 +351,7 @@ wasteful, so the replication app streams the retained original `key_*` folders:
 
 ```bash
 leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.h5 --graph \
-  traces/aes/sync/aes_sync_poi
+  traces/aes/sync/aes_sync_poi/key_50.h5
 ```
 
 It walks each retained `key_*` folder in turn, feeding that folder's
@@ -492,6 +492,15 @@ leakflow --log-level warning run --graph \
    @poicorr ! @tbl.current; \
    @stats ! @heatmap"
 ```
+
+The GMM `labels` (via `FeatureSelect` → `GaussianMixture`) and the truth (via
+`AesLeakage` → `HwClass`) must describe the **same units**. `ClusteringStats` aligns
+them by unit id, so `CorrelationPoiToIndexes(units=[...])` and
+`AesLeakage(byte_indexes=[...])` need to name the same bytes: disjoint units are an
+error (*"labels and truth share no units"*), and a partial overlap warns and scores
+only the shared units. Match them — both `[0]`, or both left at the full range — for
+a meaningful heatmap. The units each buffer carries show as `units=[…]` in a
+`Summary` and in the `--graph` buffer inspector.
 
 `out/key05_sub.h5` is only an example subset path; point `A` at an existing
 HDF5 file. Alternatively, keep the full `key_05.h5` path and add

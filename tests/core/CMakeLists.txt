@@ -28,6 +28,16 @@ target_link_libraries(leakflow_buffer_tests
 leakflow_configure_test_target(leakflow_buffer_tests)
 add_test(NAME leakflow_buffer COMMAND leakflow_buffer_tests)
 
+add_executable(leakflow_units_tests
+    units_test.cpp
+)
+target_link_libraries(leakflow_units_tests
+    PRIVATE
+        leakflow_core
+)
+leakflow_configure_test_target(leakflow_units_tests)
+add_test(NAME leakflow_units COMMAND leakflow_units_tests)
+
 add_executable(leakflow_vector_clock_tests
     vector_clock_test.cpp
 )

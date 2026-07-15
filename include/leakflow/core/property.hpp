@@ -1,5 +1,7 @@
 #pragma once
 
+#include "leakflow/core/units.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -50,6 +52,7 @@ using PropertyValue = std::variant<
     IntList,
     DoubleList,
     StringList,
+    Units,
     Color,
     std::monostate>;
 

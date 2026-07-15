@@ -40,14 +40,6 @@ void copy_unit_metadata(const Buffer& input, Buffer& output)
     return value;
 }
 
-[[nodiscard]] IntList int_list_property_or(const Element& element, std::string_view name, IntList fallback)
-{
-    if (const auto value = element.property_as<IntList>(name)) {
-        return *value;
-    }
-    return fallback;
-}
-
 // Result for a specific unit index, or throw if the payload has no such unit.
 [[nodiscard]] const CorrelationPoiResult& result_for_unit(
     const CorrelationPoiPayload& payload, std::int64_t unit)
@@ -83,7 +75,8 @@ ElementDescriptor CorrelationPoiToIndexes::descriptor()
             Pad("indexes", PadDirection::Output, Caps(leakflow::base::torch_tensor_caps_type)),
         },
         .property_specs = {
-            PropertySpec("units", IntList{}, "unit indexes to keep; [] = all, in payload order",
+            PropertySpec("units", Units::none(),
+                "unit indexes to keep, e.g. [0] / [0:16] / [0,2:4]; none/[] = all, in payload order",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
@@ -125,7 +118,7 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
         throw std::invalid_argument("CorrelationPoiToIndexes: PoI payload has no units");
     }
 
-    const auto units = int_list_property_or(*this, "units", {});
+    const auto units = property_as<Units>("units").value_or(Units::none()).to_vector();
     std::vector<torch::Tensor> per_unit;
     std::vector<std::int64_t> selected_units;
     if (units.empty()) {
@@ -154,6 +147,9 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
     output.set_metadata("attack.unit.count", std::to_string(indexes.size(0)));
     output.set_metadata("attack.unit.indexes", unit_indexes_metadata(selected_units));
     output.set_metadata("payload.feature.selected_count", std::to_string(indexes.size(1)));
+    // The PoI rows are per unit; label the leading axis so FeatureSelect and the
+    // fusion downstream carry and check unit identity, not just shape.
+    output.set_units(Units::of(selected_units));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(index_payload)));
     output.set_metadata("payload.layout", "unit/feature");
     return output;

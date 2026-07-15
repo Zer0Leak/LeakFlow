@@ -145,7 +145,7 @@ forwards the buffer as supplied and neither infers nor overwrites
   Properties). Mark a knob `PropertyEffectKind::Lifecycle` to make it editable only
   when Stopped.
 
-`replications/rezaeezade_2025_blindfold/poi_finder_main.cpp` is the worked example:
+`examples/app_src_hdf5_tutorial.cpp` is the worked example:
 it streams one `key_*.h5` trace bundle per frame, reports per-bundle progress, and
 exposes `path` and `max_trace_bundles` as stopped-only lifecycle properties on its
 `src` node. Tests: `tests/plugins/base/app_src_test.cpp` (frame producer, restart,

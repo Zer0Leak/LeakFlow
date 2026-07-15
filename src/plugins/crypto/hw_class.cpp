@@ -101,6 +101,8 @@ std::optional<Buffer> HwClass::process(std::optional<Buffer> input)
     Buffer output{class_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "leakage", name());
     copy_unit_metadata(*input, output);
+    // The Hamming-weight truth keeps the leakage's per-byte unit identity.
+    output.set_units(input->units());
     output.set_metadata("attack.unit.count", std::to_string(classes.size(0)));
     output.set_metadata("payload.class.count", std::to_string(radix * radix));
     output.set_payload(std::make_shared<leakflow::base::TorchTensorPayload>(std::move(class_payload)));

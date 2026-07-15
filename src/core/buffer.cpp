@@ -93,6 +93,16 @@ void Buffer::set_provenance(std::vector<std::uint32_t> provenance)
     provenance_ = std::move(provenance);
 }
 
+const Units& Buffer::units() const
+{
+    return units_;
+}
+
+void Buffer::set_units(Units units)
+{
+    units_ = std::move(units);
+}
+
 SummaryDocument Buffer::describe(std::int64_t summary_level) const
 {
     SummaryDocument document("Buffer");
@@ -123,11 +133,46 @@ SummaryDocument Buffer::describe(std::int64_t summary_level) const
     auto& payload_section = document.add_section("Payload");
     if (payload_) {
         payload_->describe(payload_section, summary_level);
+        if (!units_.empty()) {
+            // Name the field after the leading axis from payload.layout, pluralised
+            // ("unit/trace" -> "units"), so core prints the domain's word for the
+            // axis without hardcoding it. The value is the shared Units form.
+            std::string axis_name = "axis";
+            if (const auto found = metadata_.find("payload.layout"); found != metadata_.end()) {
+                const auto& layout = found->second;
+                const auto slash = layout.find('/');
+                axis_name = slash == std::string::npos ? layout : layout.substr(0, slash);
+            }
+            if (!axis_name.empty() && axis_name.back() != 's') {
+                axis_name += 's';
+            }
+            payload_section.add_field(axis_name, units_.format());
+        }
     } else {
         payload_section.add_field("payload", "none");
     }
 
     return document;
+}
+
+LabelAlignment align_labels(const std::vector<std::int64_t>& a, const std::vector<std::int64_t>& b)
+{
+    // Unit counts are tiny (a handful of attack bytes), so a direct scan is both
+    // simplest and fastest. Matching is by value, so a and b may list the shared
+    // labels in different orders.
+    LabelAlignment alignment;
+    for (std::size_t ai = 0; ai < a.size(); ++ai) {
+        for (std::size_t bi = 0; bi < b.size(); ++bi) {
+            if (a[ai] == b[bi]) {
+                alignment.shared.push_back(a[ai]);
+                alignment.a_indices.push_back(static_cast<std::int64_t>(ai));
+                alignment.b_indices.push_back(static_cast<std::int64_t>(bi));
+                break;
+            }
+        }
+    }
+    alignment.identical = (a == b);
+    return alignment;
 }
 
 } // namespace leakflow

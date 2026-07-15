@@ -1,63 +1,30 @@
 # Rezaeezade et al. (2025) — Breaking the Blindfold (PoI finder)
 
-Replication of the **points-of-interest (PoI) finding** step from:
+Replication of the points-of-interest (PoI) finding step from Rezaeezade et al.,
+*Breaking the Blindfold: Deep Learning-based Blind Side-channel Analysis* (2025).
+Later attack and deep-learning steps remain out of scope.
 
-> Rezaeezade et al., *Breaking the Blindfold: Deep Learning-based Blind
-> Side-channel Analysis*, 2025.
-> PDF: [`../../papers/Rezaeezade et al. - 2025 - Breaking the Blindfold Deep Learning-based Blind Side-channel Analysis.pdf`](../../papers/)
+## Pipeline
 
-Only the PoI finder is replicated here. Later steps (attack / DL model) are out of
-scope for now.
+The application reads one aligned capture file with `Hdf5FileSrc`. The file must
+provide `/traces`, `/plaintexts`, and `/keys` using the LeakFlow tensor-dataset
+HDF5 schema.
 
-## What it does
-
-Aggregates the Pearson PoI finder across **many capture folders**. Each `key_*`
-folder is one aligned `(traces, plaintexts, key)` capture. The app streams one
-folder per step into an `AppSrc` (application-fed live source). Because `AppSrc`
-declares itself live, `PearsonCorrelator` auto-selects its **incremental** mode and
-folds each folder into running correlation moments — it never resets between
-folders, only at `start()`. `PoiSelect` (stateless) then picks the top-k PoIs from
-that running correlation. The final emitted PoI is the aggregate over every folder.
-
-The old `PearsonPoiFinder` was split into `PearsonCorrelator` (stateful accumulation)
-and `PoiSelect` (stateless selection) so that, in Idle, changing `top_k`/`rank_by`
-re-selects from the cached correlation without re-streaming.
-
-Pipeline (built once by the app, then fed frame-by-frame):
-
-```
-AppSrc@src
-  src_0 (traces) ─► Tee@trace_tee ─┬─► @corr.features
-  │                                └─► @leakage.traces
-  src_1 (plain)  ────────────────────► @leakage.plaintexts
-  src_2 (key)    ────────────────────► @leakage.keys
-AesLeakage@leakage (channels=[HW(m),HW(y)]) ─► @corr.targets
-PearsonCorrelator@corr ─► @poi         # stateful: incremental correlation (live)
-PoiSelect@poi (top_k=[50], rank_by=[abs])   # stateless: top-k selection
+```text
+Hdf5FileSrc@src
+  traces     -> Tee@trace_tee -> PearsonCorrelator.features / AesLeakage.traces
+  plaintexts -> AesLeakage.plaintexts
+  keys       -> AesLeakage.keys
+AesLeakage -> PearsonCorrelator.targets
+PearsonCorrelator -> PoiSelect
 ```
 
-One `AppSrc` step = one folder = one buffer per pad, all stamped with a single
-shared vector clock, so `AesLeakage` and `PearsonCorrelator` pair the three inputs
-per folder with the default barrier (no `Sync` element needed).
-
-## Data layout
-
-Default root: `traces/aes/sync/aes_sync_poi/` (not in the repository). Each capture
-folder must contain single Torch tensors:
-
-```
-traces/aes/sync/aes_sync_poi/
-├── key_01/
-│   ├── traces.pt        # float32 [n_traces, n_samples]
-│   ├── plain_texts.pt   # uint8   [n_traces, 16]
-│   └── key.pt           # uint8   [16]
-├── key_02/ ...
-└── key_NN/ ...
-```
+The analysis covers all 16 AES bytes, the `HW(m)` and `HW(y)` channels, and
+selects the top 50 absolute-correlation samples.
 
 ## Build
 
-Gated behind `LEAKFLOW_BUILD_REPLICATIONS` (default OFF):
+The target is gated by `LEAKFLOW_BUILD_REPLICATIONS` (default `OFF`):
 
 ```bash
 CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
@@ -69,46 +36,24 @@ cmake --build build --target leakflow_rezaeezade_poi_finder -j
 ## Run
 
 ```bash
-# headless: prints the aggregate PoI summary
-./build/leakflow_rezaeezade_poi_finder traces/aes/sync/aes_sync_poi
+# Headless; prints the PoI summary.
+./build/leakflow_rezaeezade_poi_finder traces/aes/sync/aes_sync_poi/key_01.h5
 
-# live pipeline graph window (watch folders stream through, PoI sharpen)
-./build/leakflow_rezaeezade_poi_finder --graph traces/aes/sync/aes_sync_poi
+# Pipeline graph and trace/PoI display.
+./build/leakflow_rezaeezade_poi_finder --graph \
+  traces/aes/sync/aes_sync_poi/key_01.h5
+
+# Persist the correlation for later PoI selection.
+./build/leakflow_rezaeezade_poi_finder \
+  --save-correlation out/aes_corr.h5 \
+  traces/aes/sync/aes_sync_poi/key_01.h5
 ```
 
-`ROOT_DIR` defaults to `traces/aes/sync/aes_sync_poi`. Pass `--help` for usage.
+The default input is `traces/aes/sync/aes_sync_poi/key_01.h5`. Use
+`--auto-start` with `--graph` to begin immediately.
 
-### Save the aggregate correlation once, tune PoIs offline
-
-Streaming all folders is the expensive step; `PoiSelect` is cheap. `--save-correlation`
-forks the correlation to a `BufferFileSink`, persisting the full aggregate
-(all 16 bytes, `HW(m)` and `HW(y)`) to a single HDF5 file:
-
-```bash
-# compute + save the aggregate correlation (one expensive pass)
-./build/leakflow_rezaeezade_poi_finder --save-correlation out/aes_corr.h5 traces/aes/sync/aes_sync_poi
-```
-
-Then reload and re-select PoIs with any `top_k`/`rank_by` **instantly, offline, no
-re-streaming** (and plot them — see `docs/guides/COOL_PIPELINES.md`):
+Reload a saved correlation without recomputing it:
 
 ```bash
 leakflow run 'BufferFileSrc(path=out/aes_corr.h5) ! PoiSelect(top_k=[5],rank_by=[abs]) ! Summary ! FakeSink'
 ```
-
-## Notes / current limitations
-
-- Folders are pulled **lazily**: `AppSrc` asks the app for the next folder when the
-  pump needs it (one-ahead prefetch), so the `--graph` window opens immediately and
-  only ~one folder is in memory at a time.
-- `--graph` shows the pipeline topology + live buffer flow **and** a `TracePlot` of
-  the current folder's traces with the accumulated PoIs overlaid as annotation
-  markers (`CorrelationPoiToPlotAnnotations ! TracePlot`, `update_mode=replace`).
-  The markers sharpen as more folders stream in. Headless mode ends at `@poi` and
-  prints the aggregate PoI summary instead (no plot).
-- The default analysis covers all 16 key bytes × 2 channels (`HW(m)`, `HW(y)`) ×
-  `top_k=50`, so the plot shows many markers. Narrow `AesLeakage(byte_indexes=[0])`
-  or lower `top_k` for a cleaner view.
-- Stop → Start re-streams from the first folder: `AppSrc` owns the folder index and
-  rewinds on `start()`.
-- Saving the PoI result to disk (`PayloadFileSink`) is a separate, later step.

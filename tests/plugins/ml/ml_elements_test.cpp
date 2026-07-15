@@ -34,6 +34,33 @@ leakflow::ElementInputs two_inputs(const char* a, torch::Tensor ta, const char* 
     return inputs;
 }
 
+leakflow::Buffer torch_buffer_with_units(torch::Tensor tensor, std::vector<std::int64_t> units)
+{
+    auto buffer = torch_buffer(std::move(tensor));
+    buffer.set_units(leakflow::Units::of(std::move(units)));
+    return buffer;
+}
+
+leakflow::ElementInputs unit_inputs(torch::Tensor labels, std::vector<std::int64_t> labels_units, torch::Tensor truth,
+                                    std::vector<std::int64_t> truth_units)
+{
+    leakflow::ElementInputs inputs;
+    inputs.emplace("labels", torch_buffer_with_units(std::move(labels), std::move(labels_units)));
+    inputs.emplace("truth", torch_buffer_with_units(std::move(truth), std::move(truth_units)));
+    return inputs;
+}
+
+template <typename Function>
+bool throws(Function function)
+{
+    try {
+        function();
+    } catch (const std::exception&) {
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -103,6 +130,44 @@ int main()
         }
         if (!expect(out->metadata_or("payload.layout", "") == "true_class/cluster",
                 "ClusteringStats payload layout wrong")) {
+            return 1;
+        }
+    }
+
+    // --- ClusteringStats: same shape, disjoint units => error (not a silent score) ---
+    {
+        const auto labels = torch::tensor({{0, 0, 1, 1}}, torch::kLong); // [1,4], unit 1
+        const auto truth = torch::tensor({{1, 1, 0, 0}}, torch::kLong);  // [1,4], unit 0
+        leakflow::plugins::ml::ClusteringStats element;
+        const bool errored = throws([&] { (void)element.process_inputs(unit_inputs(labels, {1}, truth, {0})); });
+        if (!expect(errored, "ClusteringStats: disjoint units (matching shape) did not error")) {
+            return 1;
+        }
+    }
+
+    // --- ClusteringStats: partial unit overlap => warn and score the shared unit ---
+    {
+        const auto labels = torch::tensor({{0, 0, 1, 1}, {0, 1, 0, 1}}, torch::kLong); // [2,4], units 1,2
+        const auto truth = torch::tensor({{0, 0, 1, 1}, {1, 1, 0, 0}}, torch::kLong);  // [2,4], units 2,3
+        leakflow::plugins::ml::ClusteringStats element;
+        const auto out = element.process_inputs(unit_inputs(labels, {1, 2}, truth, {2, 3}));
+        if (!expect(out.has_value(), "ClusteringStats: partial overlap produced no output")) {
+            return 1;
+        }
+        if (!expect(out->units() == leakflow::Units::of({2}),
+                "ClusteringStats: partial overlap did not restrict to the shared unit")) {
+            return 1;
+        }
+    }
+
+    // --- ClusteringStats: identical units => score all, carry them onto the output ---
+    {
+        const auto labels = torch::tensor({{0, 0, 1, 1}, {0, 1, 0, 1}}, torch::kLong); // [2,4], units 0,1
+        const auto truth = torch::tensor({{0, 0, 1, 1}, {0, 1, 0, 1}}, torch::kLong);  // [2,4], units 0,1
+        leakflow::plugins::ml::ClusteringStats element;
+        const auto out = element.process_inputs(unit_inputs(labels, {0, 1}, truth, {0, 1}));
+        if (!expect(out.has_value() && out->units() == leakflow::Units::of({0, 1}),
+                "ClusteringStats: aligned units were not carried onto the output")) {
             return 1;
         }
     }

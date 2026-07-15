@@ -250,15 +250,21 @@ void append_payload_field(std::vector<std::string> &lines, const SummaryField &f
         return {};
     }
 
-    SummarySection section("Payload");
-    buffer.payload()->describe(section, log::summary_level());
-
+    // Render Buffer::describe()'s Payload section (not payload->describe() directly)
+    // so buffer-owned facts -- notably the leading-axis units -- appear here too, and
+    // the --graph panel matches the Summary output.
+    const auto document = buffer.describe(log::summary_level());
     std::vector<std::string> lines;
-    for (const auto &field : section.fields) {
-        if (field.label == "payload") {
+    for (const auto &section : document.sections) {
+        if (section.title != "Payload") {
             continue;
         }
-        append_payload_field(lines, field, 0);
+        for (const auto &field : section.fields) {
+            if (field.label == "payload") {
+                continue;
+            }
+            append_payload_field(lines, field, 0);
+        }
     }
     return lines;
 }

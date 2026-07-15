@@ -74,7 +74,7 @@ int main()
         leakflow::Buffer b2{leakflow::Caps(leakflow::plugins::crypto::correlation_poi_caps_type)};
         b2.set_payload(p2);
         leakflow::plugins::crypto::CorrelationPoiToIndexes filtered;
-        filtered.set_property("units", leakflow::IntList{1});
+        filtered.set_property("units", leakflow::Units::of({1}));
         const auto out2 = filtered.process(std::move(b2));
         const auto idx2 = out2->payload_as<leakflow::base::TorchTensorPayload>()->tensor();
         const auto want = torch::tensor({{30, 31, 32, 40, 41, 42}}, torch::kLong);

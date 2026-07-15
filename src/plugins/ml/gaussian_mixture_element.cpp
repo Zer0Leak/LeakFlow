@@ -230,6 +230,8 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
     auto label_payload = leakflow::base::TorchTensorPayload(labels);
     Buffer output{label_payload.caps()};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "features", name());
+    // Clustering is per unit, so the labels keep the input's unit identity.
+    output.set_units(input->units());
     output.set_metadata("payload.cluster.method", "gaussian-mixture");
     output.set_metadata("payload.cluster.n_components", std::to_string(options.n_components));
     output.set_metadata("payload.cluster.covariance_type",

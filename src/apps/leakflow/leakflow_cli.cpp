@@ -1509,6 +1509,8 @@ PropertyValue parse_property_value(const PropertySpec &spec, std::string_view te
                     values.push_back(parse_string_token(item));
                 }
                 return values;
+            } else if constexpr (std::is_same_v<Value, Units>) {
+                return leakflow::Units::parse(text);
             } else if constexpr (std::is_same_v<Value, Color>) {
                 auto color = parse_color(parse_string_token(text));
                 if (!color) {

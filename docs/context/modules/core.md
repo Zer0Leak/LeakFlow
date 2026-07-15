@@ -28,9 +28,14 @@ Tests:
 ## Current Core API
 
 - `Caps`: lightweight type plus deterministic string parameters.
-- `Buffer`: caps, metadata, and optional shared payload.
+- `Buffer`: caps, metadata, optional shared payload, vector-clock provenance, and units.
 - `Payload`: polymorphic data body with `type_name()`, a required non-empty
   logical `layout()`, and optional `describe(...)`.
+- `Units` (`units.hpp`): which unit each row of the payload's leading axis is (AES
+  byte, Kyber coefficient) — `none` / a `range` / an explicit set, with one grammar
+  (`none` / `[0]` / `[0:16]` / `[0,1,4:7]`, upper bound exclusive) for the property
+  input and the display. A typed, immutable value on `Buffer::units()`; a per-unit
+  fusion aligns its inputs on it before comparing.
 - `Element`: lifecycle, pads, properties, and `process(optional<Buffer>)`.
 - `Element` always has a writable string `name` property synchronized with
   `Element::name()`.

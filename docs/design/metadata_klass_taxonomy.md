@@ -194,6 +194,32 @@ rewrites a capture key it owns (for example a `Resample` brick updating
 `sample_rate_hz`). The mechanism for declaring such own-overrides will be added
 when the signal-processing bricks are built.
 
+### Units travel as a typed field, not metadata
+
+Some facts are structural, not descriptive: which unit each row of a tensor's
+leading axis is -- which AES byte or Kyber coefficient -- must stay consistent with
+the tensor and survive every reframe. Metadata cannot carry this safely. A
+`unit`-style key resolves to the **Payload** group (its leading token is not
+`capture`/`origin`/`routing`), so the Analyze profile and Reference pads drop it
+exactly where a fusion needs it. So units live in a typed, immutable `Buffer` value
+member, `units` (a `Units`), set by the producing element next to the payload and
+copied per branch on a `Tee` -- the same envelope treatment as provenance. `Units`
+is one of **none** (no unit axis), a **range** `[start,start+count)` (a single unit,
+a contiguous run, or the whole axis materialised from `size(0)`), or an **explicit**
+row-ordered set; one grammar (`none` / `[0]` / `[0:16]` / `[0,1,4:7]`, second number
+exclusive) serves both the property input and the display. "Unit" is a first-class
+framework concept here -- both crypto (AES bytes) and ml (the GMM's leading batch
+axis) use it -- so it lives in core rather than as domain-only vocabulary. (A
+separate future `axis_labels` concept is reserved for plot-axis labelling.)
+
+A fusion that combines two unit-bearing inputs aligns on it with the core
+`align_labels` helper: **disjoint units are an error** (the comparison is
+undefined), a **partial overlap warns** and scores the shared units, and
+**identical units** score in full. Shape equality alone is necessary but not
+sufficient -- two size-1 unit axes can still be different units.
+`ClusteringStats` is the first consumer; other per-unit fusions (CPA, template
+attacks) use the same helper.
+
 ## 5. Caps and payload model
 
 Caps stay **general**; generality is set by the most generic *consumer*, not by

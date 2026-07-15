@@ -35,3 +35,18 @@ set_target_properties(leakflow_pipeline_expression_plot_tutorial PROPERTIES
     CXX_EXTENSIONS OFF
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
+
+add_executable(leakflow_app_src_hdf5_tutorial
+    app_src_hdf5_tutorial.cpp
+)
+target_compile_features(leakflow_app_src_hdf5_tutorial PRIVATE cxx_std_23)
+target_link_libraries(leakflow_app_src_hdf5_tutorial
+    PRIVATE
+        leakflow_cli
+        leakflow_plugins_base
+        leakflow_extras
+)
+set_target_properties(leakflow_app_src_hdf5_tutorial PROPERTIES
+    CXX_EXTENSIONS OFF
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)

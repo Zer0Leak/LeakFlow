@@ -185,5 +185,61 @@ int main()
         return 1;
     }
 
+    // Axis labels: none by default, round-trip through the setter.
+    if (!expect(buffer.units().empty(), "new buffer had axis labels")) {
+        return 1;
+    }
+    buffer.set_units(leakflow::Units::of({3, 7, 9}));
+    if (!expect(buffer.units() == leakflow::Units::of({3, 7, 9}), "axis labels did not round-trip")) {
+        return 1;
+    }
+
+    // align_labels: shared labels + each input's positions, matched by value so the
+    // two inputs may list the shared labels in different orders.
+    {
+        const auto alignment = leakflow::align_labels({1, 2, 3}, {3, 2, 5});
+        if (!expect(alignment.shared == std::vector<std::int64_t>{2, 3}, "align_labels shared set wrong")) {
+            return 1;
+        }
+        if (!expect(alignment.a_indices == std::vector<std::int64_t>{1, 2}
+                    && alignment.b_indices == std::vector<std::int64_t>{1, 0},
+                "align_labels positions wrong")) {
+            return 1;
+        }
+        if (!expect(!alignment.identical, "align_labels wrongly reported identical")) {
+            return 1;
+        }
+    }
+    if (!expect(leakflow::align_labels({0, 1}, {0, 1}).identical, "align_labels missed an identical match")) {
+        return 1;
+    }
+    if (!expect(leakflow::align_labels({1}, {0}).shared.empty(), "align_labels found a phantom shared label")) {
+        return 1;
+    }
+
+    // describe(): leading-axis labels print in the Payload section as a bracketed
+    // list named by the pluralised layout axis ("item" -> "items"; "unit" -> "units"
+    // in the SCA layers).
+    {
+        leakflow::Buffer described(leakflow::Caps("sca/test"));
+        described.set_payload(std::make_shared<TestPayload>("v"));
+        described.set_units(leakflow::Units::of({5, 8}));
+        const auto document = described.describe(2);
+        bool printed = false;
+        for (const auto& section : document.sections) {
+            if (section.title != "Payload") {
+                continue;
+            }
+            for (const auto& field : section.fields) {
+                if (field.label == "items" && field.value.text == "[5,8]") {
+                    printed = true;
+                }
+            }
+        }
+        if (!expect(printed, "describe did not print leading-axis labels in the Payload section")) {
+            return 1;
+        }
+    }
+
     return 0;
 }

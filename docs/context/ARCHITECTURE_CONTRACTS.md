@@ -39,7 +39,7 @@ compact context version for day-to-day development.
 The pipeline is `Buffer`-centric:
 
 ```text
-Buffer = Caps + metadata + zero-or-one Payload + vector-clock provenance
+Buffer = Caps + metadata + zero-or-one Payload + vector-clock provenance + units
 ```
 
 Every routed buffer carries a **vector clock** (`Buffer::provenance()`, Phase 27):
@@ -47,6 +47,16 @@ a dense per-element production-count vector the executor stamps as it routes.
 Joins fold-and-match these clocks (`merge_provenance`) so branches that reconverge
 are verified to share a generation; a conflict is a desync. This replaced the
 removed `Buffer::epoch()`. See `docs/design/dataflow_sync_model.md`.
+
+A buffer also carries **units** (`Buffer::units()`, a `Units`): which unit each row
+of the payload's leading axis is (AES byte, Kyber coefficient). It is a typed,
+immutable value on the envelope — not metadata, which the Analyze profile would drop
+— set by the producing element next to the payload and copied per branch on a `Tee`.
+`Units` is `none` / a `range` / an explicit set, with one grammar (`none` / `[0]` /
+`[0:16]` / `[0,1,4:7]`, upper bound exclusive) shared by the property input and the
+display. A per-unit fusion (e.g. `ClusteringStats`) aligns its inputs on units before
+comparing: disjoint units are an error, a partial overlap warns and scores the shared
+units. See `docs/design/metadata_klass_taxonomy.md`.
 
 A payload may internally be a bundle or batch.
 
@@ -158,7 +168,11 @@ before stamping their own keys:
 - PassThrough copies capture + origin + payload (drops routing).
 - Reframe copies capture + origin (drops payload + routing).
 - Analyze unions capture (a conflicting value across inputs is an error),
-  relabels origin as `origin.<pad>.<key>`, and drops payload + routing.
+  relabels origin as `origin.<pad>.<key>`, and drops payload + routing. A
+  `Reference` input pad is excluded from the capture union — a parameter carried
+  from another experiment (e.g. `PoiCorrelation` applying profiling PoIs to attack
+  traces), whose facts forward as provenance `origin.<pad>.*` instead of colliding
+  with the output's own capture identity.
 
 An Analyze element may additionally re-own a curated subset of payload facts it
 asserts about its output (for example `PoiSelect` keeps the target model's

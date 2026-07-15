@@ -1,5 +1,6 @@
 #pragma once
 
+#include "leakflow/core/units.hpp"
 #include "leakflow/core/caps.hpp"
 #include "leakflow/core/payload.hpp"
 #include "leakflow/core/summary_document.hpp"
@@ -41,6 +42,14 @@ public:
     [[nodiscard]] const std::vector<std::uint32_t>& provenance() const;
     void set_provenance(std::vector<std::uint32_t> provenance);
 
+    // The units the payload's leading axis carries -- which unit each row is (see
+    // Units: none / range / explicit). An immutable value member, copied per buffer on
+    // a Tee fan-out, set by the producing element alongside the payload so a later
+    // fusion can verify two inputs describe the same units, not merely the same shape.
+    // A first-class framework concept, so it lives on the buffer, not inside the payload.
+    [[nodiscard]] const Units& units() const;
+    void set_units(Units units);
+
     [[nodiscard]] SummaryDocument describe(std::int64_t summary_level) const;
 
     template <typename T>
@@ -64,6 +73,21 @@ private:
     std::map<std::string, std::string> metadata_;
     std::shared_ptr<Payload> payload_;
     std::vector<std::uint32_t> provenance_;
+    Units units_;
 };
+
+// Alignment of two leading-axis label vectors by value: the labels they share and
+// the axis-0 positions of each shared label in each input, so a caller can
+// index_select both down to a common leading axis. `shared` is in `a` order.
+// `identical` is true when a and b are the same labels in the same order (the fast
+// path, no reindex needed). A domain fusion reads this as "the shared units".
+struct LabelAlignment {
+    std::vector<std::int64_t> shared;
+    std::vector<std::int64_t> a_indices;
+    std::vector<std::int64_t> b_indices;
+    bool identical = false;
+};
+
+[[nodiscard]] LabelAlignment align_labels(const std::vector<std::int64_t>& a, const std::vector<std::int64_t>& b);
 
 } // namespace leakflow

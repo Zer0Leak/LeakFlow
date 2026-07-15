@@ -360,6 +360,8 @@ std::string property_value_type_name(const PropertyValue& value)
                 return "double list";
             } else if constexpr (std::is_same_v<Value, StringList>) {
                 return "string list";
+            } else if constexpr (std::is_same_v<Value, Units>) {
+                return "units";
             } else if constexpr (std::is_same_v<Value, Color>) {
                 return "color";
             } else if constexpr (std::is_same_v<Value, std::monostate>) {
@@ -392,6 +394,8 @@ std::string property_value_to_string(const PropertyValue& value)
                 || std::is_same_v<Value, DoubleList>
                 || std::is_same_v<Value, StringList>) {
                 append_list(output, typed_value);
+            } else if constexpr (std::is_same_v<Value, Units>) {
+                return typed_value.format();
             } else if constexpr (std::is_same_v<Value, Color>) {
                 return color_to_string(typed_value);
             } else if constexpr (std::is_same_v<Value, std::monostate>) {
