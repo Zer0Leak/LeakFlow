@@ -1001,13 +1001,8 @@ void draw_list_editor(PipelineControlRuntime &runtime, const Element &element, c
     }
 
     try {
-        if (std::holds_alternative<IntList>(value)) {
-            commit_text_property(runtime, element, spec, key, parse_integer_list(state.text));
-        } else if (std::holds_alternative<DoubleList>(value)) {
-            commit_text_property(runtime, element, spec, key, parse_double_list(state.text));
-        } else if (std::holds_alternative<StringList>(value)) {
-            commit_text_property(runtime, element, spec, key, parse_string_list(state.text));
-        }
+        commit_text_property(runtime, element, spec, key,
+                             parse_control_text_value(value, state.text));
     } catch (const std::exception &error) {
         runtime.set_last_error(error.what());
     }
@@ -1332,6 +1327,23 @@ void apply_telemetry_change_to_topology(PipelineTopologySnapshot &topology,
 }
 
 } // namespace
+
+PropertyValue parse_control_text_value(const PropertyValue &current_value,
+                                       std::string_view text) {
+    if (std::holds_alternative<IntList>(current_value)) {
+        return parse_integer_list(text);
+    }
+    if (std::holds_alternative<DoubleList>(current_value)) {
+        return parse_double_list(text);
+    }
+    if (std::holds_alternative<StringList>(current_value)) {
+        return parse_string_list(text);
+    }
+    if (std::holds_alternative<Units>(current_value)) {
+        return Units::parse(text);
+    }
+    throw std::invalid_argument("property type is not editable as list text");
+}
 
 void PipelineGraphRuntime::observe(const PipelineEvent &event) {
     const auto lock = std::scoped_lock(pending_mutex_);
@@ -2704,15 +2716,20 @@ std::optional<Buffer> run_pipeline_graph_until_closed(PipelineSession &session, 
             session.set_state(PipelineSessionState::Stopped);
 
             while (!token.stop_requested()) {
-                // ---- Stopped: wait for Start; edits only stage (no cache) ----
+                // ---- Stopped: apply queued edits before observing Start. ----
+                //
+                // The UI can submit a property edit and a Start request in the
+                // same worker polling interval. Drain first so the first sweep
+                // sees the edited value instead of the construction default.
+                // Manual-mode edits remain in staged_ until Apply is requested.
+                {
+                    const std::lock_guard<std::mutex> lock(element_mutex);
+                    (void)session.drain_commands();
+                }
                 if (!start_pending) {
                     start_pending = control_runtime.take_start_request();
                 }
                 if (!start_pending) {
-                    {
-                        const std::lock_guard<std::mutex> lock(element_mutex);
-                        (void)session.drain_commands();
-                    }
                     std::this_thread::sleep_for(8ms);
                     continue;
                 }

@@ -52,6 +52,7 @@ public:
                                             }));
         add_property(leakflow::PropertySpec("mode", std::string("a"), "test mode", "",
                                             leakflow::StringEnumConstraint{{"a", "b"}}));
+        add_property(leakflow::PropertySpec("units", leakflow::Units::none(), "test units"));
     }
 
     std::optional<leakflow::Buffer> process(std::optional<leakflow::Buffer> input) override { return input; }
@@ -349,8 +350,25 @@ int main() {
         return 1;
     }
 
+    const auto parsed_units = leakflow::plot::parse_control_text_value(
+        leakflow::Units::none(), "[0,1]");
+    const auto *units = std::get_if<leakflow::Units>(&parsed_units);
+    if (!expect(units != nullptr && *units == leakflow::Units::of({0, 1}),
+                "control text did not parse [0,1] as two units")) {
+        return 1;
+    }
+    if (!expect(controls.set_property("control", "units", parsed_units),
+                "control runtime did not set units property")) {
+        return 1;
+    }
+    if (!expect(control_element->property_as<leakflow::Units>("units")
+                    == std::optional<leakflow::Units>{leakflow::Units::of({0, 1})},
+                "control runtime units property did not reach element")) {
+        return 1;
+    }
+
     const auto changes = controls.take_changes();
-    if (!expect(changes.size() == 3, "control runtime did not record property changes")) {
+    if (!expect(changes.size() == 4, "control runtime did not record property changes")) {
         return 1;
     }
     if (!expect(changes[1].element_name == "control" && changes[1].property_name == "count" &&

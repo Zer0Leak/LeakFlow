@@ -35,6 +35,12 @@ namespace leakflow::plot {
 // with Paused and Stopped.
 [[nodiscard]] bool progress_animation_enabled(PipelineSessionState state) noexcept;
 
+// Parse the text representation used by generated list-like property controls.
+// The current value selects the target PropertyValue type. Throws when that type
+// is not text-editable or when a typed list contains an invalid value.
+[[nodiscard]] PropertyValue parse_control_text_value(const PropertyValue &current_value,
+                                                     std::string_view text);
+
 class PipelineGraphRuntime final : public PipelineObserver {
 public:
     // Latest estimated progress of a long-running element (from ProgressReported events). Kept
