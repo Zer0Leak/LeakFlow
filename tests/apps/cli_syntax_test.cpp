@@ -2,6 +2,7 @@
 #include "leakflow/log/logger.hpp"
 #include "leakflow/plugins/core/descriptor_catalog.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <optional>
@@ -446,6 +447,32 @@ int main()
     }
     if (!expect(built.plot_runtime != nullptr, "built-in expression result did not retain PlotRuntime")) {
         return 1;
+    }
+
+    // The ML-to-plot bridge is registered by the built-in CLI factory with the
+    // shared PlotRuntime. Build only (do not run) so this remains a headless
+    // factory/linkage test and never opens a GUI window.
+    {
+        auto clustering_table = leakflow::cli::build_builtin_pipeline_from_expression(
+            "ClusteringEvaluate@evaluation; "
+            "ClusteringMetricsTablePlot@metrics(update_mode=append); "
+            "@evaluation.evaluation{payload.parameter.dataset=fixture} ! @metrics.sink");
+        if (!expect(clustering_table.pipeline.elements_by_type("ClusteringMetricsTablePlot").size() == 1,
+                "built-in factory did not create ClusteringMetricsTablePlot")) {
+            return 1;
+        }
+        if (!expect(clustering_table.plot_runtime != nullptr && clustering_table.plot_runtime->views().size() > 1,
+                "ML plot factory did not retain a registered shared PlotView")) {
+            return 1;
+        }
+        const auto& links = clustering_table.pipeline.links();
+        const auto linked = std::ranges::any_of(links, [](const auto& link) {
+            return link.source_element->name() == "evaluation" && link.source_pad_name == "evaluation"
+                && link.sink_element->name() == "metrics" && link.sink_pad_name == "sink";
+        });
+        if (!expect(linked, "ClusteringEvaluate was not wired to the table bridge")) {
+            return 1;
+        }
     }
 
     // Creation-with-pad: `Sync@s.in_0` creates and addresses an (on-request) input

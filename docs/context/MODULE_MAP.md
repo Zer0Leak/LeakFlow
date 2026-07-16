@@ -45,9 +45,8 @@ leakflow_plugins_crypto + leakflow_plot
   -> leakflow_cli
   -> leakflow
 
-PLANNED after the clustering-evaluation payload contract is implemented:
 leakflow_plugins_ml + leakflow_plot
-  -> leakflow_plugins_ml_plot       (evaluation payload -> domain-free views)
+  -> leakflow_plugins_ml_plot       (evaluation payload -> generic TableView)
   -> leakflow_cli
   -> leakflow
 
@@ -91,7 +90,7 @@ Buffer Persistence contract in `ARCHITECTURE_CONTRACTS.md`.
 | Plot / graph UI | `leakflow_plot` | `include/leakflow/plot` | `src/plot` | focused non-visual tests only | `docs/context/modules/plot.md` |
 | Plot plugins | `leakflow_plugins_plot` | `include/leakflow/plugins/plot` | `src/plugins/plot` | `tests/plugins/plot` plus manual GUI checks | `docs/context/modules/plot.md` |
 | Crypto plot plugins | `leakflow_plugins_crypto_plot` | `include/leakflow/plugins/crypto_plot` | `src/plugins/crypto_plot` | `tests/plugins/crypto_plot` plus manual GUI checks | `docs/context/modules/plot.md` |
-| ML plot plugins (planned) | `leakflow_plugins_ml_plot` | `include/leakflow/plugins/ml_plot` | `src/plugins/ml_plot` | `tests/plugins/ml_plot` plus manual GUI checks | `docs/context/modules/ml.md` + `docs/context/modules/plot.md` |
+| ML table plot bridge | `leakflow_plugins_ml_plot` | `include/leakflow/plugins/ml_plot` | `src/plugins/ml_plot` | `tests/plugins/ml_plot` plus manual GUI checks | `docs/context/modules/ml.md` + `docs/context/modules/plot.md` |
 | Apps / CLI | `leakflow`, `leakflow-ls`, `leakflow_cli` | `src/apps/leakflow/leakflow_cli.hpp` | `src/apps/{common,leakflow,leakflow_ls,cuda_smoke}` | `tests/apps` | relevant plugin/module context |
 | Torch debug | `leakflow_torch_debug` | `include/leakflow/debug` | `src/debug` | none (dev-only) | this row + `.vscode/launch.json`, `torch_lldb.py` |
 | GUI | none yet | none yet | none yet | none yet | `docs/context/modules/gui.md` |
@@ -139,9 +138,14 @@ Keep target configuration target-based.
 - `tests/plugins/extras`: HDF5 and NumPy extras plugin elements.
 - `tests/plugins/crypto`: AES leakage, Pearson PoI, annotation conversion, and the
   Phase 26 AES PoI numeric correctness test.
-- `tests/plugins/ml`: feature selection, Gaussian mixture wrapping, unit
-  propagation/alignment, and current clustering stats.
+- `tests/plugins/ml`: feature selection, Gaussian mixture wrapping,
+  `ClusteringEvaluate`, payload summaries/parameters, unit alignment, and legacy
+  clustering stats.
+- `tests/plugins/ml_plot`: structured clustering-result-to-`TableView`
+  translation, replace/append, captured parameters, and no-recomputation
+  behavior.
 - Plot GUI/window behavior is manual-only; `tests/plugins/plot` covers
-  non-visual snapshot, graph-runtime, and descriptor behavior.
+  non-visual snapshot, generic table sorting/update/clear, graph-runtime, and
+  descriptor behavior.
 - `tests/fixtures/aes`: deterministic AES `.h5` dataset fixture plus focused
   legacy `.pt` fixtures.

@@ -452,10 +452,12 @@ Notes:
 ### Compare PoI Transfer And GMM Clusters
 
 This extended version selects the profiling PoIs, extracts those columns from
-the attack traces, clusters them with an 81-component GMM, and compares the
-clusters against the true `(HW(m), HW(y))` classes. The same selected PoIs are
-also re-correlated on the attack traces and shown beside the profiling scores.
-One `Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
+the attack traces, clusters them with an 81-component GMM, and evaluates the
+clusters directly against the vector truth `(HW(m), HW(y))`. The structured
+metrics, effective evaluator options, and captured GMM parameters are shown in
+a sortable comparison table. The same selected PoIs are also re-correlated on
+the attack traces and shown beside the profiling scores. One `Hdf5FileSrc`
+supplies aligned traces, plaintexts, and the fixed key.
 
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
@@ -463,18 +465,17 @@ leakflow --log-level warning run --graph \
   "BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[50],rank_by=[abs]); \
    Tee@poi_tee; \
-   CorrelationPoiToIndexes@poi2idx; \
+   CorrelationPoiToIndexes@poi2idx(units=[0]); \
    Hdf5FileSrc@data(path=$A); \
    Tee@trace_tee; \
    FeatureSelect@featsel; \
    AesLeakage@leakage(channels=[HW(m),HW(y)],units=[0]); \
    Tee@leak_tee; \
-   HwClass@hwclass; \
    PoiCorrelation@poicorr; \
-   PoiTablePlot@tbl(title=\"Profiling vs attack PoIs - key_05\",reference_label=profiling,current_label=attack,precision=3); \
+   PoiTablePlot@tbl(title=\"Profiling vs attack PoIs\",reference_label=profiling,current_label=attack,precision=3); \
    GaussianMixture@gmm(n_components=81,covariance_type=full,n_init=1,max_iter=100,seed=0); \
-   ClusteringStats@stats; \
-   HeatmapPlot@heatmap(title=\"GMM vs true (hm,hy) - key_05\",normalize=row,row_label=\"true class\",col_label=cluster); \
+   ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,combined_quality=true); \
+   ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=append); \
    @corr_src ! @poi ! @poi_tee; \
    @poi_tee.src_0 ! @tbl.reference; \
    @poi_tee.src_1 ! @poi2idx ! @featsel.indexes; \
@@ -486,23 +487,40 @@ leakflow --log-level warning run --graph \
    @data.plaintexts ! @leakage.plaintexts; \
    @data.keys ! @leakage.keys; \
    @leakage ! @leak_tee; \
-   @leak_tee.src_0 ! @hwclass ! @stats.truth; \
+   @leak_tee.src_0 ! @eval.truth; \
    @leak_tee.src_1 ! @poicorr.targets; \
-   @featsel ! @gmm ! @stats.labels; \
+   @featsel ! @gmm ! @eval.labels; \
    @poicorr ! @tbl.current; \
-   @stats ! @heatmap"
+   @eval.evaluation{payload.parameter.dataset=key_01} ! @metrics.sink"
 ```
 
-The GMM `labels` (via `FeatureSelect` → `GaussianMixture`) and the truth (via
-`AesLeakage` → `HwClass`) must describe the **same units**. `ClusteringStats` aligns
+The GMM `labels` (via `FeatureSelect` → `GaussianMixture`) and the vector truth
+(via `AesLeakage`) must describe the **same units**. `ClusteringEvaluate` aligns
 them by unit id, so `CorrelationPoiToIndexes(units=[...])` and
 `AesLeakage(units=[...])` need to name the same bytes: disjoint units are an
 error (*"labels and truth share no units"*), and a partial overlap warns and scores
 only the shared units. Match them — both `[0]`, or both left at the full range — for
-a meaningful heatmap. The units each buffer carries show as `units=[…]` in a
+a meaningful comparison. The units each buffer carries show as `units=[…]` in a
 `Summary` and in the `--graph` buffer inspector.
 
+`update_mode=append` keeps each re-evaluation as additional table rows, which is
+useful when changing `GaussianMixture` parameters such as `covariance_type` or
+`n_components` while Idle. Use `update_mode=replace` to keep only the newest
+evaluation. Click any table header to sort ascending or descending; use the
+table's **Clear** button to remove that plotter's rows without clearing other
+plot views. Effective evaluator options come from the structured payload. The
+GMM parameters explicitly captured from the labels buffer's
+`payload.cluster.*` metadata are `method`, `n_components`, `covariance_type`,
+and `converged`; explicit experiment parameters can be stamped on the evaluation
+buffer as `payload.parameter.*` metadata. The table keeps the sources
+collision-proof as
+`parameter.payload.<name>` and `parameter.metadata.<name>` columns. Stamp an
+experiment parameter on `@eval.evaluation` (or its outgoing link), as the graph
+does above; do not expect `payload.parameter.*` on labels/truth to pass through
+the evaluator's Analyze-boundary metadata forwarding. If `A` selects another
+dataset, update the example `payload.parameter.dataset=key_01` stamp too.
+
 `out/key05_sub.h5` is only an example subset path; point `A` at an existing
-HDF5 file. Alternatively, keep the full `key_05.h5` path and add
+HDF5 file. Alternatively, keep the selected full key file and add
 `row_count=1000` to `Hdf5FileSrc@data` for a quicker interactive run without
 creating another file.

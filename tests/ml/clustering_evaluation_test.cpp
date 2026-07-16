@@ -119,15 +119,14 @@ int main() {
   {
     const auto exact_descriptors = exact_clustering_metric_descriptors();
     const auto descriptors = clustering_metric_descriptors();
-    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 27,
+    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 28,
                 "descriptors: wrong exact metric count")) {
       return 1;
     }
     if (!expect(exact_descriptors.front().name == "adjusted_rand_index" &&
                     exact_descriptors.back().name ==
                         "normalized_mutual_information" &&
-                    descriptors.back().name ==
-                        "semantic_alignment_dimension_error",
+                    descriptors.back().name == "combined_quality",
                 "descriptors: names/order wrong")) {
       return 1;
     }
@@ -145,6 +144,8 @@ int main() {
         clustering_metric_descriptor(ClusteringMetricId::FragmentationMacro);
     const auto &alignment = clustering_metric_descriptor(
         ClusteringMetricId::ExactAlignmentJaccardPerGroup);
+    const auto &combined =
+        clustering_metric_descriptor(ClusteringMetricId::CombinedQuality);
     if (!expect(semantic.family == MetricFamily::Semantic &&
                     semantic.direction == MetricDirection::LowerIsBetter &&
                     semantic.averaging == MetricAveraging::PerDimension &&
@@ -153,8 +154,79 @@ int main() {
                     fragmentation.averaging == MetricAveraging::Macro &&
                     alignment.family == MetricFamily::Alignment &&
                     alignment.direction == MetricDirection::HigherIsBetter &&
-                    alignment.averaging == MetricAveraging::PerGroup,
-                "descriptors: A2/A3 metadata wrong")) {
+                    alignment.averaging == MetricAveraging::PerGroup &&
+                    combined.family == MetricFamily::Combined &&
+                    combined.direction == MetricDirection::HigherIsBetter &&
+                    combined.averaging == MetricAveraging::Micro,
+                "descriptors: A2/A3/A4 metadata wrong")) {
+      return 1;
+    }
+    if (!expect(metric_family_name(MetricFamily::Exact) == "exact" &&
+                    metric_family_name(MetricFamily::Semantic) == "semantic" &&
+                    metric_family_name(MetricFamily::Fragmentation) ==
+                        "fragmentation" &&
+                    metric_family_name(MetricFamily::Alignment) ==
+                        "alignment" &&
+                    metric_family_name(MetricFamily::Combined) == "combined" &&
+                    metric_direction_name(MetricDirection::HigherIsBetter) ==
+                        "higher_is_better" &&
+                    metric_direction_name(MetricDirection::LowerIsBetter) ==
+                        "lower_is_better" &&
+                    metric_averaging_name(MetricAveraging::None) == "none" &&
+                    metric_averaging_name(MetricAveraging::Micro) == "micro" &&
+                    metric_averaging_name(MetricAveraging::Macro) == "macro" &&
+                    metric_averaging_name(MetricAveraging::PerCluster) ==
+                        "per_cluster" &&
+                    metric_averaging_name(MetricAveraging::PerGroup) ==
+                        "per_group" &&
+                    metric_averaging_name(MetricAveraging::PerDimension) ==
+                        "per_dimension" &&
+                    metric_undefined_reason_name(MetricUndefinedReason::None) ==
+                        "none" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoPredictedWithinClusterPairs) ==
+                        "no_predicted_within_cluster_pairs" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoTrueWithinGroupPairs) ==
+                        "no_true_within_group_pairs" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::DependentMetricUndefined) ==
+                        "dependent_metric_undefined" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::SemanticDisabled) ==
+                        "semantic_disabled" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoEligiblePredictedClusters) ==
+                        "no_eligible_predicted_clusters" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoMergeErrorPairs) ==
+                        "no_merge_error_pairs" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoEligibleTruthGroups) ==
+                        "no_eligible_truth_groups" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoMatchedPredictedCluster) ==
+                        "no_matched_predicted_cluster",
+                "descriptors: enum names wrong")) {
+      return 1;
+    }
+    if (!expect(throws_invalid_argument([] {
+                  static_cast<void>(
+                      metric_family_name(static_cast<MetricFamily>(99)));
+                }) &&
+                    throws_invalid_argument([] {
+                      static_cast<void>(metric_direction_name(
+                          static_cast<MetricDirection>(99)));
+                    }) &&
+                    throws_invalid_argument([] {
+                      static_cast<void>(metric_averaging_name(
+                          static_cast<MetricAveraging>(99)));
+                    }) &&
+                    throws_invalid_argument([] {
+                      static_cast<void>(metric_undefined_reason_name(
+                          static_cast<MetricUndefinedReason>(99)));
+                    }),
+                "descriptors: invalid enum names accepted")) {
       return 1;
     }
   }
@@ -173,7 +245,7 @@ int main() {
     const auto result = evaluate_clustering(predicted, truth, options);
     const auto &unit = only_unit(result);
 
-    if (!expect(result.schema_version == 3 && !result.batched &&
+    if (!expect(result.schema_version == 4 && !result.batched &&
                     result.observation_count == 6 &&
                     result.semantic_dimension_count == 2 &&
                     result.effective_options.detail == options.detail &&
@@ -181,6 +253,8 @@ int main() {
                         options.dimension_names &&
                     result.effective_options.alignment ==
                         AlignmentEvaluationMode::None &&
+                    !result.effective_options.combined_quality &&
+                    !unit.combined_quality.has_value() &&
                     !unit.alignment_identities.has_value() &&
                     !unit.exact_alignment.has_value() &&
                     !unit.semantic_alignment.has_value() &&
@@ -705,6 +779,116 @@ int main() {
                       "A2 p2: cluster 0 impurity") ||
         !metric_close(squared.cluster_details->at(1).impurity, 1.0 / 8.0,
                       "A2 p2: cluster 1 impurity")) {
+      return 1;
+    }
+  }
+
+  // A4 optional combined quality uses the harmonic mean of semantic cohesion
+  // C=1-I_micro and pair preservation G=1-F_micro. Source records keep their
+  // original pair supports beside the observation-supported derived score.
+  {
+    const auto truth = torch::tensor(
+        {{0, 0}, {0, 0}, {0, 0}, {1, 0}, {1, 0}, {0, 2}}, torch::kLong);
+    const auto predicted =
+        torch::tensor({10, 10, 20, 10, 20, 10}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {2.0, 4.0};
+    options.semantic_weights = {1.0, 1.0};
+    options.power = 1;
+    options.combined_quality = true;
+    const auto result = evaluate_clustering(predicted, truth, options);
+    const auto &unit = only_unit(result);
+    if (!expect(result.effective_options.combined_quality &&
+                    unit.combined_quality.has_value(),
+                "A4 combined: requested record missing")) {
+      return 1;
+    }
+    const auto &combined = *unit.combined_quality;
+    if (!metric_close(combined.quality, 3.0 / 8.0, "A4 combined p1: quality") ||
+        !metric_close(combined.semantic_micro_impurity, 1.0 / 4.0,
+                      "A4 combined p1: semantic source") ||
+        !metric_close(combined.fragmentation_micro, 3.0 / 4.0,
+                      "A4 combined p1: fragmentation source") ||
+        !expect(combined.quality.metric ==
+                        ClusteringMetricId::CombinedQuality &&
+                    combined.quality.support_count == 6 &&
+                    combined.semantic_micro_impurity.metric ==
+                        ClusteringMetricId::SemanticImpurityMicro &&
+                    combined.semantic_micro_impurity.support_count == 7 &&
+                    combined.fragmentation_micro.metric ==
+                        ClusteringMetricId::FragmentationMicro &&
+                    combined.fragmentation_micro.support_count == 4,
+                "A4 combined p1: metric IDs/supports wrong")) {
+      return 1;
+    }
+
+    options.power = 2;
+    const auto squared_unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto &squared = *squared_unit.combined_quality;
+    if (!metric_close(squared.quality, 7.0 / 18.0, "A4 combined p2: quality") ||
+        !metric_close(squared.semantic_micro_impurity, 1.0 / 8.0,
+                      "A4 combined p2: semantic source") ||
+        !metric_close(squared.fragmentation_micro, 3.0 / 4.0,
+                      "A4 combined p2: fragmentation source")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions scalar_options;
+    scalar_options.semantic = SemanticEvaluationMode::Power;
+    scalar_options.semantic_ranges = {1.0};
+    scalar_options.power = 1;
+    scalar_options.combined_quality = true;
+    const auto zero_unit = only_unit(
+        evaluate_clustering(torch::tensor({0, 1, 0, 1}, torch::kLong),
+                            scalar_truth({0, 0, 1, 1}), scalar_options));
+    const auto &zero = *zero_unit.combined_quality;
+    if (!metric_close(zero.semantic_micro_impurity, 1.0,
+                      "A4 combined zero: semantic source") ||
+        !metric_close(zero.fragmentation_micro, 1.0,
+                      "A4 combined zero: fragmentation source") ||
+        !metric_close(zero.quality, 0.0, "A4 combined zero: quality")) {
+      return 1;
+    }
+
+    const auto perfect_unit = only_unit(
+        evaluate_clustering(torch::tensor({9, 9, -2, -2}, torch::kLong),
+                            scalar_truth({0, 0, 1, 1}), scalar_options));
+    const auto &perfect = *perfect_unit.combined_quality;
+    if (!metric_close(perfect.quality, 1.0, "A4 combined perfect: quality")) {
+      return 1;
+    }
+
+    const auto semantic_undefined_unit =
+        only_unit(evaluate_clustering(torch::tensor({0, 1, 2}, torch::kLong),
+                                      scalar_truth({0, 0, 1}), scalar_options));
+    const auto &semantic_undefined = *semantic_undefined_unit.combined_quality;
+    if (!metric_undefined(semantic_undefined.semantic_micro_impurity,
+                          MetricUndefinedReason::NoPredictedWithinClusterPairs,
+                          0, "A4 combined: semantic source undefined") ||
+        !metric_close(semantic_undefined.fragmentation_micro, 1.0,
+                      "A4 combined: defined fragmentation source") ||
+        !metric_undefined(semantic_undefined.quality,
+                          MetricUndefinedReason::DependentMetricUndefined, 3,
+                          "A4 combined: semantic dependency")) {
+      return 1;
+    }
+
+    scalar_options.semantic_ranges = {2.0};
+    const auto fragmentation_undefined_unit =
+        only_unit(evaluate_clustering(torch::zeros({3}, torch::kLong),
+                                      scalar_truth({0, 1, 2}), scalar_options));
+    const auto &fragmentation_undefined =
+        *fragmentation_undefined_unit.combined_quality;
+    if (!expect(fragmentation_undefined.semantic_micro_impurity.defined(),
+                "A4 combined: semantic source unexpectedly undefined") ||
+        !metric_undefined(fragmentation_undefined.fragmentation_micro,
+                          MetricUndefinedReason::NoTrueWithinGroupPairs, 0,
+                          "A4 combined: fragmentation source undefined") ||
+        !metric_undefined(fragmentation_undefined.quality,
+                          MetricUndefinedReason::DependentMetricUndefined, 3,
+                          "A4 combined: fragmentation dependency")) {
       return 1;
     }
   }
@@ -1668,6 +1852,16 @@ int main() {
                   "validation: semantic alignment without power accepted")) {
         return 1;
       }
+    }
+
+    ClusteringEvaluationOptions combined_without_power;
+    combined_without_power.combined_quality = true;
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, combined_without_power));
+                }),
+                "validation: combined quality without power accepted")) {
+      return 1;
     }
 
     ClusteringEvaluationOptions invalid_alignment_mode;

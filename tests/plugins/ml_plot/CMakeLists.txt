@@ -1,0 +1,10 @@
+add_executable(leakflow_plugins_ml_plot_clustering_metrics_table_plot_tests
+    clustering_metrics_table_plot_test.cpp
+)
+target_link_libraries(leakflow_plugins_ml_plot_clustering_metrics_table_plot_tests
+    PRIVATE
+        leakflow_plugins_ml_plot
+)
+leakflow_configure_test_target(leakflow_plugins_ml_plot_clustering_metrics_table_plot_tests)
+add_test(NAME leakflow_plugins_ml_plot_clustering_metrics_table_plot
+    COMMAND leakflow_plugins_ml_plot_clustering_metrics_table_plot_tests)

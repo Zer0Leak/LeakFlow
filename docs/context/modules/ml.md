@@ -10,17 +10,23 @@ AES knowledge lives here.
 - Numeric sources/tests: `src/ml`, `tests/ml`
 - Pipeline public headers: `include/leakflow/plugins/ml`
 - Pipeline sources/tests: `src/plugins/ml`, `tests/plugins/ml`
+- Table-bridge headers/sources/tests: `include/leakflow/plugins/ml_plot`,
+  `src/plugins/ml_plot`, `tests/plugins/ml_plot`
 
 ## Targets
 
 - `leakflow_ml` (links Torch only; no `leakflow_core` dependency).
 - `leakflow_plugins_ml` (wraps the numeric layer in pipeline elements/payloads).
+- `leakflow_plugins_ml_plot` (implemented in A4; links `leakflow_plugins_ml` and
+  `leakflow_plot` and translates the evaluation payload into generic
+  `TableView` data only).
 
 The pipeline **elements** that wrap these APIs live in the `leakflow_plugins_ml`
 family (klass `Analyze/Clustering/...`, `Analyze/Evaluation/Clustering`,
 `Transform/Feature/Select`). Generic `HeatmapPlot` lives in
-`leakflow_plugins_plot`; a future clustering-result plot bridge belongs in
-`leakflow_plugins_ml_plot`, not either numeric target.
+`leakflow_plugins_plot`; the A4 clustering table bridge belongs in
+`leakflow_plugins_ml_plot`, not either numeric target. Generic `MetricView` and
+clustering matrix plotting remain later work.
 
 Every payload-producing wrapper stamps the core `payload.layout` contract with
 semantic axes after attaching its Torch payload: `FeatureSelect` emits
@@ -66,7 +72,7 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   (diagonalise for plotting), and `matched_clustering_scores` (accuracy +
   per-class precision/recall/F1).
 - `clustering_evaluation.hpp`: the core-free, GMM-independent
-  `evaluate_clustering(...)` API through Phase A3. It accepts arbitrary
+  `evaluate_clustering(...)` API through completed Phase A. It accepts arbitrary
   int64-representable predicted IDs `[N]`/`[U,N]` and numeric semantic truth
   `[N,D]`/`[U,N,D]`, groups truth by exact full-vector equality, and returns a
   structured per-unit result. Current results include deterministic sparse
@@ -83,6 +89,15 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   mapping identities, deterministic predicted-major ties, unmatched marginal
   supports, exact per-group scores, semantic per-dimension errors, and
   Full-detail contingency-mass error records.
+- `ClusteringEvaluate`: pipeline wrapper with `labels` and `truth` inputs and an
+  `evaluation` output. It aligns typed unit identity carried by the input
+  `Buffer`s, emits that identity on the output `Buffer`, and produces a bounded
+  `ClusteringEvaluationPayload`. The payload stores effective `evaluation.*`
+  options plus only bounded labels-side `payload.cluster.*` producer metadata;
+  it does not own typed `Units` or copy `payload.parameter.*` metadata.
+- `ClusteringMetricsTablePlot`: ML→plot bridge with a `sink` input. It translates
+  structured results into generic `TableView` rows and adds direct
+  evaluation-buffer `payload.parameter.*` metadata without recomputation.
 
 The current pipeline `ClusteringStats` is intentionally narrower than the active
 Phase A evaluator. It accepts scalar truth IDs, emits a dense reordered confusion
@@ -104,23 +119,34 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 - **A3 done:** exact-overlap and semantic-cost rectangular alignments, including
   both rectangular directions, strict tie behavior, and fixed semantic dummy
   penalty semantics.
-- **A4 next:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
-  alignment, optional combined quality, summaries, and persistence in
-  `leakflow_plugins_ml`.
+- **A4 done:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
+  alignment, optional combined quality, bounded summaries, effective
+  `evaluation.*` options, and bounded generic `payload.cluster.*` capture only
+  from labels metadata in `leakflow_plugins_ml`; plus
+  `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. The table reuses
+  generic `TableView`, accepts
+  explicitly stamped `payload.parameter.*` metadata on its input `Buffer`, and
+  exposes collision-proof `parameter.payload.<name>` and
+  `parameter.metadata.<name>` columns. `update_mode` is
+  `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls are
+  `UiControl`. It does not introspect arbitrary upstream properties, flatten the
+  structured payload into metadata, or recompute metrics.
 - Support exact-only evaluation without ranges. Semantic mode uses an explicit
   normalized power cost with configured ranges/weights and `power=1|2` (default
   2). Keep undefined value, reason, support, direction, family, and averaging in
   every metric record.
 - Do not mutate `ClusteringStats`; it remains the legacy matrix adapter.
 
-### Phase B — Metric Visualization
+### Deferred Follow-up (Unblocked)
 
-After Phase A freezes the payload contract, add `leakflow_plugins_ml_plot`.
-Bridge elements consume the payload and fill domain-free table/metric/heatmap
-views. They select stored results and apply display normalization only; they do
-not compute metrics, assignments, or clustering labels.
+Completed A4 leaves versioned payload persistence and round-trip coverage
+unblocked but deferred. A later visual slice may add generic
+`MetricView`/`ClusteringMetricsPlot` and
+`ClusteringMatrixPlot`; those bridge elements consume stored payload results and
+apply display transformations only. They do not compute metrics, assignments,
+or clustering labels.
 
-### Planned Validation
+### Validation
 
 - A1 conventional metrics are cross-validated against checked-in scikit-learn
   fixtures, with degeneracy, symmetry, arbitrary-ID, vector/batch/dtype,
@@ -132,10 +158,14 @@ not compute metrics, assignments, or clustering labels.
   mappings that deliberately differ by objective, both powers, `D=1/2/4`,
   batches, zero weights, dtype edges, strict ties, and large-N/small-assignment
   stress.
-- Hand-check the remaining combined-score case in A4.
+- The A4 combined-score case is hand-checked.
 - Cover arbitrary IDs, rectangular mappings, `D=1/2/4`, unit batching/alignment,
   all undefined denominators, invalid ranges/weights/power, overflow, and a
   non-quadratic stress case.
+- A4 coverage includes payload summary/effective options and bounded
+  producer-parameter capture, plus table translation, explicit
+  `payload.parameter.*` metadata, replace/append, clear, per-column sorting, and
+  no-recomputation behavior.
 - Preserve all current `ClusteringStats` tests and pipeline behavior.
 
 ## Contracts
@@ -146,9 +176,13 @@ not compute metrics, assignments, or clustering labels.
 - All heavy math runs in float64 for stability.
 - Structured evaluation details belong in the ML plugin payload, not string
   metadata. The numeric result itself remains core-free.
+- The A4 plot dependency is isolated in `leakflow_plugins_ml_plot`; neither
+  `leakflow_ml` nor `leakflow_plugins_ml` links plotting.
+- Payload persistence, `MetricView`, and clustering matrix plots are not part of
+  A4.
 
 ## Common Tests
 
 ```bash
-ctest --test-dir build -R leakflow_ml
+ctest --test-dir build -R 'leakflow_ml|leakflow_plugins_ml'
 ```

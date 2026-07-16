@@ -1,9 +1,9 @@
 # Clustering Evaluation and Metric Visualization
 
-Status: implementation in progress. Phase A1 (exact numeric core), Phase A2
-(semantic and fragmentation metrics), and Phase A3 (rectangular alignments) are
-implemented; Phase A4 is next. Phase A as a whole and all Phase B visualization
-work remain incomplete.
+Status: **Phase A implemented**. A1 (exact numeric core), A2 (semantic and
+fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline result
+contract plus table-only inspection) are complete. Payload persistence, generic
+`MetricView`, and matrix plotting are unblocked but remain deferred.
 
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
@@ -12,9 +12,9 @@ AES, Kyber, a fixed number of semantic dimensions, or a fixed number of classes.
 
 ## Phase Split
 
-Implementation is deliberately split into two phases.
+Implementation is deliberately split into bounded slices.
 
-Current Phase A slices:
+Implemented Phase A slices:
 
 - **A1 — exact numeric core (implemented):** core-free result/options contract,
   vector-truth grouping, deterministic sparse contingency detail, conventional
@@ -29,9 +29,13 @@ Current Phase A slices:
   assignments with explicit unmatched marginal support, strict predicted-major
   dense tie-breaking, exact per-group scores, semantic per-dimension errors,
   and Full-detail contingency-mass error records.
-- **A4 — pipeline contract (next):** payload, evaluator element, typed-unit
-  alignment, the default-off optional combined-quality record/property, summary,
-  persistence, registration, and pipeline tests.
+- **A4 — pipeline and table-inspection contract (implemented):** the default-off
+  optional combined-quality record/property, payload, evaluator element,
+  typed-unit alignment, bounded summary and parameter capture, registration,
+  and pipeline tests. It also adds `ClusteringMetricsTablePlot` in a new
+  `leakflow_plugins_ml_plot` bridge, reusing generic `TableView` for metrics and
+  captured parameters with `replace|append`, clear, and deterministic
+  per-column `asc|desc` sorting.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
@@ -41,24 +45,30 @@ Phase A owns:
 - a structured result contract;
 - a new pipeline evaluator and payload in `leakflow_plugins_ml`;
 - exact, semantic-aware, and alignment metrics;
-- persistence and summary support for the structured payload;
+- bounded summary and effective-option/parameter capture for the structured
+  payload;
+- the table-only `leakflow_plugins_ml_plot` bridge and any domain-free sorting
+  support required in the existing `TableView`;
 - compatibility with the existing `ClusteringStats` element;
-- numeric and pipeline tests.
+- numeric, pipeline, and table-bridge tests.
 
-Phase A does not add plotting code.
+A4 does not add payload persistence, a generic `MetricView`, or matrix plotting.
+The plot dependency is isolated in `leakflow_plugins_ml_plot`; neither
+`leakflow_ml` nor `leakflow_plugins_ml` links plotting.
 
-### Phase B — Clustering Metric Visualization
+### Deferred Follow-up — Persistence and Additional Visualization (Unblocked)
 
-Phase B owns:
+The deferred follow-up owns:
 
+- versioned payload persistence and round-trip compatibility;
 - domain-free metric display data/views in `leakflow_plot`;
-- clustering-result-to-view bridge elements in a new
+- additional clustering-result-to-view elements in the A4-created
   `leakflow_plugins_ml_plot` target;
-- metric tables, normalized metric charts, and result-matrix heatmaps;
+- normalized metric charts and result-matrix heatmaps;
 - headless view-data tests and manual GUI validation.
 
-Phase B consumes Phase A results. It must not recompute clustering metrics or
-alignment assignments.
+The follow-up can consume the now-stable A4 results. It must not recompute
+clustering metrics or alignment assignments.
 
 ## Goals
 
@@ -69,7 +79,8 @@ alignment assignments.
 - Support both one dataset and a leading unit batch.
 - Represent undefined results explicitly.
 - Avoid observation-pair enumeration.
-- Make every result self-describing enough for summaries, persistence, and plots.
+- Make every result self-describing enough for bounded summaries and table
+  inspection; keep a clean seam for later persistence and additional plots.
 
 ## Non-Goals
 
@@ -78,7 +89,8 @@ alignment assignments.
 - Defining a universal scalar that replaces the complete metric set.
 - Encoding or decoding AES-specific class identifiers.
 - Turning `leakflow_ml` into an SCA-specific library.
-- Rendering plots during Phase A.
+- Adding payload persistence, a generic metric chart, or a clustering matrix
+  plot during A4.
 
 ## 1. Input Contract
 
@@ -364,9 +376,8 @@ have zero semantic cost, while the error is their separation.
 ## 6. Optional Combined Quality
 
 Implementation scheduling: this optional record and its default-off property
-are deliberately deferred to A4, when the pipeline payload and property
-contract are frozen. A2 reports both component metrics but does not calculate
-the composite.
+were added in A4 with the pipeline payload/property contract. A2 reports both
+component metrics but does not calculate the composite.
 
 A composite score may be requested for ranking experiments, but it is never the
 only reported result.
@@ -540,7 +551,8 @@ The result contains:
 
 - schema version and effective options;
 - semantic dimension names, ranges, weights, and power;
-- one result record per typed unit;
+- one result record per aligned unit; the enclosing pipeline `Buffer` carries
+  the corresponding typed unit identities;
 - observation, truth-group, predicted-cluster, and eligible-pair counts;
 - all required global metrics;
 - per-dimension metrics;
@@ -559,32 +571,45 @@ Large or structured results are not encoded as string metadata.
 The pipeline layer adds `ClusteringEvaluationPayload` in
 `leakflow_plugins_ml`. It wraps the numeric result, derives from `Payload`,
 uses caps `leakflow/clustering-evaluation`, and declares the structured layout
-`unit/evaluation`. The buffer retains typed `Units`.
+`unit/evaluation`. The enclosing output `Buffer` retains typed `Units`; unit
+identity is not duplicated inside the payload. The payload records the effective
+evaluator options used to produce the result as bounded `evaluation.*`
+parameters.
+
+The evaluator also captures a bounded set of generic clustering-producer
+parameters only from the labels buffer metadata namespace `payload.cluster.*`
+(for example `method`, `n_components`, `covariance_type`, and `converged`). Captured
+records are scalar, deterministically key-ordered, and subject to explicit
+entry/key/value bounds in the public payload contract. Unknown metadata
+namespaces are ignored. The evaluator does not inspect arbitrary upstream
+element properties, copy `payload.parameter.*` metadata, or flatten the
+structured evaluation result into metadata.
 
 The payload summary prints a bounded headline view: counts, ARI, AMI,
 V-measure, purity, pair precision/recall/F1, semantic impurity, and fragmentation.
 Undefined values render as `N/A` with a short reason. Full detail belongs in
-the payload, persistence format, or plot views, not unbounded terminal metadata.
+the payload or table view, not unbounded terminal metadata.
 
-A versioned payload codec persists the result through
-`BufferFileSink`/`BufferFileSrc`; round-trip compatibility is part of Phase A.
+`ClusteringEvaluationPayload` persistence is explicitly outside A4. A later
+slice may add a versioned codec and `BufferFileSink`/`BufferFileSrc` round-trip
+compatibility without changing A4's in-memory schema semantics.
 
 ## 9. Numeric and Pipeline APIs
 
-The numeric API should have one primary evaluator:
+The numeric API has one primary evaluator:
 
 `evaluate_clustering(predicted, semantic_truth, options)`
 
 It returns `ClusteringEvaluationResult` and does not know about buffers,
 properties, plots, AES, or GMM.
 
-The pipeline API adds a new `ClusteringEvaluate` element:
+The pipeline API provides `ClusteringEvaluate`:
 
 - `labels` sink: predicted cluster IDs;
 - `truth` sink: semantic vectors;
 - `evaluation` source: `ClusteringEvaluationPayload`.
 
-Planned properties:
+Properties:
 
 - `semantic` = `off|power` (default `off`);
 - `semantic_ranges` (required when `semantic=power`);
@@ -598,6 +623,32 @@ Planned properties:
 Metric-affecting properties are `payload-output` with downstream invalidation.
 Display selection is not an evaluator property.
 
+A4 also added `ClusteringMetricsTablePlot` with one `sink` input accepting
+`ClusteringEvaluationPayload`. Its table contract is:
+
+- show metric value/defined state, direction, family, averaging, support, and
+  undefined reason, plus typed-unit/count context;
+- show effective `evaluation.*` options and bounded labels-side
+  `payload.cluster.*` parameters stored by the payload;
+- accept scalar `payload.parameter.*` metadata explicitly stamped on the
+  evaluation input as additional display parameters, while ignoring all other
+  namespaces;
+- expose payload parameters as `parameter.payload.<name>` and direct input
+  metadata as `parameter.metadata.<name>`, so equal suffixes remain distinct;
+- `update_mode=replace|append` (default `replace`), where replace refreshes the
+  current comparison table and append retains it and adds the new translated
+  result;
+- provide an explicit clear operation that empties retained table state, also
+  honored by `PlotRuntime::clear()`;
+- allow any column to be selected as a stable sort key with `asc|desc` ordering.
+  Numeric values sort numerically, text values lexically, unavailable values
+  follow defined values in both directions, and ties retain source order.
+
+`update_mode` is `SinkDisplay`/`ElementUi`: an Idle change re-derives the table
+from the cached sink input without upstream work. `group` and `title` are
+`UiControl`/`ElementUi`. Clear and table sorting are view-local UI controls.
+None of these operations reruns clustering, evaluation, or alignment.
+
 ## 10. Compatibility and Migration
 
 The current `ClusteringStats` contract remains available during migration:
@@ -610,53 +661,58 @@ Phase A must not silently change its accepted truth shape, output payload type,
 or matrix layout. Existing `ClusteringStats ! HeatmapPlot` pipelines continue
 to work.
 
-`ClusteringEvaluate` is a new element because its vector-truth input and
+`ClusteringEvaluate` is a separate element because its vector-truth input and
 structured output are materially different contracts. Existing metric kernels
-may be reused internally. `ClusteringStats` may be documented as a legacy
-matrix adapter only after the new evaluator is validated and examples are
-migrated; removal is outside both planned phases.
+may be reused internally. `ClusteringStats` remains the legacy matrix adapter;
+removal is outside A4 and its deferred visualization/persistence follow-up.
 
-## 11. Metric Visualization Contract
+## 11. Table Inspection and Deferred Visualization Contract
 
-Phase B adds `leakflow_plugins_ml_plot`, depending on
-`leakflow_plugins_ml` and `leakflow_plot`. Clustering semantics do not enter
-`leakflow_plot`.
+### A4 Table Bridge
 
-### Generic Display Views
+A4 added `leakflow_plugins_ml_plot`, depending on `leakflow_plugins_ml` and
+`leakflow_plot`. It contains only `ClusteringMetricsTablePlot`. Clustering
+semantics stay in the bridge and do not enter `leakflow_plot`.
 
-- Reuse `TableView` for global, per-unit, per-dimension, per-cluster, and
-  per-group result tables.
-- Reuse `HeatmapView` for contingency and aligned matrices.
-- Add a domain-free `MetricView` for grouped scalar and per-dimension bars. Its
-  display records contain labels, values, bounds, direction, series grouping,
-  and optional/undefined state—not clustering field names.
+The bridge reuses the existing domain-free `TableView`; A4 extended that
+generic view only with reusable stable column sorting and clear/update behavior.
+It does not add another plot-view type. The table translates the payload into:
 
-### Bridge Elements
+- exact, semantic, fragmentation, alignment, per-dimension, per-cluster, and
+  per-group metric rows as allowed by stored detail;
+- value, direction, averaging, support, and `N/A` reason fields;
+- typed-unit identity from the enclosing `Buffer` and
+  observation/group/cluster count context;
+- effective evaluator options;
+- bounded labels-side producer parameters captured under `payload.cluster.*`
+  and rendered as `parameter.payload.<name>`; and
+- explicit evaluation-buffer `payload.parameter.*` metadata rendered as
+  `parameter.metadata.<name>` for presentation.
 
-`ClusteringMetricsTablePlot`:
+`replace` and `append` have the deterministic semantics defined in Section 9.
+Clear drops retained table content. Any column can be selected as the stable
+sort key with `asc` or `desc`; sorting never separates cells that belong to one
+row. Missing optional detail yields an unavailable row/section and never
+triggers numeric recomputation.
 
-- reads `ClusteringEvaluationPayload`;
-- shows exact, semantic, fragmentation, and support sections;
-- supports unit/detail selection and precision;
-- renders undefined values as `N/A` with reason and support.
+The bridge only copies and translates stored data. A fixture-payload test proves
+that it never calls `evaluate_clustering` or an assignment solver. Generic
+`TableView` and `PlotRuntime` contain no clustering-field branches.
 
-`ClusteringMetricsPlot`:
+### Deferred Persistence and Views
 
-- reads already-computed scalar/per-dimension metrics;
-- separates higher-is-better and lower-is-better panels;
-- preserves declared bounds (including ARI's possible negative values);
-- never inverts, combines, or recomputes scores silently.
+The following are explicitly deferred beyond A4:
 
-`ClusteringMatrixPlot`:
+- a versioned `ClusteringEvaluationPayload` persistence codec;
+- a domain-free `MetricView` and `ClusteringMetricsPlot` for grouped scalar and
+  per-dimension bars; and
+- `ClusteringMatrixPlot`, reusing `HeatmapView` for raw contingency,
+  exact-overlap aligned, or semantic-cost aligned stored results with
+  presentation-only `none|row|col` normalization.
 
-- selects raw contingency, exact-overlap aligned, or semantic-cost aligned data
-  already present in the payload;
-- supports display normalization `none|row|col` and unit selection;
-- preserves unmatched row/column annotations.
-
-Display-only style changes are `ui-control`. A property that selects a
-different stored result view is `sink-display` and reprocesses the cached
-evaluation payload; neither change reruns clustering or evaluation.
+When added, those views must consume stored payload results and preserve
+unmatched/undefined state. Display selection and normalization must not rerun
+clustering, evaluation, or alignment.
 
 ## 12. Computational Requirements
 
@@ -697,34 +753,47 @@ overlap optimality is not perturbed by tie-breaking. AMI expected-mutual-
 information terms require a stable log-gamma/hypergeometric implementation and
 independent reference validation.
 
-## 13. Planned File Ownership
+## 13. Implemented File Ownership
 
-Phase A should prefer new evaluation files over turning the current compatibility
-header into an unrelated catch-all:
+Phase A uses focused evaluation/bridge files rather than turning the current
+compatibility header into an unrelated catch-all:
 
 - `include/leakflow/ml/clustering_evaluation.hpp`
 - `src/ml/clustering_evaluation.cpp`
 - `tests/ml/clustering_evaluation_test.cpp`
 - `include/leakflow/plugins/ml/clustering_evaluation_payload.hpp`
 - `include/leakflow/plugins/ml/clustering_evaluate.hpp`
-- matching `src/plugins/ml` implementations, descriptor catalog registration,
-  CMake entries, and focused `tests/plugins/ml` coverage.
+- `src/plugins/ml/clustering_evaluation_payload.cpp`,
+  `src/plugins/ml/clustering_evaluate.cpp`,
+  `src/plugins/ml/descriptor_catalog.cpp`, `src/plugins/ml/CMakeLists.txt`, and
+  `tests/plugins/ml/{clustering_evaluate_test.cpp,CMakeLists.txt}`;
+- `include/leakflow/plot/table_view.hpp`, `src/plot/table_view.cpp`, and
+  `tests/plugins/plot/{table_view_test.cpp,CMakeLists.txt}` for generic sorting,
+  update, and clear behavior;
+- `include/leakflow/plugins/ml_plot`, `src/plugins/ml_plot`, and
+  `tests/plugins/ml_plot` trees for `ClusteringMetricsTablePlot` only;
+- root `CMakeLists.txt`, `tests/CMakeLists.txt`, `src/apps/CMakeLists.txt`,
+  `src/apps/leakflow/leakflow_cli.cpp`, `src/apps/leakflow_ls/main.cpp`, and
+  `tests/apps/{CMakeLists.txt,cli_syntax_test.cpp}` for target, descriptor,
+  factory, runtime, CLI, and inspect-tool integration; and
+- `docs/guides/COOL_PIPELINES.md` for the runnable A4 graph.
 
 Current `clustering_metrics.hpp/.cpp` APIs remain available. Shared kernels may
 move only if their public behavior and tests remain compatible.
 
-Phase B owns:
+Deferred follow-up work owns:
 
+- a versioned payload codec and persistence round-trip tests;
 - `include/leakflow/plot/metric_view.hpp` and `src/plot/metric_view.cpp`;
-- new `include/leakflow/plugins/ml_plot`, `src/plugins/ml_plot`, and
-  `tests/plugins/ml_plot` trees;
-- bridge descriptor/factory registration and CLI/CMake wiring;
+- `ClusteringMetricsPlot` and `ClusteringMatrixPlot` additions to the existing
+  ML→plot bridge;
 - focused generic-view tests in the existing plot test area where appropriate.
 
-No Phase A file may include plot headers, and no generic plot file may include an
-ML payload header.
+No `leakflow_ml` or `leakflow_plugins_ml` file may include plot headers, and no
+generic plot file may include an ML payload header. Only the
+`leakflow_plugins_ml_plot` bridge sees both contracts.
 
-## 14. Validation Plan
+## 14. Validation Coverage
 
 ### Numeric Tests
 
@@ -769,34 +838,48 @@ fragmentation records, both rectangular alignment directions, exact and
 semantic mappings that intentionally differ, a tie that requires an
 equality-graph matching flip, both powers, `D=1/2/4`, zero weights, numeric dtype
 edges, batching, observation permutation, and large-`N`/small-assignment stress.
-The optional combined score remains with A4's property/payload contract.
+The optional combined score is covered with A4's property/payload contract.
 
-### Pipeline and Persistence Tests
+### Pipeline Tests
 
 - descriptor/property validation;
 - vector-truth shape validation;
 - unit alignment;
-- structured payload contents and bounded summary;
-- codec round trip;
+- optional combined-quality behavior;
+- structured payload contents, effective evaluator options, output-`Buffer`
+  typed units, and bounded summary;
+- deterministic bounded capture of scalar `payload.cluster.*` labels metadata,
+  including ignored namespaces and overflow/bounds behavior;
 - downstream invalidation after an evaluator property change;
 - unchanged legacy `ClusteringStats` behavior.
 
-### Plot Tests
+### A4 Table-Bridge Tests
 
-- deterministic translation from a fixture result into `TableView`,
-  `MetricView`, and `HeatmapView` data;
-- undefined display and support annotations;
-- unit/detail/matrix selection;
-- row/column normalization;
-- unmatched alignment annotations;
-- property-effect behavior proving display changes do not rerun evaluation.
+- deterministic translation from a fixture payload into `TableView` data;
+- exact, semantic, fragmentation, alignment, per-dimension/detail, direction,
+  support, and undefined-reason rows;
+- effective options, typed-unit/count context, captured `payload.cluster.*`
+  values, and explicit `payload.parameter.*` input metadata;
+- collision-proof `parameter.payload.*` and `parameter.metadata.*` columns;
+- `replace|append`, explicit clear, history/reset, and stable per-column
+  `asc|desc` sorting for numeric, textual, unavailable, and tied values;
+- descriptor/factory/CLI registration in headless operation;
+- property-effect and fixture instrumentation proving display changes do not
+  call evaluation or assignment code.
 
 ImGui/ImPlot rendering remains manual-only. Manual validation covers one offline
-multi-unit result and an Idle-state display-property change.
+multi-unit table, append/clear/sort controls, and an Idle-state display-property
+change.
+
+### Deferred Tests
+
+Codec round trips, `MetricView`/metric-chart data, and matrix/heatmap selection,
+normalization, and unmatched annotations belong to their deferred slices, not
+A4.
 
 ## 15. Exit Criteria
 
-### Phase A
+### Implemented A4 / Phase A
 
 - The numeric evaluator returns every required exact and fragmentation result,
   plus every semantic and requested alignment result when enabled, for
@@ -804,16 +887,25 @@ multi-unit result and an Idle-state display-property change.
   `[U,N]`/`[U,N,D]`.
 - Undefined values, supports, direction, family, and averaging are explicit.
 - Reference and hand-computed tests pass.
-- The new payload persists and summarizes correctly.
+- The output `Buffer` preserves typed units; the new payload preserves effective
+  options, bounded generic producer parameters, structured results, and a
+  bounded summary.
+- `ClusteringMetricsTablePlot` makes the stored metrics and captured parameters
+  inspectable through generic `TableView`, including deterministic
+  replace/append, clear, and per-column sorting behavior.
+- Table operations over cached data do not rerun evaluation or alignment.
 - Existing `ClusteringStats` pipelines and tests remain unchanged and green.
-- No plotting dependency enters ML or core targets.
+- No plotting dependency enters ML or core targets; the bridge dependency is
+  isolated in `leakflow_plugins_ml_plot`, and no clustering-specific branch
+  enters `PlotRuntime` or `TableView`.
 
-### Phase B
+### Deferred Follow-up
 
-- Every Phase A result is inspectable in a table.
+- The payload round-trips through a versioned persistence codec.
 - Headline and per-dimension metrics have a generic visual representation.
 - Raw and aligned matrices are selectable without recomputation.
-- Headless display-data tests pass and manual GUI validation is recorded.
+- Deferred headless display-data tests pass and manual GUI validation is
+  recorded.
 - No clustering-specific branch enters `PlotRuntime` or generic plot views.
 
 ## Deferred
@@ -823,6 +915,9 @@ multi-unit result and an Idle-state display-property change.
 - Arbitrary real power exponents beyond \(p=1\) and \(p=2\).
 - Continuous-label or tolerance-based truth equality.
 - GPU-specific kernels.
-- Confidence intervals, bootstrap resampling, temporal metric histories, and
-  cross-run experiment comparison.
+- Versioned `ClusteringEvaluationPayload` persistence.
+- Generic `MetricView`/`ClusteringMetricsPlot` and `ClusteringMatrixPlot`.
+- Confidence intervals, bootstrap resampling, persistent temporal metric
+  histories, and statistical cross-run comparison beyond A4's in-memory append
+  table.
 - Using any evaluation metric as a training objective.

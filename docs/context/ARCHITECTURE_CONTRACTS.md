@@ -536,8 +536,8 @@ need in-call checkpoints.
 ## Clustering Evaluation Result Boundary
 
 Design of record: `docs/design/clustering_evaluation_metrics.md`. The numeric
-result boundary through Phase A3 is implemented; the pipeline payload/element
-boundary remains planned for A4.
+result boundary through Phase A3 and the A4 pipeline/table boundary are
+implemented.
 
 The full evaluator is split across existing architectural layers:
 
@@ -546,11 +546,15 @@ The full evaluator is split across existing architectural layers:
   rectangular alignment records are implemented there. It remains Torch-numeric
   only and has no core, buffer, plugin, plot, AES, or Kyber dependency.
 - `leakflow_plugins_ml` owns `ClusteringEvaluate` and the core-derived
-  `ClusteringEvaluationPayload`. The payload wraps the numeric result, carries
-  typed units, has versioned persistence, and exposes a bounded summary.
-- A follow-up `leakflow_plugins_ml_plot` bridge consumes that payload and fills
-  domain-free views in `leakflow_plot`. Neither generic views nor `PlotRuntime`
-  know clustering field names.
+  `ClusteringEvaluationPayload`. The payload wraps the numeric result, records
+  effective `evaluation.*` options and bounded labels-side producer parameters,
+  and exposes a bounded summary. Typed unit identity is carried by the enclosing
+  `Buffer`, not duplicated in the payload. Versioned persistence is unblocked
+  but deferred.
+- `leakflow_plugins_ml_plot` owns the implemented bridge for
+  `ClusteringMetricsTablePlot`. It consumes that payload and fills the existing
+  domain-free `TableView`; neither the view nor `PlotRuntime` knows clustering
+  field names. Generic `MetricView` and matrix/heatmap bridge work are deferred.
 
 Predicted labels and vector semantic truth are separate inputs. Truth is used
 only after clustering; exact truth groups are derived from full-vector equality,
@@ -562,6 +566,18 @@ mappings are structured payload data. Large tables/matrices must not be flattene
 into metadata. Small headline metrics may be copied into summaries/metadata only
 when bounded and explicitly derived from the payload.
 
+`ClusteringEvaluate` captures bounded, generic clustering-producer parameters
+only from its labels input and only when their metadata keys use the
+`payload.cluster.*` prefix (for example method, component count, covariance type,
+and convergence). It stores them beside effective `evaluation.*` options in the
+payload. It does not copy `payload.parameter.*` metadata, inspect arbitrary
+upstream element properties, or flatten the result into metadata.
+`ClusteringMetricsTablePlot` additionally reads explicitly stamped
+`payload.parameter.*` metadata from its evaluation input `Buffer`; unknown
+metadata namespaces are ignored. To prevent name collisions, the table exposes
+payload entries as `parameter.payload.<name>` and direct metadata entries as
+`parameter.metadata.<name>`.
+
 Every metric carries defined/unavailable state, reason, denominator support,
 direction, family, and averaging. Exact partition metrics and semantic-cost
 metrics remain separate. Exact-overlap and semantic-cost alignment are separate
@@ -569,12 +585,23 @@ result variants with explicit unmatched support.
 
 `ClusteringStats` remains the compatibility matrix adapter. Its scalar-truth
 input, tensor output, caps, and `ClusteringStats ! HeatmapPlot` behavior must not
-silently change when `ClusteringEvaluate` is added.
+silently change with `ClusteringEvaluate` available.
 
 Evaluator properties that affect numeric results are `payload-output` with
-downstream invalidation. Plot style is `ui-control`; selecting a different result
-already stored in a payload is `sink-display`. A plot edit must never trigger GMM
-fitting or metric/alignment recomputation.
+downstream invalidation. `ClusteringMetricsTablePlot.update_mode` is
+`SinkDisplay`/`ElementUi`: changing it re-derives the sink display from cached
+input without rerunning upstream. `group` and `title` are
+`UiControl`/`ElementUi`. Clear and column sorting are view-local UI controls. A
+plot edit must never trigger GMM fitting or metric/alignment recomputation.
+
+The A4 table bridge is presentation-only. Its `sink` pad exposes metrics,
+undefined reasons and supports, effective options, typed-unit/count context,
+and the bounded captured parameters. Its update contract is `replace|append`;
+clear empties its retained table state; and each column supports deterministic
+stable ascending or descending ordering. These operations use copied
+table/payload data and never invoke the evaluator or Hungarian solver. Any
+generic sorting support belongs in `TableView`, not in a clustering-specific
+`PlotRuntime` branch.
 
 ## Future Plugin Boundaries
 
@@ -591,8 +618,10 @@ Future algorithm or UI features must stay outside core:
 - Crypto→plot bridge elements: `leakflow_plugins_crypto_plot` (`ScorePlot`,
   which reads `AttackStatsPayload` and fills a `ScoreView`). A plot element that
   needs domain payloads goes in a bridge plugin, never in `leakflow_plot`.
-- ML→plot bridge elements: planned `leakflow_plugins_ml_plot`, which reads
-  `ClusteringEvaluationPayload` and fills domain-free table/metric/heatmap views.
+- ML→plot bridge elements: `leakflow_plugins_ml_plot`, which reads
+  `ClusteringEvaluationPayload` and fills the domain-free `TableView` through
+  `ClusteringMetricsTablePlot`. Later additions may fill a generic `MetricView`
+  and `HeatmapView`, but those are outside A4.
 - GUI: a separate app or plugin layer.
 
 Do not pull future plugin dependencies into core.

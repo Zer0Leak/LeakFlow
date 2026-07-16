@@ -254,6 +254,14 @@ set_tests_properties(leakflow_cli_run_correlation_poi_to_plot_annotations PROPER
     PASS_REGULAR_EXPRESSION "leakflow/plot-annotations"
 )
 
+add_test(NAME leakflow_cli_run_clustering_evaluate
+    COMMAND leakflow --log-level warning run
+        "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakage@leak(channels=[HW(m),HW(y)],units=[0]); Tee@targets; GaussianMixture@gmm(n_components=2,covariance_type=diagonal,n_init=1,max_iter=2,seed=0); ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],alignment=both,combined_quality=true); Summary@summary(level=2); @data.traces ! @leak.traces; @data.plaintexts ! @leak.plaintexts; @data.keys ! @leak.keys; @leak ! @targets; @targets.src_0 ! @gmm ! @eval.labels; @targets.src_1 ! @eval.truth; @eval ! @summary"
+)
+set_tests_properties(leakflow_cli_run_clustering_evaluate PROPERTIES
+    PASS_REGULAR_EXPRESSION "payload=leakflow/clustering-evaluation"
+)
+
 add_test(NAME leakflow_cli_run_torch_file_sink
     COMMAND leakflow run "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); @data.traces ! TorchFileSink(path=${PROJECT_BINARY_DIR}/tests/traces_roundtrip.pt)"
 )
@@ -364,6 +372,22 @@ set_tests_properties(leakflow_ls_cpa_attack PROPERTIES
 add_test(NAME leakflow_ls_attack_stats COMMAND leakflow-ls AttackStats)
 set_tests_properties(leakflow_ls_attack_stats PROPERTIES
     PASS_REGULAR_EXPRESSION "true_rank"
+)
+
+add_test(NAME leakflow_ls_clustering_evaluate COMMAND leakflow-ls --no-colors ClusteringEvaluate)
+set_tests_properties(leakflow_ls_clustering_evaluate PROPERTIES
+    PASS_REGULAR_EXPRESSION "leakflow/clustering-evaluation"
+)
+
+add_test(NAME leakflow_ls_clustering_metrics_table_plot
+    COMMAND leakflow-ls --no-colors ClusteringMetricsTablePlot)
+set_tests_properties(leakflow_ls_clustering_metrics_table_plot PROPERTIES
+    PASS_REGULAR_EXPRESSION "update_mode"
+)
+
+add_test(NAME leakflow_ls_list_ml_plot COMMAND leakflow-ls)
+set_tests_properties(leakflow_ls_list_ml_plot PROPERTIES
+    PASS_REGULAR_EXPRESSION "leakflow_plugins_ml_plot.*ClusteringMetricsTablePlot"
 )
 
 add_test(NAME leakflow_ls_attack_stats_to_plot_annotations COMMAND leakflow-ls AttackStatsToPlotAnnotations)

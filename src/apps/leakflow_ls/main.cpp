@@ -8,6 +8,7 @@
 #include "leakflow/plugins/crypto_plot/descriptor_catalog.hpp"
 #include "leakflow/plugins/extras/descriptor_catalog.hpp"
 #include "leakflow/plugins/ml/descriptor_catalog.hpp"
+#include "leakflow/plugins/ml_plot/descriptor_catalog.hpp"
 #include "leakflow/plugins/plot/descriptor_catalog.hpp"
 
 #include <algorithm>
@@ -29,6 +30,7 @@ namespace {
 namespace core = leakflow::plugins::core;
 namespace base = leakflow::plugins::base;
 namespace ml_plugin = leakflow::plugins::ml;
+namespace ml_plot_plugin = leakflow::plugins::ml_plot;
 namespace crypto_plugin = leakflow::plugins::crypto;
 namespace crypto_plot_plugin = leakflow::plugins::crypto_plot;
 namespace extras = leakflow::plugins::extras;
@@ -83,6 +85,7 @@ private:
     extras::register_plugin_descriptors(registry);
     crypto_plugin::register_plugin_descriptors(registry);
     plot_plugin::register_plugin_descriptors(registry);
+    ml_plot_plugin::register_plugin_descriptors(registry);
     crypto_plot_plugin::register_plugin_descriptors(registry);
     return registry;
 }

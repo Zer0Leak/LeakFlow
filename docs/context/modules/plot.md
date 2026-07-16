@@ -37,10 +37,12 @@ Tests:
 - `leakflow_plugins_crypto_plot`: crypto→plot bridge; `ScorePlot` fills a
   `ScoreView` and `ScoreTablePlot` fills a `TableView`, both from
   `AttackStatsPayload`. Depends on `leakflow_plugins_crypto` + `leakflow_plot`.
-- `leakflow_plugins_ml_plot` (**planned, not implemented**): ML→plot bridge for
-  `ClusteringEvaluationPayload`. It will depend on `leakflow_plugins_ml` +
-  `leakflow_plot`; clustering result translation does not belong in a generic
-  view or in `leakflow_plugins_plot`.
+- `leakflow_plugins_ml_plot` (**implemented in A4**): ML→plot bridge for
+  `ClusteringEvaluationPayload`. A4 added only
+  `ClusteringMetricsTablePlot`, which fills the existing generic `TableView`.
+  The target depends on `leakflow_plugins_ml` + `leakflow_plot`; clustering
+  result translation does not belong in a generic view or in
+  `leakflow_plugins_plot`.
 
 ## Dependency Boundary
 
@@ -61,7 +63,7 @@ Tests:
 - `leakflow_plot`.
 
 Domain-aware plot elements depend on their domain payload through a bridge
-target. The planned `leakflow_plugins_ml_plot` follows the existing
+target. `leakflow_plugins_ml_plot` follows the existing
 `leakflow_plugins_crypto_plot` pattern and must not make `leakflow_plot` depend
 on `leakflow_ml` or `leakflow_plugins_ml`.
 
@@ -162,6 +164,11 @@ units as columns, ranked guesses as rows, correct-key cell tinted. It works the
 same live (a frame per buffer, kept to `max_history`) and offline (one frame =
 final result), so it needs no live/offline switch.
 
+A4 extended the generic table contract with typed sort values, stable single-key
+ascending/descending row ordering, replace-frame and append-row updates,
+schema-union remapping, and per-producer erase. Missing/NaN sort values remain
+last in either direction. The view still knows nothing about clustering fields.
+
 `ScorePlot`, the element that fills a `ScoreView`, lives in the separate
 `leakflow_plugins_crypto_plot` target (depends on `leakflow_plugins_crypto` +
 `leakflow_plot`) because it reads the crypto `AttackStatsPayload` directly. Its
@@ -172,35 +179,57 @@ and hands the `ScoreView` to every `ScorePlot` and the `TableView` to every
 window (`ScorePlot` always stacks; it never overlays). Design:
 `docs/design/plotting.md` (Plot View Architecture) and `docs/design/cpa_attack.md`.
 
-## Planned Clustering Metric Views (Not Implemented)
+## A4 Clustering Metrics Table (Implemented)
 
-Authoritative design: `docs/design/clustering_evaluation_metrics.md` (Phase B).
-This phase starts only after the full clustering-evaluation result/payload phase
-is implemented and its schema is stable.
+Authoritative design: `docs/design/clustering_evaluation_metrics.md` (A4).
 
-Planned bridge elements:
+`ClusteringMetricsTablePlot` is the only clustering visualization in A4. Its
+`sink` pad reads `ClusteringEvaluationPayload` and translates stored records
+into the existing domain-free `TableView`:
 
-- `ClusteringMetricsTablePlot` fills the existing domain-free `TableView` with
-  exact, semantic, fragmentation, per-dimension, and support sections. Undefined
-  values display `N/A` with their reason/support.
-- `ClusteringMetricsPlot` shows already-computed headline and per-dimension
-  values, separating higher-is-better from lower-is-better metrics. Its new
-  domain-free `MetricView` stores generic labels/values/bounds/direction, never
-  clustering fields.
-- `ClusteringMatrixPlot` fills the existing `HeatmapView` from a raw contingency,
-  exact-overlap alignment, or semantic-cost alignment already stored in the
-  payload. `none|row|col` normalization is presentation-only, and unmatched
-  rows/columns remain visible.
+- exact, semantic, fragmentation, alignment, per-dimension, and support metrics
+  remain structured rows; undefined values display `N/A` with reason/support;
+- effective evaluator options and typed-unit/count context from the enclosing
+  `Buffer` are visible; the payload does not own typed units;
+- bounded generic producer parameters captured by `ClusteringEvaluate` from
+  labels metadata under `payload.cluster.*` are visible;
+- explicitly stamped `payload.parameter.*` metadata on the evaluation buffer is
+  accepted as additional display parameters; arbitrary metadata namespaces and
+  upstream properties are not inspected;
+- payload entries use `parameter.payload.<name>` columns and direct input
+  metadata uses `parameter.metadata.<name>`, so identical suffixes cannot
+  collide;
+- `replace` updates the current table from the latest payload, while `append`
+  retains the existing comparison content and adds the new translated result;
+- clear empties the retained table state, consistent with `PlotRuntime::clear()`;
+- any column can be selected as the stable `asc` or `desc` sort key using
+  deterministic generic `TableView` sorting. Numeric cells sort numerically,
+  text cells lexically, unavailable cells follow defined cells in either
+  direction, and equal keys retain source order.
 
-The bridge never calls the evaluator or Hungarian solver. Missing optional
-detail yields a clear unavailable display; it does not trigger recomputation.
-Style properties are `ui-control`. Unit/detail/matrix selection is
-`sink-display`, using the cached payload, so changes while Idle update only the
-view.
+`update_mode` is `SinkDisplay`/`ElementUi`, so an Idle change re-derives the sink
+display from its cached input without upstream work. `group` and `title` are
+`UiControl`/`ElementUi`; the Clear button and header sorting are view-local UI
+controls. These operations use copied table/payload data. The bridge never calls
+the evaluator or Hungarian solver, and generic sorting belongs in `TableView`,
+not a clustering branch in `PlotRuntime`. Headless A4 coverage checks
+deterministic translation, undefined states, captured parameters,
+replace/append, clear, sorting, history/reset, and property effects.
+ImGui/ImPlot rendering remains a manual smoke check.
 
-Validation is headless for copied view data, selection, normalization, undefined
-states, history, reset, and property effects. ImGui/ImPlot rendering remains a
-manual smoke check.
+## Deferred Clustering Metric Views (Unblocked)
+
+Payload persistence is unblocked by A4 but deferred. A later visual slice may
+add:
+
+- `ClusteringMetricsPlot` with a new domain-free `MetricView` for already
+  computed headline and per-dimension values;
+- `ClusteringMatrixPlot` with the existing `HeatmapView` for raw contingency,
+  exact-overlap aligned, or semantic-cost aligned stored data and display-only
+  `none|row|col` normalization.
+
+Those additions remain presentation-only and must not recompute metrics,
+assignments, or labels.
 
 ## Pipeline Graph Runtime
 

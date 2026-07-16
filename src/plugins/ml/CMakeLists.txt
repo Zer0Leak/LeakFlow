@@ -1,4 +1,6 @@
 add_library(leakflow_plugins_ml SHARED
+    clustering_evaluate.cpp
+    clustering_evaluation_payload.cpp
     clustering_stats.cpp
     descriptor_catalog.cpp
     feature_select.cpp

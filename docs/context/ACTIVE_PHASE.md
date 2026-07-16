@@ -4,11 +4,11 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-**Full Clustering Evaluation Metrics (Phase A) is active.** A1 exact numeric
-evaluation, A2 semantic/fragmentation metrics, and A3 rectangular alignments are
-implemented and green. A4, the pipeline result contract, is the next bounded
-slice. Phase B plotting remains blocked until the complete Phase A payload
-contract is frozen.
+**Full Clustering Evaluation Metrics (Phase A) is implemented.** A1 exact
+numeric evaluation, A2 semantic/fragmentation metrics, A3 rectangular
+alignments, and A4 pipeline/table inspection are complete. No clustering
+follow-up is active by default: persistence, `MetricView`, and matrix plotting
+are unblocked but remain deferred.
 
 ## Active ML Sequence
 
@@ -28,20 +28,30 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    predicted-major dense tie-breaking, unmatched marginal supports, exact
    per-group scores, semantic per-dimension errors, and Full-detail
    contingency-mass error records.
-4. **A4 — pipeline result contract (next)** — add `ClusteringEvaluate`, structured
+4. **A4 — pipeline and table-inspection contract (done)** — the default-off
+   optional combined-quality record/property, `ClusteringEvaluate`, structured
    `ClusteringEvaluationPayload`, typed-unit alignment, bounded summaries, and
-   versioned persistence, plus the default-off optional combined-quality
-   record/property, while keeping `ClusteringStats` unchanged.
-5. **Clustering Metric Visualization (Phase B)** — after the result contract is
-   green, add `leakflow_plugins_ml_plot`. Its table/metric/matrix elements
-   consume the structured payload and fill domain-free plot views; they do not
-   recompute evaluation or alignment.
+   effective `evaluation.*` options are implemented. The evaluator captures only
+   bounded generic producer parameters from the labels buffer's
+   `payload.cluster.*` metadata; typed unit identity stays on the output
+   `Buffer`. `leakflow_plugins_ml_plot` and its
+   `ClusteringMetricsTablePlot` are implemented. The table reuses `TableView`,
+   accepts explicitly stamped `payload.parameter.*` metadata on its `sink` input
+   buffer, and exposes payload and metadata parameters separately as
+   `parameter.payload.<name>` and `parameter.metadata.<name>`. Its `update_mode`
+   is `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls
+   are `UiControl`. It never recomputes evaluation or introspects arbitrary
+   upstream properties; `ClusteringStats` stays unchanged.
+5. **Deferred follow-up** — add versioned payload persistence, then the generic
+   `MetricView`/`ClusteringMetricsPlot` and `ClusteringMatrixPlot` bridge work.
+   Those views consume stored payload results and never recompute evaluation or
+   alignment.
 
-The two phases must not be combined. The first phase has no plotting changes;
-the second phase depends on its frozen payload contract. Other previously
-discussed candidates (Zarr parity, CPA plot refinement, overlay/correlation plot
-polish, and Kyber / ML-KEM hypotheses) remain deferred rather than folded into
-this sequence.
+A4 is deliberately table-only: it added the ML→plot bridge and generic table
+behavior, but not persistence, `MetricView`, or matrix plotting.
+Other previously discussed candidates (Zarr parity, CPA plot refinement,
+overlay/correlation plot polish, and Kyber / ML-KEM hypotheses) remain deferred
+rather than folded into this sequence.
 
 The post-phase **HDF5 tensor-dataset slice** is implemented:
 

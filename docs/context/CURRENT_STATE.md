@@ -51,10 +51,15 @@ support:
   bit channels.
 - `leakflow_ml` exists and provides generic Torch numeric APIs for Gaussian
   mixtures, constrained Sinkhorn transport, the legacy scalar-class clustering
-  metrics, and the Phase A1/A2/A3 vector-truth exact, semantic, fragmentation,
-  and rectangular-alignment evaluator.
+  metrics, and the complete Phase A vector-truth exact, semantic,
+  fragmentation, rectangular-alignment, and optional combined-quality
+  evaluator.
 - `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
-  and `ClusteringStats`, including typed-unit propagation/alignment.
+  `ClusteringStats`, and the structured `ClusteringEvaluate` /
+  `ClusteringEvaluationPayload` boundary, including typed-unit
+  propagation/alignment.
+- `leakflow_plugins_ml_plot` exists and provides the table-only
+  `ClusteringMetricsTablePlot` bridge into generic `TableView` data.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
   guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
   difference-of-means ranking with an optional best-difference trace output,
@@ -206,10 +211,10 @@ real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative sto
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
 state machine), and §14 (CLI cookbook). Full clustering evaluation Phase A is
-now active: its A1 exact numeric core, A2 semantic/fragmentation metrics, and A3
-rectangular alignments are implemented, with pipeline integration still pending.
-Clustering-metric visualization remains the follow-up phase. Zarr parity remains
-a separate deferred candidate.
+implemented: A1 exact numeric core, A2 semantic/fragmentation metrics, A3
+rectangular alignments, and A4 pipeline/table inspection are complete. Payload
+persistence, generic metric charts, and matrix plotting are unblocked but remain
+deferred. Zarr parity remains a separate deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -364,6 +369,12 @@ ML:
   mode. Full detail adds exact per-truth scores and semantic contingency-mass
   error records; semantic alignment uses the configured power cost and a fixed
   maximum dummy penalty of `1.0`.
+- Phase A4 added the default-off combined-quality record,
+  `ClusteringEvaluationPayload`, and `ClusteringEvaluate`. The element aligns
+  typed units carried by its input/output `Buffer`s, stores effective
+  `evaluation.*` options plus bounded labels-side `payload.cluster.*` producer
+  parameters in the payload, and emits a bounded summary. The payload itself
+  does not own unit identity.
 
 ML plugin elements:
 
@@ -373,6 +384,16 @@ ML plugin elements:
   reordered confusion tensor with ARI/NMI/purity/matched-score metadata. This is
   the current/legacy matrix evaluator; it does not yet accept semantic vectors
   or emit a structured evaluation result.
+- `ClusteringEvaluate`: accepts `labels` and vector `truth`, emits structured
+  clustering evaluation on `evaluation`, and keeps `ClusteringStats` unchanged.
+
+ML plot bridge:
+
+- `ClusteringMetricsTablePlot`: consumes that result on `sink`, presents metrics
+  and collision-proof `parameter.payload.*` / `parameter.metadata.*` columns,
+  and supports replace/append, clear, and stable column sorting without numeric
+  recomputation. `update_mode` is `SinkDisplay`/`ElementUi`; group/title and
+  view-local clear/sort behavior are `UiControl`.
 
 Core plugin elements:
 
@@ -439,13 +460,9 @@ Logging:
 
 ## Not Implemented Yet
 
-- Remaining full clustering-evaluation work after A3: the default-off optional
-  combined-quality record and `ClusteringEvaluationPayload` /
-  `ClusteringEvaluate` pipeline integration, typed-unit alignment, summaries,
-  registration, and persistence.
-- Clustering evaluation table/metric/matrix plot bridge
-  (`leakflow_plugins_ml_plot`). Design for both planned phases:
-  `docs/design/clustering_evaluation_metrics.md`.
+- Deferred clustering-evaluation work: versioned payload persistence, generic
+  `MetricView`/`ClusteringMetricsPlot`, and `ClusteringMatrixPlot`. Design of
+  record: `docs/design/clustering_evaluation_metrics.md`.
 - Zarr tensor-dataset reader/source/converter and the HDF5/Zarr benchmark.
 - Pipeline `Convert` element.
 - Conversion registry.

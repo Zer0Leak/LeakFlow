@@ -1998,12 +1998,12 @@ Exit criteria:
   metadata presence).
 - No dependency on the local `traces/` tree.
 
-## Active Phase: Full Clustering Evaluation Metrics
+## Completed Phase: Full Clustering Evaluation Metrics
 
-Status: **in progress**. Phase A1 (exact numeric evaluation), A2 (semantic and
-fragmentation metrics), and A3 (rectangular alignments) are implemented; A4 is
-next. Phase A is not complete until its payload, persistence, and pipeline exit
-criteria are all green.
+Status: **implemented**. Phase A1 (exact numeric evaluation), A2 (semantic and
+fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline payload
+plus table inspection) are complete. Payload persistence, `MetricView`, and
+matrix plotting were deliberately not part of Phase A.
 
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Phase A).
@@ -2030,10 +2030,13 @@ Implementation sequence:
   explicit unmatched marginal supports, exact per-group scores, fixed maximum
   semantic dummy penalty, per-dimension errors, and contingency-mass error
   records. Both rectangular directions are covered by hand-checked fixtures.
-- **A4 — pipeline contract (next):** `ClusteringEvaluationPayload`,
-  `ClusteringEvaluate`, typed-unit alignment, summaries, persistence, descriptor
-  registration, the default-off optional combined-quality record/property, and
-  compatibility tests.
+- **A4 — pipeline and table-inspection contract (done):** the default-off
+  optional combined-quality record/property, `ClusteringEvaluationPayload`,
+  `ClusteringEvaluate`, typed-unit alignment, bounded summaries and captured
+  parameters, descriptor registration, and compatibility tests. It added the
+  `leakflow_plugins_ml_plot` bridge with `ClusteringMetricsTablePlot`, reusing
+  generic `TableView` for metrics and captured parameters with
+  `replace|append`, clear, and deterministic per-column `asc|desc` behavior.
 
 Locked decisions:
 
@@ -2059,20 +2062,32 @@ Locked decisions:
 - Current `ClusteringStats` input/output/caps remain unchanged as the legacy
   confusion-matrix adapter.
 
-Remaining work:
+Delivered A4 integration:
 
-- Add `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
-  alignment, optional combined quality, and a versioned persistence codec.
-- Cover typed-unit alignment and pipeline/persistence behavior. A1–A3 already
-  cover the conventional scikit-learn fixtures, hand-computed semantic,
-  fragmentation, and alignment cases, exact degeneracies, both rectangular directions,
-  deterministic assignment ties, arbitrary IDs, `D=1/2/4`, numeric batches/
-  dtypes/validation, all current undefined denominators, and non-quadratic
-  AMI/semantic/alignment stress cases.
+- `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
+  alignment, optional combined quality, effective `evaluation.*` parameters,
+  and bounded generic clustering-producer parameters captured only from the
+  labels buffer's `payload.cluster.*` metadata. Typed unit identity remains on
+  the output `Buffer`, not inside `ClusteringEvaluationPayload`.
+- `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. Its `sink` pad
+  consumes the structured payload and fills the existing generic `TableView`.
+  Payload parameters and explicitly stamped evaluation-buffer
+  `payload.parameter.*` metadata use separate collision-proof columns,
+  `parameter.payload.<name>` and `parameter.metadata.<name>`. `update_mode` is
+  `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls are
+  `UiControl`.
+- Typed-unit alignment, pipeline behavior, table translation,
+  `replace|append`, clear, and stable per-column ascending/descending sorting
+  are covered. A1–A3 cover the conventional scikit-learn fixtures,
+  hand-computed semantic, fragmentation, and alignment cases, exact
+  degeneracies, both rectangular directions, deterministic assignment ties,
+  arbitrary IDs, `D=1/2/4`, numeric batches/dtypes/validation, all current
+  undefined denominators, and non-quadratic AMI/semantic/alignment stress cases.
 
 Out of scope:
 
-- Plot views/elements (the follow-up phase below).
+- Payload persistence, a generic `MetricView`/headline metric chart, and a
+  clustering matrix plot; these are deferred to the follow-up below.
 - GMM fitting changes or using truth during clustering.
 - Removal or silent repurposing of `ClusteringStats`.
 - AES/Kyber-specific class encodings, inferred semantic ranges, arbitrary real
@@ -2093,47 +2108,50 @@ Exit criteria:
   alignment results when enabled, are available through the structured
   result/payload for batched and unbatched inputs.
 - Undefined/value/support/direction/averaging semantics are explicit and tested.
-- Numeric reference, pipeline, persistence, and compatibility tests pass.
+- Numeric reference, pipeline, table-bridge, and compatibility tests pass.
+- The table exposes metrics, effective evaluator options, and bounded explicitly
+  captured parameters with deterministic replace/append, clear, and per-column
+  sorting behavior, without recomputing evaluation.
 - Existing `ClusteringStats ! HeatmapPlot` pipelines remain valid.
-- No plotting dependency enters core, `leakflow_ml`, or `leakflow_plugins_ml`.
+- No plotting dependency enters core, `leakflow_ml`, or `leakflow_plugins_ml`;
+  the A4 table dependency is isolated in `leakflow_plugins_ml_plot`.
 
-## Planned Follow-up Phase: Clustering Metric Visualization
+## Planned Follow-up Phase: Persistence and Additional Clustering Visualization
 
-Status: **planned, blocked on completion of Phase A, not implemented**.
+Status: **unblocked by completed A4, but deferred and not implemented**.
 
 Authoritative design:
-`docs/design/clustering_evaluation_metrics.md` (Phase B).
+`docs/design/clustering_evaluation_metrics.md` (Deferred Follow-up).
 
-Goal: make the complete structured evaluation result inspectable without placing
-clustering semantics in the generic plot runtime or recomputing metrics in plot
-elements.
+Goal: add payload persistence and the visual forms that are intentionally beyond
+A4's table-only inspection contract, without placing clustering semantics in the
+generic plot runtime or recomputing metrics in plot elements.
 
 Locked decisions:
 
-- Add `leakflow_plugins_ml_plot`, depending on `leakflow_plugins_ml` and
-  `leakflow_plot`, following the existing crypto→plot bridge pattern.
-- Reuse domain-free `TableView` and `HeatmapView`; add a generic `MetricView` for
-  grouped scalar and per-dimension bars.
-- Plan `ClusteringMetricsTablePlot`, `ClusteringMetricsPlot`, and
-  `ClusteringMatrixPlot` as consumers of `ClusteringEvaluationPayload`.
-- Tables show value, direction, support, and `N/A` reason. Matrix views select
-  raw, exact-aligned, or semantic-aligned stored results and may apply only
-  display normalization (`none|row|col`).
+- Add a versioned `ClusteringEvaluationPayload` persistence codec and round-trip
+  compatibility coverage.
+- Add a generic `MetricView` for grouped scalar and per-dimension bars, then add
+  `ClusteringMetricsPlot` in the existing `leakflow_plugins_ml_plot` bridge.
+- Add `ClusteringMatrixPlot`, reusing domain-free `HeatmapView` to select raw,
+  exact-aligned, or semantic-aligned stored results and apply only display
+  normalization (`none|row|col`).
 - Style changes are `ui-control`; selecting another stored result is
   `sink-display`. Neither reruns clustering or evaluation, including while Idle.
 
 Expected validation:
 
-- Headless tests over copied table/metric/heatmap view data, selection,
-  normalization, undefined values, unmatched annotations, history, and reset.
+- Codec round-trip tests plus headless tests over copied metric/heatmap view data,
+  selection, normalization, undefined values, unmatched annotations, and reset.
 - A fixture payload proves bridge elements do not call metric computation.
 - GUI rendering remains manual-only; record an offline multi-unit smoke and an
   Idle-state display-property change.
 
 Exit criteria:
 
-- Every Phase A result is available in a table, headline/per-dimension metrics
-  have a generic visual form, and raw/aligned matrices are selectable.
+- The structured payload round-trips through the persistence layer,
+  headline/per-dimension metrics have a generic visual form, and raw/aligned
+  matrices are selectable.
 - Plot changes do not trigger evaluation recomputation.
 - No clustering-specific branch enters `PlotRuntime` or a generic plot view.
 

@@ -46,6 +46,7 @@ add_subdirectory(src/plugins/ml)
 add_subdirectory(src/plugins/extras)
 add_subdirectory(src/plugins/crypto)
 add_subdirectory(src/plugins/plot)
+add_subdirectory(src/plugins/ml_plot)
 add_subdirectory(src/plugins/crypto_plot)
 
 if(LEAKFLOW_TORCH_DEBUG)

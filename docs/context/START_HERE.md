@@ -44,8 +44,9 @@ Instead:
   inspect only `include/leakflow/ml`, `src/ml`, `tests/ml`, and the matching
   `include/leakflow/plugins/ml`, `src/plugins/ml`, and `tests/plugins/ml` files
   when pipeline exposure is affected. For clustering metric plots, also read the
-  plot module context and inspect only the planned ML→plot bridge plus the exact
-  generic views it uses.
+  plot module context and inspect only `include/leakflow/plugins/ml_plot`,
+  `src/plugins/ml_plot`, `tests/plugins/ml_plot`, and the exact generic views the
+  implemented bridge uses.
 - For core plugin work, read `docs/context/modules/plugins-core.md`, then inspect
   only `include/leakflow/plugins/core`, `src/plugins/core`,
   `tests/plugins/core`, and CLI files if command syntax is affected.
@@ -79,8 +80,9 @@ not default startup context:
 - `docs/design/profiling.md` — execution timing telemetry / profiling design
   (per-element + op-scope timing, `--print-profile`, `--profile-file` trace).
 - `docs/design/clustering_evaluation_metrics.md` — design of record for full
-  clustering evaluation and its separate metric-visualization follow-up; read
-  only for clustering metric/result/plot work.
+  clustering evaluation (implemented through A4 table inspection) and its
+  deferred, unblocked persistence/additional-visualization follow-up; read only
+  for clustering metric/result/plot work.
 
 Read the relevant sections of those files only when a task needs detailed
 design history or CLI syntax details.

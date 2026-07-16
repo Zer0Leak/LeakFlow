@@ -1,5 +1,6 @@
 #include "leakflow/plugins/ml/descriptor_catalog.hpp"
 
+#include "leakflow/plugins/ml/clustering_evaluate.hpp"
 #include "leakflow/plugins/ml/clustering_stats.hpp"
 #include "leakflow/plugins/ml/feature_select.hpp"
 #include "leakflow/plugins/ml/gaussian_mixture_element.hpp"
@@ -24,6 +25,7 @@ std::vector<PluginDescriptor> plugin_descriptors()
             .elements = {
                 FeatureSelect::descriptor(),
                 GaussianMixtureElement::descriptor(),
+                ClusteringEvaluate::descriptor(),
                 ClusteringStats::descriptor(),
             },
         }),
@@ -56,6 +58,9 @@ void register_element_factories(ElementFactoryRegistry& registry)
              }},
             {"GaussianMixture", [](std::string name) {
                  return std::make_shared<GaussianMixtureElement>(std::move(name));
+             }},
+            {"ClusteringEvaluate", [](std::string name) {
+                 return std::make_shared<ClusteringEvaluate>(std::move(name));
              }},
             {"ClusteringStats", [](std::string name) {
                  return std::make_shared<ClusteringStats>(std::move(name));

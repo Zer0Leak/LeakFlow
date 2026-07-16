@@ -27,3 +27,13 @@ target_link_libraries(leakflow_plugins_plot_pipeline_graph_tests
 )
 leakflow_configure_test_target(leakflow_plugins_plot_pipeline_graph_tests)
 add_test(NAME leakflow_plugins_plot_pipeline_graph COMMAND leakflow_plugins_plot_pipeline_graph_tests)
+
+add_executable(leakflow_plot_table_view_tests
+    table_view_test.cpp
+)
+target_link_libraries(leakflow_plot_table_view_tests
+    PRIVATE
+        leakflow_plot
+)
+leakflow_configure_test_target(leakflow_plot_table_view_tests)
+add_test(NAME leakflow_plot_table_view COMMAND leakflow_plot_table_view_tests)
