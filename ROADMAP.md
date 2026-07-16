@@ -2000,10 +2000,10 @@ Exit criteria:
 
 ## Active Phase: Full Clustering Evaluation Metrics
 
-Status: **in progress**. Phase A1 (exact numeric evaluation) and A2 (semantic
-and fragmentation metrics) are implemented; rectangular alignments are next.
-Phase A is not complete until its alignment, payload, persistence, and pipeline
-exit criteria are all green.
+Status: **in progress**. Phase A1 (exact numeric evaluation), A2 (semantic and
+fragmentation metrics), and A3 (rectangular alignments) are implemented; A4 is
+next. Phase A is not complete until its payload, persistence, and pipeline exit
+criteria are all green.
 
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Phase A).
@@ -2025,9 +2025,12 @@ Implementation sequence:
   `off|power` semantics, validated ranges/weights and `power=1|2`, micro/macro/
   per-dimension/per-cluster impurity, merge rate and conditional severity, and
   micro/macro/per-group fragmentation with full-detail records.
-- **A3 — rectangular alignments (next):** separate exact-overlap and
-  semantic-cost assignments with unmatched support.
-- **A4 — pipeline contract (pending):** `ClusteringEvaluationPayload`,
+- **A3 — rectangular alignments (done):** separate exact-overlap and
+  semantic-cost assignments, deterministic predicted-major dense tie-breaking,
+  explicit unmatched marginal supports, exact per-group scores, fixed maximum
+  semantic dummy penalty, per-dimension errors, and contingency-mass error
+  records. Both rectangular directions are covered by hand-checked fixtures.
+- **A4 — pipeline contract (next):** `ClusteringEvaluationPayload`,
   `ClusteringEvaluate`, typed-unit alignment, summaries, persistence, descriptor
   registration, the default-off optional combined-quality record/property, and
   compatibility tests.
@@ -2058,15 +2061,14 @@ Locked decisions:
 
 Remaining work:
 
-- Add rectangular alignment support with hand-checked reference fixtures.
 - Add `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
   alignment, optional combined quality, and a versioned persistence codec.
-- Validate semantic metrics and alignments with hand-computed cases, then cover
-  unit alignment and pipeline/persistence behavior. A1/A2 already cover the
-  conventional scikit-learn fixtures, hand-computed semantic/fragmentation
-  cases, exact degeneracies, arbitrary IDs, `D=1/2/4`, numeric
-  batches/dtypes/validation, all current undefined denominators, and
-  non-quadratic AMI/semantic stress cases.
+- Cover typed-unit alignment and pipeline/persistence behavior. A1–A3 already
+  cover the conventional scikit-learn fixtures, hand-computed semantic,
+  fragmentation, and alignment cases, exact degeneracies, both rectangular directions,
+  deterministic assignment ties, arbitrary IDs, `D=1/2/4`, numeric batches/
+  dtypes/validation, all current undefined denominators, and non-quadratic
+  AMI/semantic/alignment stress cases.
 
 Out of scope:
 

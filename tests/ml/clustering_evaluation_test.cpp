@@ -119,14 +119,15 @@ int main() {
   {
     const auto exact_descriptors = exact_clustering_metric_descriptors();
     const auto descriptors = clustering_metric_descriptors();
-    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 20,
+    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 27,
                 "descriptors: wrong exact metric count")) {
       return 1;
     }
     if (!expect(exact_descriptors.front().name == "adjusted_rand_index" &&
                     exact_descriptors.back().name ==
                         "normalized_mutual_information" &&
-                    descriptors.back().name == "fragmentation_per_group",
+                    descriptors.back().name ==
+                        "semantic_alignment_dimension_error",
                 "descriptors: names/order wrong")) {
       return 1;
     }
@@ -142,13 +143,18 @@ int main() {
         ClusteringMetricId::SemanticImpurityDimensionMicro);
     const auto &fragmentation =
         clustering_metric_descriptor(ClusteringMetricId::FragmentationMacro);
+    const auto &alignment = clustering_metric_descriptor(
+        ClusteringMetricId::ExactAlignmentJaccardPerGroup);
     if (!expect(semantic.family == MetricFamily::Semantic &&
                     semantic.direction == MetricDirection::LowerIsBetter &&
                     semantic.averaging == MetricAveraging::PerDimension &&
                     fragmentation.family == MetricFamily::Fragmentation &&
                     fragmentation.direction == MetricDirection::LowerIsBetter &&
-                    fragmentation.averaging == MetricAveraging::Macro,
-                "descriptors: A2 metadata wrong")) {
+                    fragmentation.averaging == MetricAveraging::Macro &&
+                    alignment.family == MetricFamily::Alignment &&
+                    alignment.direction == MetricDirection::HigherIsBetter &&
+                    alignment.averaging == MetricAveraging::PerGroup,
+                "descriptors: A2/A3 metadata wrong")) {
       return 1;
     }
   }
@@ -167,12 +173,17 @@ int main() {
     const auto result = evaluate_clustering(predicted, truth, options);
     const auto &unit = only_unit(result);
 
-    if (!expect(result.schema_version == 2 && !result.batched &&
+    if (!expect(result.schema_version == 3 && !result.batched &&
                     result.observation_count == 6 &&
                     result.semantic_dimension_count == 2 &&
                     result.effective_options.detail == options.detail &&
                     result.effective_options.dimension_names ==
                         options.dimension_names &&
+                    result.effective_options.alignment ==
+                        AlignmentEvaluationMode::None &&
+                    !unit.alignment_identities.has_value() &&
+                    !unit.exact_alignment.has_value() &&
+                    !unit.semantic_alignment.has_value() &&
                     result.units.size() == 1,
                 "reference: result envelope wrong")) {
       return 1;
@@ -852,6 +863,381 @@ int main() {
     }
   }
 
+  // A3 G<K fixture: exact overlap leaves the mixed cluster unmatched, while
+  // semantic cost prefers paying the dummy penalty for a smaller pure cluster.
+  // This exercises distinct mappings, fixed dummy cost, per-dimension errors,
+  // marginal supports, Full details, both powers, and canonical identities.
+  {
+    const auto truth = torch::tensor({{0, 0},
+                                      {0, 0},
+                                      {0, 0},
+                                      {0, 0},
+                                      {0, 0},
+                                      {1, 2},
+                                      {1, 2},
+                                      {1, 2},
+                                      {1, 2},
+                                      {1, 2}},
+                                     torch::kLong);
+    const auto predicted =
+        torch::tensor({-5, -5, -5, 30, 30, 10, 10, 10, 30, 30}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {4.0, 4.0};
+    options.semantic_weights = {3.0, 1.0};
+    options.power = 1;
+    options.alignment = AlignmentEvaluationMode::Both;
+
+    const auto result = evaluate_clustering(predicted, truth, options);
+    const auto &unit = only_unit(result);
+    if (!expect(result.effective_options.alignment ==
+                        AlignmentEvaluationMode::Both &&
+                    unit.alignment_identities.has_value() &&
+                    unit.exact_alignment.has_value() &&
+                    unit.semantic_alignment.has_value(),
+                "A3 G<K: requested results/identities missing") ||
+        !expect(torch::equal(unit.alignment_identities->predicted_ids,
+                             torch::tensor({-5, 10, 30}, torch::kLong)) &&
+                    torch::equal(unit.alignment_identities->truth_vectors,
+                                 torch::tensor({{0, 0}, {1, 2}}, torch::kLong)),
+                "A3 G<K: canonical identities wrong")) {
+      return 1;
+    }
+
+    const auto &exact = *unit.exact_alignment;
+    if (!expect(exact.mapping.predicted_to_truth_group ==
+                        std::vector<std::int64_t>({0, 1, -1}) &&
+                    exact.mapping.truth_to_predicted_cluster ==
+                        std::vector<std::int64_t>({0, 1}) &&
+                    exact.aligned_column_to_predicted_cluster ==
+                        std::vector<std::int64_t>({0, 1, 2}),
+                "A3 G<K exact: mapping/permutation wrong") ||
+        !expect(exact.matched_overlap_observation_count == 6 &&
+                    exact.nonmatched_observation_count == 4 &&
+                    exact.mapping.assigned_predicted_observation_count == 6 &&
+                    exact.mapping.unmatched_predicted_observation_count == 4 &&
+                    exact.mapping.assigned_truth_observation_count == 10 &&
+                    exact.mapping.unmatched_truth_observation_count == 0 &&
+                    exact.mapping.unmatched_predicted_clusters.size() == 1 &&
+                    exact.mapping.unmatched_predicted_clusters[0].index == 2 &&
+                    exact.mapping.unmatched_predicted_clusters[0]
+                            .observation_count == 4,
+                "A3 G<K exact: supports wrong") ||
+        !metric_close(exact.matched_accuracy, 3.0 / 5.0,
+                      "A3 G<K exact: accuracy") ||
+        !expect(exact.matched_accuracy.support_count == 10 &&
+                    exact.truth_group_details.has_value() &&
+                    exact.truth_group_details->size() == 2,
+                "A3 G<K exact: detail envelope wrong")) {
+      return 1;
+    }
+    for (const auto &group : *exact.truth_group_details) {
+      if (!expect(group.truth_observation_count == 5 &&
+                      group.predicted_observation_count == 3 &&
+                      group.overlap_observation_count == 3,
+                  "A3 G<K exact: group counts wrong") ||
+          !metric_close(group.precision, 1.0,
+                        "A3 G<K exact: group precision") ||
+          !metric_close(group.recall, 3.0 / 5.0,
+                        "A3 G<K exact: group recall") ||
+          !metric_close(group.f1, 3.0 / 4.0, "A3 G<K exact: group F1") ||
+          !metric_close(group.jaccard, 3.0 / 5.0,
+                        "A3 G<K exact: group Jaccard") ||
+          !expect(group.precision.support_count == 3 &&
+                      group.recall.support_count == 5 &&
+                      group.f1.support_count == 8 &&
+                      group.jaccard.support_count == 5,
+                  "A3 G<K exact: group supports wrong")) {
+        return 1;
+      }
+    }
+
+    const auto &semantic = *unit.semantic_alignment;
+    if (!expect(semantic.mapping.predicted_to_truth_group ==
+                        std::vector<std::int64_t>({0, -1, 1}) &&
+                    semantic.mapping.truth_to_predicted_cluster ==
+                        std::vector<std::int64_t>({0, 2}),
+                "A3 G<K semantic: mapping wrong") ||
+        !expect(semantic.mapping.assigned_predicted_observation_count == 7 &&
+                    semantic.mapping.unmatched_predicted_observation_count ==
+                        3 &&
+                    semantic.mapping.assigned_truth_observation_count == 10 &&
+                    semantic.mapping.unmatched_truth_observation_count == 0 &&
+                    semantic.exact_overlap_observation_count == 5 &&
+                    semantic.nonoverlap_observation_count == 5 &&
+                    close(semantic.unmatched_predicted_penalty, 1.0),
+                "A3 G<K semantic: supports/penalty wrong") ||
+        !metric_close(semantic.normalized_cost, 29.0 / 80.0,
+                      "A3 G<K semantic p1: normalized cost") ||
+        !expect(semantic.normalized_cost.support_count == 10 &&
+                    semantic.dimensions.size() == 2 &&
+                    semantic.dimensions[0].normalized_error.support_count ==
+                        10 &&
+                    semantic.dimensions[1].normalized_error.support_count == 10,
+                "A3 G<K semantic p1: metric supports wrong") ||
+        !metric_close(semantic.dimensions[0].normalized_error, 7.0 / 20.0,
+                      "A3 G<K semantic p1: dimension 0") ||
+        !metric_close(semantic.dimensions[1].normalized_error, 2.0 / 5.0,
+                      "A3 G<K semantic p1: dimension 1") ||
+        !expect(semantic.error_masses.has_value() &&
+                    semantic.error_masses->size() == 4,
+                "A3 G<K semantic p1: masses missing")) {
+      return 1;
+    }
+    std::uint64_t mass_support = 0;
+    double weighted_mass_cost = 0.0;
+    for (const auto &mass : *semantic.error_masses) {
+      mass_support += mass.observation_count;
+      weighted_mass_cost +=
+          mass.normalized_cost * static_cast<double>(mass.observation_count);
+    }
+    if (!expect(
+            mass_support == 10 &&
+                close(weighted_mass_cost / 10.0, 29.0 / 80.0) &&
+                semantic.error_masses->at(1).source_truth_group_index == 0 &&
+                semantic.error_masses->at(1).predicted_cluster_index == 2 &&
+                semantic.error_masses->at(1).assigned_truth_group_index == 1 &&
+                close(semantic.error_masses->at(1).normalized_cost,
+                      5.0 / 16.0) &&
+                semantic.error_masses->at(2).assigned_truth_group_index == -1 &&
+                close(semantic.error_masses->at(2).normalized_cost, 1.0),
+            "A3 G<K semantic p1: mass records wrong")) {
+      return 1;
+    }
+
+    const auto permutation =
+        torch::tensor({9, 3, 7, 0, 6, 2, 8, 5, 1, 4}, torch::kLong);
+    const auto &permuted = only_unit(
+        evaluate_clustering(predicted.index_select(0, permutation),
+                            truth.index_select(0, permutation), options));
+    if (!expect(
+            permuted.exact_alignment->mapping.predicted_to_truth_group ==
+                    exact.mapping.predicted_to_truth_group &&
+                permuted.semantic_alignment->mapping.predicted_to_truth_group ==
+                    semantic.mapping.predicted_to_truth_group &&
+                close(*permuted.semantic_alignment->normalized_cost.value,
+                      *semantic.normalized_cost.value),
+            "A3 G<K: observation permutation changed alignment")) {
+      return 1;
+    }
+
+    options.power = 2;
+    const auto squared_unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto &squared = *squared_unit.semantic_alignment;
+    if (!expect(squared.mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0, -1, 1}),
+                "A3 G<K semantic p2: mapping wrong") ||
+        !metric_close(squared.normalized_cost, 103.0 / 320.0,
+                      "A3 G<K semantic p2: normalized cost") ||
+        !metric_close(squared.dimensions[0].normalized_error, 5.0 / 16.0,
+                      "A3 G<K semantic p2: dimension 0") ||
+        !metric_close(squared.dimensions[1].normalized_error, 7.0 / 20.0,
+                      "A3 G<K semantic p2: dimension 1")) {
+      return 1;
+    }
+
+    options.detail = ClusteringEvaluationDetail::Global;
+    options.power = 1;
+    const auto &global =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    if (!expect(global.alignment_identities.has_value() &&
+                    !global.partition_detail.has_value() &&
+                    !global.exact_alignment->truth_group_details.has_value() &&
+                    !global.semantic_alignment->error_masses.has_value(),
+                "A3 G<K global: detail policy wrong")) {
+      return 1;
+    }
+  }
+
+  // A3 G>K fixture: exact overlap chooses the plurality truth group, while
+  // semantic alignment chooses the weighted semantic medoid. Unmatched truth
+  // supports and undefined per-group precision/F1 remain explicit.
+  {
+    const auto truth = scalar_truth({0, 0, 0, 0, 4, 4, 4, 10, 10, 10});
+    const auto predicted = torch::full({10}, 42, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {10.0};
+    options.power = 1;
+    options.alignment = AlignmentEvaluationMode::Both;
+    const auto &unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+
+    const auto &exact = *unit.exact_alignment;
+    if (!expect(exact.mapping.predicted_to_truth_group ==
+                        std::vector<std::int64_t>({0}) &&
+                    exact.mapping.truth_to_predicted_cluster ==
+                        std::vector<std::int64_t>({0, -1, -1}) &&
+                    exact.mapping.assigned_predicted_observation_count == 10 &&
+                    exact.mapping.unmatched_predicted_observation_count == 0 &&
+                    exact.mapping.assigned_truth_observation_count == 4 &&
+                    exact.mapping.unmatched_truth_observation_count == 6 &&
+                    exact.mapping.unmatched_truth_groups.size() == 2,
+                "A3 G>K exact: mapping/supports wrong") ||
+        !metric_close(exact.matched_accuracy, 2.0 / 5.0,
+                      "A3 G>K exact: accuracy") ||
+        !metric_undefined(exact.truth_group_details->at(1).precision,
+                          MetricUndefinedReason::NoMatchedPredictedCluster, 0,
+                          "A3 G>K exact: unmatched precision") ||
+        !metric_close(exact.truth_group_details->at(1).recall, 0.0,
+                      "A3 G>K exact: unmatched recall") ||
+        !metric_undefined(exact.truth_group_details->at(1).f1,
+                          MetricUndefinedReason::DependentMetricUndefined, 3,
+                          "A3 G>K exact: unmatched F1") ||
+        !metric_close(exact.truth_group_details->at(1).jaccard, 0.0,
+                      "A3 G>K exact: unmatched Jaccard")) {
+      return 1;
+    }
+
+    const auto &semantic = *unit.semantic_alignment;
+    if (!expect(
+            semantic.mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({1}) &&
+                semantic.mapping.truth_to_predicted_cluster ==
+                    std::vector<std::int64_t>({-1, 0, -1}) &&
+                semantic.mapping.assigned_predicted_observation_count == 10 &&
+                semantic.mapping.unmatched_predicted_observation_count == 0 &&
+                semantic.mapping.assigned_truth_observation_count == 3 &&
+                semantic.mapping.unmatched_truth_observation_count == 7 &&
+                semantic.exact_overlap_observation_count == 3 &&
+                semantic.nonoverlap_observation_count == 7,
+            "A3 G>K semantic p1: mapping/supports wrong") ||
+        !metric_close(semantic.normalized_cost, 17.0 / 50.0,
+                      "A3 G>K semantic p1: cost") ||
+        !metric_close(semantic.dimensions[0].normalized_error, 17.0 / 50.0,
+                      "A3 G>K semantic p1: dimension") ||
+        !expect(semantic.error_masses->size() == 3 &&
+                    close(semantic.error_masses->at(0).normalized_cost, 0.4) &&
+                    close(semantic.error_masses->at(1).normalized_cost, 0.0) &&
+                    close(semantic.error_masses->at(2).normalized_cost, 0.6),
+                "A3 G>K semantic p1: masses wrong")) {
+      return 1;
+    }
+
+    options.power = 2;
+    const auto squared_unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto &squared = *squared_unit.semantic_alignment;
+    if (!expect(squared.mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({1}),
+                "A3 G>K semantic p2: mapping wrong") ||
+        !metric_close(squared.normalized_cost, 43.0 / 250.0,
+                      "A3 G>K semantic p2: cost") ||
+        !metric_close(squared.dimensions[0].normalized_error, 43.0 / 250.0,
+                      "A3 G>K semantic p2: dimension")) {
+      return 1;
+    }
+  }
+
+  // Equal-primary optima use the locked predicted-major dense tie rule in
+  // square and both rectangular directions.
+  {
+    ClusteringEvaluationOptions options;
+    options.alignment = AlignmentEvaluationMode::Exact;
+    const auto &square = only_unit(
+        evaluate_clustering(torch::tensor({10, 20, 10, 20}, torch::kLong),
+                            scalar_truth({0, 0, 1, 1}), options));
+    const auto &more_predicted = only_unit(evaluate_clustering(
+        torch::tensor({10, 20}, torch::kLong), scalar_truth({0, 0}), options));
+    const auto &more_truth = only_unit(evaluate_clustering(
+        torch::tensor({10, 10}, torch::kLong), scalar_truth({0, 1}), options));
+    // Raw ascending Hungarian traversal chooses {1,0} for this equal optimum;
+    // the equality-graph refinement must flip it to the contractual {0,1}.
+    const auto &requires_refinement = only_unit(evaluate_clustering(
+        torch::tensor({10, 20, 10, 10, 20, 20}, torch::kLong),
+        scalar_truth({0, 0, 1, 1, 1, 1}), options));
+    if (!expect(
+            square.exact_alignment->mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0, 1}) &&
+                more_predicted.exact_alignment->mapping
+                        .predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0, -1}) &&
+                more_truth.exact_alignment->mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0}) &&
+                more_truth.exact_alignment->mapping
+                        .truth_to_predicted_cluster ==
+                    std::vector<std::int64_t>({0, -1}) &&
+                requires_refinement.exact_alignment->mapping
+                        .predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0, 1}),
+            "A3 ties: dense lexicographic rule failed") ||
+        !metric_close(requires_refinement.exact_alignment->matched_accuracy,
+                      0.5, "A3 ties: refinement accuracy") ||
+        !expect(!square.semantic_alignment.has_value() &&
+                    square.alignment_identities.has_value(),
+                "A3 exact-only: result engagement wrong")) {
+      return 1;
+    }
+  }
+
+  // Zero-weight dimensions remain visible in semantic alignment diagnostics
+  // but do not affect the aggregate assignment objective or cost.
+  {
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0, 1.0};
+    options.semantic_weights = {1.0, 0.0};
+    options.power = 1;
+    options.alignment = AlignmentEvaluationMode::Semantic;
+    const auto alignment_unit = only_unit(evaluate_clustering(
+        torch::zeros({2}, torch::kLong),
+        torch::tensor({{0, 0}, {0, 1}}, torch::kLong), options));
+    const auto &alignment = *alignment_unit.semantic_alignment;
+    if (!expect(alignment.mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0}),
+                "A3 zero weight: mapping wrong") ||
+        !metric_close(alignment.normalized_cost, 0.0,
+                      "A3 zero weight: aggregate cost") ||
+        !metric_close(alignment.dimensions[0].normalized_error, 0.0,
+                      "A3 zero weight: dimension 0") ||
+        !metric_close(alignment.dimensions[1].normalized_error, 0.5,
+                      "A3 zero weight: dimension 1")) {
+      return 1;
+    }
+  }
+
+  // Batched D=4 alignment evaluates canonical mappings independently per unit.
+  {
+    const auto truth = torch::stack({
+        torch::tensor({{0, 0, 0, 0}, {0, 0, 0, 0}, {1, 1, 1, 1}, {1, 1, 1, 1}},
+                      torch::kLong),
+        torch::tensor({{2, 2, 2, 2}, {2, 2, 2, 2}, {3, 3, 3, 3}, {3, 3, 3, 3}},
+                      torch::kLong),
+    });
+    const auto predicted = torch::stack({
+        torch::tensor({9, 9, -2, -2}, torch::kLong),
+        torch::tensor({3, 3, 4, 4}, torch::kLong),
+    });
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0, 1.0, 1.0, 1.0};
+    options.alignment = AlignmentEvaluationMode::Both;
+    const auto result = evaluate_clustering(predicted, truth, options);
+    if (!expect(
+            result.batched && result.units.size() == 2 &&
+                result.units[0].alignment_identities.has_value() &&
+                result.units[1].alignment_identities.has_value() &&
+                result.units[0]
+                        .exact_alignment->mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({1, 0}) &&
+                result.units[0]
+                        .exact_alignment->aligned_column_to_predicted_cluster ==
+                    std::vector<std::int64_t>({1, 0}) &&
+                result.units[1]
+                        .exact_alignment->mapping.predicted_to_truth_group ==
+                    std::vector<std::int64_t>({0, 1}),
+            "A3 batch D4: mappings/identities wrong") ||
+        !metric_close(result.units[0].semantic_alignment->normalized_cost, 0.0,
+                      "A3 batch D4: unit 0 cost") ||
+        !metric_close(result.units[1].semantic_alignment->normalized_cost, 0.0,
+                      "A3 batch D4: unit 1 cost")) {
+      return 1;
+    }
+  }
+
   // Leading units are evaluated independently and may have different G and K.
   {
     const auto truth0 = torch::tensor(
@@ -982,6 +1368,7 @@ int main() {
     options.semantic = SemanticEvaluationMode::Power;
     options.semantic_ranges = {1.0};
     options.power = 2;
+    options.alignment = AlignmentEvaluationMode::Semantic;
     const std::int64_t large0 = 9'007'199'254'740'992LL;
     const std::int64_t large1 = 9'007'199'254'740'993LL;
     const auto large_integral = only_unit(evaluate_clustering(
@@ -989,7 +1376,9 @@ int main() {
         torch::tensor({large0, large1}, torch::kLong).reshape({2, 1}),
         options));
     if (!metric_close(large_integral.semantic.micro_impurity, 1.0,
-                      "A2 dtype: adjacent large int64 values")) {
+                      "A2 dtype: adjacent large int64 values") ||
+        !metric_close(large_integral.semantic_alignment->normalized_cost, 0.5,
+                      "A3 dtype: adjacent large int64 alignment")) {
       return 1;
     }
 
@@ -1002,7 +1391,9 @@ int main() {
     const auto wide_integral = only_unit(evaluate_clustering(
         torch::zeros({2}, torch::kLong), wide_truth, options));
     if (!metric_close(wide_integral.semantic.micro_impurity, 1.0,
-                      "A2 dtype: adjacent uint64 values")) {
+                      "A2 dtype: adjacent uint64 values") ||
+        !metric_close(wide_integral.semantic_alignment->normalized_cost, 0.5,
+                      "A3 dtype: adjacent uint64 alignment")) {
       return 1;
     }
 
@@ -1012,7 +1403,9 @@ int main() {
         torch::zeros({2}, torch::kLong),
         torch::tensor({-1.5, 0.5}, torch::kFloat64).reshape({2, 1}), options));
     if (!metric_close(floating.semantic.micro_impurity, 1.0,
-                      "A2 dtype: signed floating values")) {
+                      "A2 dtype: signed floating values") ||
+        !metric_close(floating.semantic_alignment->normalized_cost, 0.5,
+                      "A3 dtype: signed floating alignment")) {
       return 1;
     }
   }
@@ -1263,6 +1656,30 @@ int main() {
       return 1;
     }
 
+    for (const auto alignment :
+         {AlignmentEvaluationMode::Semantic, AlignmentEvaluationMode::Both}) {
+      ClusteringEvaluationOptions semantic_alignment_without_power;
+      semantic_alignment_without_power.alignment = alignment;
+      if (!expect(throws_invalid_argument([&] {
+                    static_cast<void>(
+                        evaluate_clustering(valid_predicted, valid_truth,
+                                            semantic_alignment_without_power));
+                  }),
+                  "validation: semantic alignment without power accepted")) {
+        return 1;
+      }
+    }
+
+    ClusteringEvaluationOptions invalid_alignment_mode;
+    invalid_alignment_mode.alignment = static_cast<AlignmentEvaluationMode>(99);
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, invalid_alignment_mode));
+                }),
+                "validation: unknown alignment mode accepted")) {
+      return 1;
+    }
+
     ClusteringEvaluationOptions invalid_detail;
     invalid_detail.detail = static_cast<ClusteringEvaluationDetail>(99);
     if (!expect(throws_invalid_argument([&] {
@@ -1402,6 +1819,34 @@ int main() {
                       "A2 p2 stress: macro impurity", 1.0e-12) ||
         !metric_close(unit.semantic.conditional_merge_error_severity, expected,
                       "A2 p2 stress: severity", 1.0e-12)) {
+      return 1;
+    }
+  }
+
+  // A3 stress keeps N large while the dense assignment remains small. Costs
+  // must come from contingency masses, not observation-pair materialization.
+  {
+    constexpr std::int64_t observations = 50'000;
+    const auto truth_labels = torch::arange(observations, torch::kLong) % 2;
+    const auto predicted = 1 - truth_labels;
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0};
+    options.alignment = AlignmentEvaluationMode::Both;
+    const auto &unit = only_unit(evaluate_clustering(
+        predicted, truth_labels.reshape({observations, 1}), options));
+    if (!expect(unit.exact_alignment->mapping.predicted_to_truth_group ==
+                        std::vector<std::int64_t>({1, 0}) &&
+                    unit.semantic_alignment->mapping.predicted_to_truth_group ==
+                        std::vector<std::int64_t>({1, 0}),
+                "A3 stress: mapping wrong") ||
+        !metric_close(unit.exact_alignment->matched_accuracy, 1.0,
+                      "A3 stress: exact accuracy") ||
+        !metric_close(unit.semantic_alignment->normalized_cost, 0.0,
+                      "A3 stress: semantic cost") ||
+        !expect(unit.semantic_alignment->normalized_cost.support_count ==
+                    static_cast<std::uint64_t>(observations),
+                "A3 stress: support wrong")) {
       return 1;
     }
   }

@@ -5,8 +5,8 @@ This file is the compact phase/task brief for Codex.
 ## Current Default
 
 **Full Clustering Evaluation Metrics (Phase A) is active.** A1 exact numeric
-evaluation and A2 semantic/fragmentation metrics are implemented and green. A3,
-rectangular exact-overlap and semantic-cost alignments, is the next bounded
+evaluation, A2 semantic/fragmentation metrics, and A3 rectangular alignments are
+implemented and green. A4, the pipeline result contract, is the next bounded
 slice. Phase B plotting remains blocked until the complete Phase A payload
 contract is frozen.
 
@@ -23,9 +23,12 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 2. **A2 — semantic and fragmentation metrics (done)** — validated normalized
    power costs (`power=1|2`), semantic merge/impurity aggregates and details,
    and fragmentation aggregates and details are now in the numeric contract.
-3. **A3 — rectangular alignments (next)** — add distinct exact-overlap and
-   semantic-cost assignments with unmatched support.
-4. **A4 — pipeline result contract** — add `ClusteringEvaluate`, structured
+3. **A3 — rectangular alignments (done)** — distinct exact-overlap and
+   semantic-cost assignments support both rectangular directions, strict
+   predicted-major dense tie-breaking, unmatched marginal supports, exact
+   per-group scores, semantic per-dimension errors, and Full-detail
+   contingency-mass error records.
+4. **A4 — pipeline result contract (next)** — add `ClusteringEvaluate`, structured
    `ClusteringEvaluationPayload`, typed-unit alignment, bounded summaries, and
    versioned persistence, plus the default-off optional combined-quality
    record/property, while keeping `ClusteringStats` unchanged.

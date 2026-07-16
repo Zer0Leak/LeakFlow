@@ -51,8 +51,8 @@ support:
   bit channels.
 - `leakflow_ml` exists and provides generic Torch numeric APIs for Gaussian
   mixtures, constrained Sinkhorn transport, the legacy scalar-class clustering
-  metrics, and the Phase A1/A2 vector-truth exact, semantic, and fragmentation
-  evaluator.
+  metrics, and the Phase A1/A2/A3 vector-truth exact, semantic, fragmentation,
+  and rectangular-alignment evaluator.
 - `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
   and `ClusteringStats`, including typed-unit propagation/alignment.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
@@ -206,8 +206,8 @@ real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative sto
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
 state machine), and §14 (CLI cookbook). Full clustering evaluation Phase A is
-now active: its A1 exact numeric core and A2 semantic/fragmentation metrics are
-implemented, with alignments and pipeline integration still pending.
+now active: its A1 exact numeric core, A2 semantic/fragmentation metrics, and A3
+rectangular alignments are implemented, with pipeline integration still pending.
 Clustering-metric visualization remains the follow-up phase. Zarr parity remains
 a separate deferred candidate.
 
@@ -357,6 +357,13 @@ ML:
   and fragmentation micro/macro and per-group records. Global detail stays
   bounded; Full detail retains singleton clusters/groups as explicit unavailable
   records. The `p=1` and `p=2` kernels avoid observation-pair enumeration.
+- Phase A3 adds optional `none|exact|semantic|both` alignment. Exact-overlap and
+  semantic-cost mappings remain separate, support rectangular `G<K` and `G>K`,
+  use strict predicted-major dense tie-breaking, expose unmatched support on
+  both marginals, and materialize canonical mapping identities even in Global
+  mode. Full detail adds exact per-truth scores and semantic contingency-mass
+  error records; semantic alignment uses the configured power cost and a fixed
+  maximum dummy penalty of `1.0`.
 
 ML plugin elements:
 
@@ -432,10 +439,10 @@ Logging:
 
 ## Not Implemented Yet
 
-- Remaining full clustering-evaluation work after A2: rectangular
-  exact/semantic alignments; the default-off optional combined-quality record;
-  and `ClusteringEvaluationPayload` / `ClusteringEvaluate` pipeline integration
-  and persistence.
+- Remaining full clustering-evaluation work after A3: the default-off optional
+  combined-quality record and `ClusteringEvaluationPayload` /
+  `ClusteringEvaluate` pipeline integration, typed-unit alignment, summaries,
+  registration, and persistence.
 - Clustering evaluation table/metric/matrix plot bridge
   (`leakflow_plugins_ml_plot`). Design for both planned phases:
   `docs/design/clustering_evaluation_metrics.md`.

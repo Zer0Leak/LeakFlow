@@ -1,8 +1,9 @@
 # Clustering Evaluation and Metric Visualization
 
-Status: implementation in progress. Phase A1 (exact numeric core) and Phase A2
-(semantic and fragmentation metrics) are implemented; Phase A3 is next. Phase A
-as a whole and all Phase B visualization work remain incomplete.
+Status: implementation in progress. Phase A1 (exact numeric core), Phase A2
+(semantic and fragmentation metrics), and Phase A3 (rectangular alignments) are
+implemented; Phase A4 is next. Phase A as a whole and all Phase B visualization
+work remain incomplete.
 
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
@@ -24,9 +25,11 @@ Current Phase A slices:
   configuration is validated even in `off` mode but ranges are not required;
   semantic records then carry `semantic_disabled`. Full detail retains
   singleton cluster/group records with explicit undefined reasons.
-- **A3 — rectangular alignments (next):** exact-overlap and semantic-cost
-  assignments with unmatched support.
-- **A4 — pipeline contract (pending):** payload, evaluator element, typed-unit
+- **A3 — rectangular alignments (implemented):** exact-overlap and semantic-cost
+  assignments with explicit unmatched marginal support, strict predicted-major
+  dense tie-breaking, exact per-group scores, semantic per-dimension errors,
+  and Full-detail contingency-mass error records.
+- **A4 — pipeline contract (next):** payload, evaluator element, typed-unit
   alignment, the default-off optional combined-quality record/property, summary,
   persistence, registration, and pipeline tests.
 
@@ -396,9 +399,24 @@ clusters and truth groups. Alignment is optional post-processing for
 interpretation and visualization only.
 
 Both alignment methods support rectangular \(G\times K\) inputs by padding the
-assignment problem. Mappings explicitly mark unmatched truth groups and
-predicted clusters. Deterministic tie-breaking prefers real-to-real assignments
-over dummies, then follows dense-ID order.
+assignment problem to \(L=\max(G,K)\). Solver rows are canonical predicted
+clusters followed by dummy predicted rows; columns are canonical truth groups
+followed by dummy truth columns. Mappings use `-1` for unmatched entries.
+
+Tie-breaking is part of the numeric contract, not an implementation accident:
+after optimizing the primary objective, choose the lexicographically smallest
+predicted-cluster-to-truth-group vector in ascending canonical predicted-cluster
+order, treating unmatched as larger than every real truth-group index. Thus real
+truth groups precede dummies and dense truth-group order breaks remaining ties.
+The implementation refines the Hungarian equality graph, so the secondary rule
+does not perturb or weaken the primary optimum.
+
+Each alignment reports four separate marginal supports: assigned and unmatched
+predicted-cluster observations, and assigned and unmatched truth-group
+observations. These are deliberately not collapsed into one ambiguous
+"matched support" field. A rectangular assignment may pair real groups and
+clusters with zero overlap because the maximum-cardinality real-to-real pairing
+is still explicit.
 
 ### Exact-Overlap Alignment
 
@@ -411,13 +429,33 @@ Maximize:
 Report:
 
 - predicted-cluster-to-truth-group mapping;
-- unmatched IDs and their observation support;
-- matched accuracy;
+- inverse truth-group-to-predicted-cluster mapping;
+- unmatched canonical indices and their observation support;
+- matched-overlap observation count, nonmatched count, and matched accuracy;
 - a column permutation for the rectangular contingency matrix;
 - per-truth-group precision, recall, F1, Jaccard, and support.
 
-The matrix remains rectangular; alignment metadata reorders or annotates it
-without discarding unmatched rows or columns.
+For truth group \(g\) assigned predicted cluster \(k\), let
+\(t=n_{gk}\). The per-group records are:
+
+\[
+P_g=\frac{t}{n_k},\qquad
+R_g=\frac{t}{n_g},\qquad
+F1_g=\frac{2t}{n_g+n_k},\qquad
+J_g=\frac{t}{n_g+n_k-t}.
+\]
+
+Their denominator supports are \(n_k\), \(n_g\), \(n_g+n_k\), and
+\(n_g+n_k-t\), respectively. For an unmatched truth group, precision is
+undefined with `no_matched_predicted_cluster`, recall and Jaccard are defined as
+zero with support \(n_g\), and F1 is unavailable with
+`dependent_metric_undefined`.
+
+The aligned-column permutation means "new column position to original canonical
+predicted-cluster index": matched clusters appear in assigned truth-group order,
+then unmatched predicted clusters in ascending canonical order. The matrix
+remains rectangular; no row or column is discarded and no dummy column is
+materialized in the result.
 
 ### Semantic-Cost Alignment
 
@@ -430,16 +468,50 @@ D_{kg}=
 
 Minimize total assigned cost. A predicted cluster assigned to a dummy truth
 group receives its maximum normalized penalty \(n_k\). Dummy predicted rows have
-zero cost but remain explicitly unmatched. This penalty is part of the result
-configuration; it must not be implicit.
+zero cost but remain explicitly unmatched. The normalized dummy penalty is
+fixed at `1.0` and is stored explicitly in the result. For an unmatched
+predicted cluster the aggregate error and every per-dimension error are `1.0`,
+preserving the configured weighted identity.
+
+If \(a(k)\) is the assigned truth group for predicted cluster \(k\), define for
+a real assignment:
+
+\[
+e_{g'k,d}=\left(\frac{|v_{g',d}-v_{a(k),d}|}{R_d}\right)^p,
+\qquad
+e_{g'k}=\frac{\sum_d w_d e_{g'k,d}}{\sum_d w_d}.
+\]
+
+For an unmatched predicted cluster, \(e_{g'k,d}=e_{g'k}=1\). Report:
+
+\[
+E=\frac{1}{N}\sum_{g',k}n_{g'k}e_{g'k},
+\qquad
+E_d=\frac{1}{N}\sum_{g',k}n_{g'k}e_{g'k,d}.
+\]
+
+Therefore:
+
+\[
+E=\frac{\sum_d w_dE_d}{\sum_d w_d}.
+\]
 
 Report:
 
-- the semantic-cost mapping and unmatched IDs/support;
-- matched and unmatched observation support;
-- penalized total cost divided by \(N\);
-- per-dimension normalized errors;
-- aggregate semantic error distributions computed from contingency counts.
+- the semantic-cost mapping, inverse mapping, four marginal supports, and
+  unmatched canonical-index records;
+- exact-overlap and nonoverlap observation counts under the semantic mapping;
+- penalized normalized cost \(E\) and per-dimension errors \(E_d\), each with
+  support \(N\);
+- in Full detail, one deterministic error-mass record per nonzero contingency
+  cell: source truth index, predicted index, assigned truth index or unmatched,
+  observation count, aggregate cost, and per-dimension costs.
+
+The error-mass records are ordered by the canonical sparse contingency order and
+sum to \(N\); they describe the empirical error distribution without expanding
+observations or merging floating values into unstable bins. Global detail keeps
+the mapping, identities, supports, and scalar/per-dimension metrics but omits
+per-truth exact scores and semantic error masses.
 
 Exact-overlap and semantic-cost mappings must never share one ambiguous
 `alignment` field because they optimize different objectives.
@@ -474,6 +546,13 @@ The result contains:
 - per-dimension metrics;
 - optional per-cluster and per-group details;
 - optional contingency and alignment records.
+
+When either alignment is requested, canonical predicted IDs and truth vectors
+are materialized as alignment identities even in Global detail, so dense mapping
+indices remain self-describing. Full partition detail additionally retains the
+sparse contingency. Exact alignment can be requested with `semantic=off`;
+semantic alignment, alone or together with exact alignment, requires
+`semantic=power` and validated ranges/weights.
 
 Large or structured results are not encoded as string metadata.
 
@@ -600,14 +679,23 @@ n\sum_i x_i^2-\left(\sum_i x_i\right)^2.
 
 For \(p=1\), sort each cluster/dimension and use prefix sums to obtain the total
 absolute pair difference in \(O(n\log n)\). Semantic-cost alignment uses
-contingency counts and truth-group representative vectors.
+contingency counts and truth-group representative vectors. It precomputes the
+\(G\times G\) truth-group power costs, accumulates the \(K\times G\) assignment
+matrix from the \(Z\) nonzero contingency cells, and never enumerates
+observation pairs.
 
 Use sparse/hash mappings for semantic vectors and contingency entries. A dense
-matrix is materialized only when requested for a result or plot.
+matrix is materialized only when an alignment requests the assignment problem.
+For \(L=\max(G,K)\), Hungarian assignment plus strict equality-graph tie
+refinement is \(O(L^3)\) time and \(O(L^2)\) memory. Semantic matrix construction
+is \(O(G^2D+ZG)\).
 
 Use 64-bit counts with checked \(\binom n2\) arithmetic. Heavy floating-point
-math uses float64. AMI expected-mutual-information terms require a stable
-log-gamma/hypergeometric implementation and independent reference validation.
+math uses at least float64 with extended/compensated accumulation where
+available. Exact assignment costs use wider internal arithmetic so primary
+overlap optimality is not perturbed by tie-breaking. AMI expected-mutual-
+information terms require a stable log-gamma/hypergeometric implementation and
+independent reference validation.
 
 ## 13. Planned File Ownership
 
@@ -675,6 +763,13 @@ Required scenario coverage:
 - exact-only mode without semantic ranges;
 - every undefined denominator;
 - a stress case that would expose an accidental \(O(N^2)\) implementation.
+
+A1–A3 numeric tests now cover the conventional metrics, semantic/
+fragmentation records, both rectangular alignment directions, exact and
+semantic mappings that intentionally differ, a tie that requires an
+equality-graph matching flip, both powers, `D=1/2/4`, zero weights, numeric dtype
+edges, batching, observation permutation, and large-`N`/small-assignment stress.
+The optional combined score remains with A4's property/payload contract.
 
 ### Pipeline and Persistence Tests
 

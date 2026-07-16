@@ -533,16 +533,18 @@ CPA/DPA/correlation/leakage crypto elements) have no interruptible inner loop;
 they rely on the executor's between-buffer safe points for pause/stop and do not
 need in-call checkpoints.
 
-## Clustering Evaluation Result Boundary (Planned)
+## Clustering Evaluation Result Boundary
 
-Design of record: `docs/design/clustering_evaluation_metrics.md`. This contract
-is planned, not yet implemented.
+Design of record: `docs/design/clustering_evaluation_metrics.md`. The numeric
+result boundary through Phase A3 is implemented; the pipeline payload/element
+boundary remains planned for A4.
 
 The full evaluator is split across existing architectural layers:
 
 - `leakflow_ml` owns only the generic numeric options, algorithms, and
-  `ClusteringEvaluationResult`. It remains Torch/numeric-only and has no core,
-  buffer, plugin, plot, AES, or Kyber dependency.
+  `ClusteringEvaluationResult`. A1/A2/A3 exact, semantic, fragmentation, and
+  rectangular alignment records are implemented there. It remains Torch-numeric
+  only and has no core, buffer, plugin, plot, AES, or Kyber dependency.
 - `leakflow_plugins_ml` owns `ClusteringEvaluate` and the core-derived
   `ClusteringEvaluationPayload`. The payload wraps the numeric result, carries
   typed units, has versioned persistence, and exposes a bounded summary.

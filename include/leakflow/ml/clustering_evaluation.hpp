@@ -31,6 +31,13 @@ enum class ClusteringMetricId : std::uint8_t {
   FragmentationMicro = 17,
   FragmentationMacro = 18,
   FragmentationPerGroup = 19,
+  ExactAlignmentMatchedAccuracy = 20,
+  ExactAlignmentPrecisionPerGroup = 21,
+  ExactAlignmentRecallPerGroup = 22,
+  ExactAlignmentF1PerGroup = 23,
+  ExactAlignmentJaccardPerGroup = 24,
+  SemanticAlignmentCost = 25,
+  SemanticAlignmentDimensionError = 26,
 };
 
 enum class MetricFamily : std::uint8_t {
@@ -80,6 +87,7 @@ enum class MetricUndefinedReason : std::uint8_t {
   NoEligiblePredictedClusters = 5,
   NoMergeErrorPairs = 6,
   NoEligibleTruthGroups = 7,
+  NoMatchedPredictedCluster = 8,
 };
 
 struct MetricValue {
@@ -158,6 +166,99 @@ struct FragmentationClusteringMetrics {
   std::optional<std::vector<TruthGroupFragmentationDetail>> group_details;
 };
 
+inline constexpr std::int64_t kUnmatchedAlignmentIndex = -1;
+
+struct AlignmentUnmatchedSupport {
+  // Dense truth-group or predicted-cluster index, according to the containing
+  // vector.
+  std::int64_t index = 0;
+  std::uint64_t observation_count = 0;
+};
+
+struct ClusteringAlignmentMapping {
+  // Canonical dense indices. Unmatched entries use
+  // kUnmatchedAlignmentIndex. See ClusteringAlignmentIdentities for the
+  // corresponding original predicted IDs and semantic truth vectors. Among
+  // equal primary optima, both alignment methods choose the lexicographically
+  // smallest predicted_to_truth_group vector in canonical predicted-ID order,
+  // with real truth indices ordered before unmatched entries.
+  std::vector<std::int64_t> predicted_to_truth_group;   // [K]
+  std::vector<std::int64_t> truth_to_predicted_cluster; // [G]
+  std::vector<AlignmentUnmatchedSupport> unmatched_truth_groups;
+  std::vector<AlignmentUnmatchedSupport> unmatched_predicted_clusters;
+
+  // Predicted-side and truth-side assignment supports are separate marginals;
+  // neither pair should be interpreted as an observation partition shared by
+  // both sides.
+  std::uint64_t assigned_predicted_observation_count = 0;
+  std::uint64_t unmatched_predicted_observation_count = 0;
+  std::uint64_t assigned_truth_observation_count = 0;
+  std::uint64_t unmatched_truth_observation_count = 0;
+};
+
+struct ExactAlignmentTruthGroupDetail {
+  std::int64_t truth_group_index = 0;
+  std::int64_t predicted_cluster_index = kUnmatchedAlignmentIndex;
+  std::uint64_t truth_observation_count = 0;
+  std::uint64_t predicted_observation_count = 0;
+  std::uint64_t overlap_observation_count = 0;
+  MetricValue precision;
+  MetricValue recall;
+  MetricValue f1;
+  MetricValue jaccard;
+};
+
+struct ExactOverlapAlignment {
+  ClusteringAlignmentMapping mapping;
+  MetricValue matched_accuracy;
+  std::uint64_t matched_overlap_observation_count = 0;
+  std::uint64_t nonmatched_observation_count = 0;
+
+  // New/aligned column position -> canonical predicted-cluster index. Matched
+  // clusters follow truth-group order; unmatched clusters follow in ascending
+  // canonical order.
+  std::vector<std::int64_t> aligned_column_to_predicted_cluster;
+
+  // nullopt for Global detail; one record per truth group for Full detail.
+  std::optional<std::vector<ExactAlignmentTruthGroupDetail>>
+      truth_group_details;
+};
+
+struct SemanticAlignmentDimensionError {
+  std::int64_t dimension_index = 0;
+  MetricValue normalized_error;
+};
+
+struct SemanticAlignmentErrorMass {
+  // One deterministic record per nonzero contingency cell. The record carries
+  // observation mass without expanding observations individually.
+  std::int64_t source_truth_group_index = 0;
+  std::int64_t predicted_cluster_index = 0;
+  std::int64_t assigned_truth_group_index = kUnmatchedAlignmentIndex;
+  std::uint64_t observation_count = 0;
+  double normalized_cost = 0.0;
+  std::vector<double> dimension_costs;
+};
+
+struct SemanticCostAlignment {
+  ClusteringAlignmentMapping mapping;
+  MetricValue normalized_cost;
+  std::vector<SemanticAlignmentDimensionError> dimensions;
+
+  // Sum of contingency overlap under this semantic mapping. This is reported
+  // separately from the predicted/truth marginal supports in mapping.
+  std::uint64_t exact_overlap_observation_count = 0;
+  std::uint64_t nonoverlap_observation_count = 0;
+
+  // A predicted cluster assigned to a dummy truth group pays this normalized
+  // cost for every observation, in aggregate and in every dimension.
+  double unmatched_predicted_penalty = 1.0;
+
+  // nullopt for Global detail; deterministic contingency-mass records for Full
+  // detail.
+  std::optional<std::vector<SemanticAlignmentErrorMass>> error_masses;
+};
+
 struct SparseContingency {
   // CPU, contiguous, int64 COO arrays sorted by (truth_group,
   // predicted_cluster).
@@ -176,6 +277,13 @@ struct ClusteringPartitionDetail {
   SparseContingency contingency;
 };
 
+struct ClusteringAlignmentIdentities {
+  // Materialized whenever an alignment is requested, including Global detail,
+  // so dense mapping indices remain self-describing.
+  torch::Tensor predicted_ids; // [K], CPU int64
+  torch::Tensor truth_vectors; // [G,D], CPU, original numeric dtype
+};
+
 struct ClusteringEvaluationUnitResult {
   std::int64_t observation_count = 0;
   std::int64_t truth_group_count = 0;
@@ -184,6 +292,9 @@ struct ClusteringEvaluationUnitResult {
   ExactClusteringMetrics exact;
   SemanticClusteringMetrics semantic;
   FragmentationClusteringMetrics fragmentation;
+  std::optional<ClusteringAlignmentIdentities> alignment_identities;
+  std::optional<ExactOverlapAlignment> exact_alignment;
+  std::optional<SemanticCostAlignment> semantic_alignment;
   std::optional<ClusteringPartitionDetail> partition_detail;
 };
 
@@ -197,6 +308,13 @@ enum class SemanticEvaluationMode : std::uint8_t {
   Power,
 };
 
+enum class AlignmentEvaluationMode : std::uint8_t {
+  None,
+  Exact,
+  Semantic,
+  Both,
+};
+
 struct ClusteringEvaluationOptions {
   ClusteringEvaluationDetail detail = ClusteringEvaluationDetail::Global;
   std::vector<std::string> dimension_names;
@@ -208,10 +326,11 @@ struct ClusteringEvaluationOptions {
   std::vector<double> semantic_ranges;
   std::vector<double> semantic_weights;
   std::int64_t power = 2;
+  AlignmentEvaluationMode alignment = AlignmentEvaluationMode::None;
 };
 
 struct ClusteringEvaluationResult {
-  std::uint32_t schema_version = 2;
+  std::uint32_t schema_version = 3;
   ClusteringEvaluationOptions effective_options;
   bool batched = false;
   std::int64_t observation_count = 0;

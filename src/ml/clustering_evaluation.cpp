@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <map>
 #include <set>
@@ -18,7 +19,7 @@ namespace leakflow::ml {
 namespace {
 
 constexpr std::size_t kExactMetricCount = 10;
-constexpr std::array<ClusteringMetricDescriptor, 20> kMetricDescriptors{{
+constexpr std::array<ClusteringMetricDescriptor, 27> kMetricDescriptors{{
     {ClusteringMetricId::AdjustedRandIndex, "adjusted_rand_index",
      MetricFamily::Exact, MetricDirection::HigherIsBetter,
      MetricAveraging::None},
@@ -72,6 +73,27 @@ constexpr std::array<ClusteringMetricDescriptor, 20> kMetricDescriptors{{
     {ClusteringMetricId::FragmentationPerGroup, "fragmentation_per_group",
      MetricFamily::Fragmentation, MetricDirection::LowerIsBetter,
      MetricAveraging::PerGroup},
+    {ClusteringMetricId::ExactAlignmentMatchedAccuracy,
+     "exact_alignment_matched_accuracy", MetricFamily::Alignment,
+     MetricDirection::HigherIsBetter, MetricAveraging::Micro},
+    {ClusteringMetricId::ExactAlignmentPrecisionPerGroup,
+     "exact_alignment_precision_per_group", MetricFamily::Alignment,
+     MetricDirection::HigherIsBetter, MetricAveraging::PerGroup},
+    {ClusteringMetricId::ExactAlignmentRecallPerGroup,
+     "exact_alignment_recall_per_group", MetricFamily::Alignment,
+     MetricDirection::HigherIsBetter, MetricAveraging::PerGroup},
+    {ClusteringMetricId::ExactAlignmentF1PerGroup,
+     "exact_alignment_f1_per_group", MetricFamily::Alignment,
+     MetricDirection::HigherIsBetter, MetricAveraging::PerGroup},
+    {ClusteringMetricId::ExactAlignmentJaccardPerGroup,
+     "exact_alignment_jaccard_per_group", MetricFamily::Alignment,
+     MetricDirection::HigherIsBetter, MetricAveraging::PerGroup},
+    {ClusteringMetricId::SemanticAlignmentCost, "semantic_alignment_cost",
+     MetricFamily::Alignment, MetricDirection::LowerIsBetter,
+     MetricAveraging::Micro},
+    {ClusteringMetricId::SemanticAlignmentDimensionError,
+     "semantic_alignment_dimension_error", MetricFamily::Alignment,
+     MetricDirection::LowerIsBetter, MetricAveraging::PerDimension},
 }};
 
 class CompensatedSum {
@@ -116,6 +138,213 @@ private:
   return left * right;
 }
 
+template <typename Cost> struct AssignmentSolution {
+  std::vector<std::size_t> column_for_row;
+  std::vector<std::size_t> row_for_column;
+  std::vector<Cost> row_dual;
+  std::vector<Cost> column_dual;
+};
+
+template <typename Cost>
+[[nodiscard]] AssignmentSolution<Cost>
+hungarian_min_assignment(const std::vector<std::vector<Cost>> &cost) {
+  const auto size = cost.size();
+  if (size == 0) {
+    throw std::invalid_argument(
+        "clustering evaluation assignment matrix must not be empty");
+  }
+  for (const auto &row : cost) {
+    if (row.size() != size) {
+      throw std::invalid_argument(
+          "clustering evaluation assignment matrix must be square");
+    }
+  }
+
+  // One-based Kuhn-Munkres potentials and matching. Reached flags avoid a
+  // finite sentinel whose arithmetic could overflow exact integer costs.
+  std::vector<Cost> row_dual(size + 1, Cost{0});
+  std::vector<Cost> column_dual(size + 1, Cost{0});
+  std::vector<std::size_t> row_for_column(size + 1, 0);
+  std::vector<std::size_t> predecessor(size + 1, 0);
+  for (std::size_t next_row = 1; next_row <= size; ++next_row) {
+    row_for_column[0] = next_row;
+    std::size_t current_column = 0;
+    std::vector<Cost> minimum(size + 1, Cost{0});
+    std::vector<std::uint8_t> reached(size + 1, 0);
+    std::vector<std::uint8_t> used(size + 1, 0);
+    do {
+      used[current_column] = 1;
+      const auto current_row = row_for_column[current_column];
+      bool delta_set = false;
+      Cost delta{0};
+      std::size_t next_column = 0;
+      for (std::size_t column = 1; column <= size; ++column) {
+        if (used[column] != 0) {
+          continue;
+        }
+        const auto reduced = cost[current_row - 1][column - 1] -
+                             row_dual[current_row] - column_dual[column];
+        if (reached[column] == 0 || reduced < minimum[column]) {
+          minimum[column] = reduced;
+          reached[column] = 1;
+          predecessor[column] = current_column;
+        }
+        if (!delta_set || minimum[column] < delta) {
+          delta = minimum[column];
+          next_column = column;
+          delta_set = true;
+        }
+      }
+      if (!delta_set) {
+        throw std::logic_error(
+            "clustering evaluation assignment lost an augmenting path");
+      }
+      for (std::size_t column = 0; column <= size; ++column) {
+        if (used[column] != 0) {
+          row_dual[row_for_column[column]] += delta;
+          column_dual[column] -= delta;
+        } else if (reached[column] != 0) {
+          minimum[column] -= delta;
+        }
+      }
+      current_column = next_column;
+    } while (row_for_column[current_column] != 0);
+
+    do {
+      const auto previous_column = predecessor[current_column];
+      row_for_column[current_column] = row_for_column[previous_column];
+      current_column = previous_column;
+    } while (current_column != 0);
+  }
+
+  AssignmentSolution<Cost> result;
+  result.column_for_row.resize(size);
+  result.row_for_column.resize(size);
+  result.row_dual.resize(size);
+  result.column_dual.resize(size);
+  for (std::size_t column = 1; column <= size; ++column) {
+    const auto row = row_for_column[column] - 1;
+    result.column_for_row[row] = column - 1;
+    result.row_for_column[column - 1] = row;
+  }
+  for (std::size_t index = 0; index < size; ++index) {
+    result.row_dual[index] = row_dual[index + 1];
+    result.column_dual[index] = column_dual[index + 1];
+  }
+  return result;
+}
+
+template <typename Cost>
+void refine_assignment_lexicographically(
+    const std::vector<std::vector<Cost>> &cost,
+    AssignmentSolution<Cost> &solution) {
+  const auto size = cost.size();
+  const auto no_index = std::numeric_limits<std::size_t>::max();
+
+  // Every primary-optimal matching uses only zero-reduced-cost edges. Keep the
+  // initial matching explicitly because recomputing a selected long-double
+  // edge can leave a tiny residual.
+  std::vector<std::vector<std::uint8_t>> equality(
+      size, std::vector<std::uint8_t>(size, 0));
+  for (std::size_t row = 0; row < size; ++row) {
+    for (std::size_t column = 0; column < size; ++column) {
+      const auto reduced = cost[row][column] - solution.row_dual[row] -
+                           solution.column_dual[column];
+      equality[row][column] = static_cast<std::uint8_t>(
+          solution.column_for_row[row] == column || reduced == Cost{0});
+    }
+  }
+
+  std::vector<std::uint8_t> fixed_column(size, 0);
+  for (std::size_t row = 0; row < size; ++row) {
+    const auto current_column = solution.column_for_row[row];
+    std::vector<std::uint8_t> reachable_row(size, 0);
+    std::vector<std::uint8_t> reachable_column(size, 0);
+    std::vector<std::size_t> next_column_for_row(size, no_index);
+    std::deque<std::size_t> queue;
+    reachable_column[current_column] = 1;
+    queue.push_back(current_column);
+
+    // Reverse alternating reachability from the column made free by removing
+    // this row. Earlier rows are already fixed and excluded.
+    while (!queue.empty()) {
+      const auto column = queue.front();
+      queue.pop_front();
+      for (std::size_t candidate_row = row + 1; candidate_row < size;
+           ++candidate_row) {
+        if (reachable_row[candidate_row] != 0 ||
+            solution.column_for_row[candidate_row] == column ||
+            equality[candidate_row][column] == 0) {
+          continue;
+        }
+        reachable_row[candidate_row] = 1;
+        next_column_for_row[candidate_row] = column;
+        const auto matched_column = solution.column_for_row[candidate_row];
+        if (reachable_column[matched_column] == 0) {
+          reachable_column[matched_column] = 1;
+          queue.push_back(matched_column);
+        }
+      }
+    }
+
+    std::size_t chosen_column = no_index;
+    for (std::size_t candidate_column = 0; candidate_column < size;
+         ++candidate_column) {
+      if (fixed_column[candidate_column] != 0 ||
+          equality[row][candidate_column] == 0) {
+        continue;
+      }
+      if (candidate_column == current_column) {
+        chosen_column = candidate_column;
+        break;
+      }
+      const auto displaced_row = solution.row_for_column[candidate_column];
+      if (displaced_row > row && reachable_row[displaced_row] != 0) {
+        chosen_column = candidate_column;
+        break;
+      }
+    }
+    if (chosen_column == no_index) {
+      throw std::logic_error(
+          "clustering evaluation lexicographic assignment lost a matching");
+    }
+
+    if (chosen_column != current_column) {
+      auto displaced_row = solution.row_for_column[chosen_column];
+      solution.column_for_row[row] = chosen_column;
+      solution.row_for_column[chosen_column] = row;
+      std::size_t steps = 0;
+      while (true) {
+        if (++steps > size) {
+          throw std::logic_error(
+              "clustering evaluation assignment refinement found a cycle");
+        }
+        const auto next_column = next_column_for_row[displaced_row];
+        if (next_column == no_index) {
+          throw std::logic_error(
+              "clustering evaluation assignment refinement lost its path");
+        }
+        const auto next_displaced_row = solution.row_for_column[next_column];
+        solution.column_for_row[displaced_row] = next_column;
+        solution.row_for_column[next_column] = displaced_row;
+        if (next_column == current_column) {
+          break;
+        }
+        displaced_row = next_displaced_row;
+      }
+    }
+    fixed_column[chosen_column] = 1;
+  }
+}
+
+template <typename Cost>
+[[nodiscard]] AssignmentSolution<Cost>
+lexicographic_min_assignment(const std::vector<std::vector<Cost>> &cost) {
+  auto result = hungarian_min_assignment(cost);
+  refine_assignment_lexicographically(cost, result);
+  return result;
+}
+
 [[nodiscard]] MetricValue defined_metric(ClusteringMetricId metric,
                                          double value,
                                          std::uint64_t support_count) {
@@ -144,6 +373,192 @@ private:
 
 using ContingencyCounts =
     std::map<std::pair<std::int64_t, std::int64_t>, std::uint64_t>;
+
+[[nodiscard]] std::uint64_t
+contingency_count(const ContingencyCounts &contingency,
+                  std::int64_t truth_group, std::int64_t predicted_cluster) {
+  const auto found = contingency.find({truth_group, predicted_cluster});
+  return found == contingency.end() ? 0 : found->second;
+}
+
+template <typename Cost>
+[[nodiscard]] ClusteringAlignmentMapping
+build_alignment_mapping(const AssignmentSolution<Cost> &assignment,
+                        const std::vector<std::uint64_t> &truth_marginal,
+                        const std::vector<std::uint64_t> &predicted_marginal) {
+  const auto truth_groups = truth_marginal.size();
+  const auto predicted_clusters = predicted_marginal.size();
+  ClusteringAlignmentMapping result;
+  result.predicted_to_truth_group.assign(predicted_clusters,
+                                         kUnmatchedAlignmentIndex);
+  result.truth_to_predicted_cluster.assign(truth_groups,
+                                           kUnmatchedAlignmentIndex);
+
+  for (std::size_t predicted = 0; predicted < predicted_clusters; ++predicted) {
+    const auto column = assignment.column_for_row[predicted];
+    if (column < truth_groups) {
+      result.predicted_to_truth_group[predicted] =
+          static_cast<std::int64_t>(column);
+      result.truth_to_predicted_cluster[column] =
+          static_cast<std::int64_t>(predicted);
+      result.assigned_predicted_observation_count =
+          checked_add(result.assigned_predicted_observation_count,
+                      predicted_marginal[predicted],
+                      "assigned predicted alignment support");
+    } else {
+      result.unmatched_predicted_clusters.push_back(
+          {static_cast<std::int64_t>(predicted),
+           predicted_marginal[predicted]});
+      result.unmatched_predicted_observation_count =
+          checked_add(result.unmatched_predicted_observation_count,
+                      predicted_marginal[predicted],
+                      "unmatched predicted alignment support");
+    }
+  }
+
+  for (std::size_t truth_group = 0; truth_group < truth_groups; ++truth_group) {
+    if (result.truth_to_predicted_cluster[truth_group] !=
+        kUnmatchedAlignmentIndex) {
+      result.assigned_truth_observation_count = checked_add(
+          result.assigned_truth_observation_count, truth_marginal[truth_group],
+          "assigned truth alignment support");
+    } else {
+      result.unmatched_truth_groups.push_back(
+          {static_cast<std::int64_t>(truth_group),
+           truth_marginal[truth_group]});
+      result.unmatched_truth_observation_count = checked_add(
+          result.unmatched_truth_observation_count, truth_marginal[truth_group],
+          "unmatched truth alignment support");
+    }
+  }
+  return result;
+}
+
+[[nodiscard]] ExactOverlapAlignment compute_exact_overlap_alignment(
+    const ContingencyCounts &contingency,
+    const std::vector<std::uint64_t> &truth_marginal,
+    const std::vector<std::uint64_t> &predicted_marginal,
+    std::uint64_t observations, ClusteringEvaluationDetail detail) {
+  const auto truth_groups = truth_marginal.size();
+  const auto predicted_clusters = predicted_marginal.size();
+  const auto assignment_size = std::max(truth_groups, predicted_clusters);
+  using ExactCost = __int128;
+  std::vector<std::vector<ExactCost>> cost(
+      assignment_size, std::vector<ExactCost>(assignment_size, 0));
+  for (const auto &[cell, count] : contingency) {
+    const auto truth_group = static_cast<std::size_t>(cell.first);
+    const auto predicted_cluster = static_cast<std::size_t>(cell.second);
+    cost[predicted_cluster][truth_group] = -static_cast<ExactCost>(count);
+  }
+
+  const auto assignment = lexicographic_min_assignment(cost);
+  ExactOverlapAlignment result;
+  result.mapping =
+      build_alignment_mapping(assignment, truth_marginal, predicted_marginal);
+  for (std::size_t predicted = 0; predicted < predicted_clusters; ++predicted) {
+    const auto truth_group = result.mapping.predicted_to_truth_group[predicted];
+    if (truth_group == kUnmatchedAlignmentIndex) {
+      continue;
+    }
+    result.matched_overlap_observation_count =
+        checked_add(result.matched_overlap_observation_count,
+                    contingency_count(contingency, truth_group,
+                                      static_cast<std::int64_t>(predicted)),
+                    "exact alignment matched observations");
+  }
+  if (result.matched_overlap_observation_count > observations) {
+    throw std::logic_error(
+        "clustering evaluation exact alignment support is inconsistent");
+  }
+  result.nonmatched_observation_count =
+      observations - result.matched_overlap_observation_count;
+  result.matched_accuracy = defined_metric(
+      ClusteringMetricId::ExactAlignmentMatchedAccuracy,
+      static_cast<double>(result.matched_overlap_observation_count) /
+          static_cast<double>(observations),
+      observations);
+
+  result.aligned_column_to_predicted_cluster.reserve(predicted_clusters);
+  for (const auto predicted : result.mapping.truth_to_predicted_cluster) {
+    if (predicted != kUnmatchedAlignmentIndex) {
+      result.aligned_column_to_predicted_cluster.push_back(predicted);
+    }
+  }
+  for (const auto &unmatched : result.mapping.unmatched_predicted_clusters) {
+    result.aligned_column_to_predicted_cluster.push_back(unmatched.index);
+  }
+  if (result.aligned_column_to_predicted_cluster.size() != predicted_clusters) {
+    throw std::logic_error(
+        "clustering evaluation exact alignment permutation is inconsistent");
+  }
+
+  if (detail == ClusteringEvaluationDetail::Full) {
+    result.truth_group_details.emplace();
+    result.truth_group_details->reserve(truth_groups);
+    for (std::size_t truth_group = 0; truth_group < truth_groups;
+         ++truth_group) {
+      ExactAlignmentTruthGroupDetail group;
+      group.truth_group_index = static_cast<std::int64_t>(truth_group);
+      group.predicted_cluster_index =
+          result.mapping.truth_to_predicted_cluster[truth_group];
+      group.truth_observation_count = truth_marginal[truth_group];
+
+      if (group.predicted_cluster_index == kUnmatchedAlignmentIndex) {
+        group.precision = undefined_metric(
+            ClusteringMetricId::ExactAlignmentPrecisionPerGroup, 0,
+            MetricUndefinedReason::NoMatchedPredictedCluster);
+        group.recall =
+            defined_metric(ClusteringMetricId::ExactAlignmentRecallPerGroup,
+                           0.0, group.truth_observation_count);
+        group.f1 =
+            undefined_metric(ClusteringMetricId::ExactAlignmentF1PerGroup,
+                             group.truth_observation_count,
+                             MetricUndefinedReason::DependentMetricUndefined);
+        group.jaccard =
+            defined_metric(ClusteringMetricId::ExactAlignmentJaccardPerGroup,
+                           0.0, group.truth_observation_count);
+      } else {
+        const auto predicted =
+            static_cast<std::size_t>(group.predicted_cluster_index);
+        group.predicted_observation_count = predicted_marginal[predicted];
+        group.overlap_observation_count = contingency_count(
+            contingency, static_cast<std::int64_t>(truth_group),
+            group.predicted_cluster_index);
+        group.precision = defined_metric(
+            ClusteringMetricId::ExactAlignmentPrecisionPerGroup,
+            static_cast<double>(group.overlap_observation_count) /
+                static_cast<double>(group.predicted_observation_count),
+            group.predicted_observation_count);
+        group.recall = defined_metric(
+            ClusteringMetricId::ExactAlignmentRecallPerGroup,
+            static_cast<double>(group.overlap_observation_count) /
+                static_cast<double>(group.truth_observation_count),
+            group.truth_observation_count);
+        const auto f1_support = checked_add(group.truth_observation_count,
+                                            group.predicted_observation_count,
+                                            "exact alignment F1 support");
+        group.f1 = defined_metric(
+            ClusteringMetricId::ExactAlignmentF1PerGroup,
+            2.0 * static_cast<double>(group.overlap_observation_count) /
+                static_cast<double>(f1_support),
+            f1_support);
+        if (group.overlap_observation_count > f1_support) {
+          throw std::logic_error(
+              "clustering evaluation exact alignment overlap is inconsistent");
+        }
+        const auto jaccard_support =
+            f1_support - group.overlap_observation_count;
+        group.jaccard = defined_metric(
+            ClusteringMetricId::ExactAlignmentJaccardPerGroup,
+            static_cast<double>(group.overlap_observation_count) /
+                static_cast<double>(jaccard_support),
+            jaccard_support);
+      }
+      result.truth_group_details->push_back(std::move(group));
+    }
+  }
+  return result;
+}
 
 [[nodiscard]] long double
 mutual_information(const ContingencyCounts &contingency,
@@ -528,17 +943,23 @@ private:
   CompensatedSum second_moment_;
 };
 
-[[nodiscard]] long double validated_pair_sum(long double value,
-                                             std::uint64_t pair_count) {
-  const auto upper = static_cast<long double>(pair_count);
+[[nodiscard]] long double validated_bounded_sum(long double value,
+                                                std::uint64_t upper_count,
+                                                const char *what) {
+  const auto upper = static_cast<long double>(upper_count);
   const auto tolerance = 64.0L * std::numeric_limits<long double>::epsilon() *
                          std::max(1.0L, upper);
   if (value < -tolerance || value > upper + tolerance ||
       !std::isfinite(value)) {
-    throw std::runtime_error(
-        "clustering evaluation semantic pair aggregation failed");
+    throw std::runtime_error(std::string("clustering evaluation ") + what +
+                             " aggregation failed");
   }
   return std::clamp(value, 0.0L, upper);
+}
+
+[[nodiscard]] long double validated_pair_sum(long double value,
+                                             std::uint64_t pair_count) {
+  return validated_bounded_sum(value, pair_count, "semantic pair");
 }
 
 template <typename Scalar>
@@ -894,6 +1315,203 @@ compute_semantic_metrics(const torch::TensorAccessor<Scalar, 2> &truth,
   return result;
 }
 
+struct SemanticAlignmentWeightState {
+  std::vector<long double> scaled_weights;
+  long double scaled_weight_sum = 0.0L;
+};
+
+[[nodiscard]] SemanticAlignmentWeightState
+semantic_alignment_weight_state(const ClusteringEvaluationOptions &options) {
+  const auto maximum = *std::max_element(options.semantic_weights.begin(),
+                                         options.semantic_weights.end());
+  SemanticAlignmentWeightState result;
+  result.scaled_weights.reserve(options.semantic_weights.size());
+  CompensatedSum sum;
+  for (const auto weight : options.semantic_weights) {
+    const auto scaled = static_cast<long double>(weight / maximum);
+    result.scaled_weights.push_back(scaled);
+    sum.add(scaled);
+  }
+  result.scaled_weight_sum = sum.value();
+  if (!(result.scaled_weight_sum > 0.0L) ||
+      !std::isfinite(result.scaled_weight_sum)) {
+    throw std::logic_error(
+        "clustering evaluation semantic alignment weights are invalid");
+  }
+  return result;
+}
+
+template <typename Scalar>
+[[nodiscard]] long double
+semantic_alignment_dimension_cost(Scalar left, Scalar right, double range,
+                                  std::int64_t power) {
+  const auto high = std::max(left, right);
+  const auto low = std::min(left, right);
+  const auto normalized = nonnegative_coordinate_difference(high, low) /
+                          static_cast<long double>(range);
+  const auto cost = power == 2 ? normalized * normalized : normalized;
+  return validated_bounded_sum(cost, 1, "semantic alignment dimension");
+}
+
+[[nodiscard]] long double semantic_alignment_aggregate_cost(
+    const std::vector<long double> &dimension_costs,
+    const SemanticAlignmentWeightState &weights) {
+  CompensatedSum weighted;
+  for (std::size_t dimension = 0; dimension < dimension_costs.size();
+       ++dimension) {
+    weighted.add(weights.scaled_weights[dimension] *
+                 dimension_costs[dimension]);
+  }
+  return validated_bounded_sum(weighted.value() / weights.scaled_weight_sum, 1,
+                               "semantic alignment cost");
+}
+
+template <typename Scalar>
+[[nodiscard]] SemanticCostAlignment compute_semantic_cost_alignment(
+    const std::vector<std::vector<Scalar>> &truth_vectors,
+    const ContingencyCounts &contingency,
+    const std::vector<std::uint64_t> &truth_marginal,
+    const std::vector<std::uint64_t> &predicted_marginal,
+    const ClusteringEvaluationOptions &options, std::uint64_t observations) {
+  const auto truth_groups = truth_vectors.size();
+  const auto predicted_clusters = predicted_marginal.size();
+  const auto dimensions = truth_vectors.front().size();
+  const auto assignment_size = std::max(truth_groups, predicted_clusters);
+  const auto weights = semantic_alignment_weight_state(options);
+
+  // Truth-to-truth aggregate costs are symmetric and independent of predicted
+  // cluster membership. The assignment matrix then uses only sparse
+  // contingency cells, never observation pairs.
+  std::vector<std::vector<long double>> truth_cost(
+      truth_groups, std::vector<long double>(truth_groups, 0.0L));
+  std::vector<long double> dimension_costs(dimensions, 0.0L);
+  for (std::size_t left = 0; left < truth_groups; ++left) {
+    for (std::size_t right = left + 1; right < truth_groups; ++right) {
+      for (std::size_t dimension = 0; dimension < dimensions; ++dimension) {
+        dimension_costs[dimension] = semantic_alignment_dimension_cost(
+            truth_vectors[left][dimension], truth_vectors[right][dimension],
+            options.semantic_ranges[dimension], options.power);
+      }
+      const auto aggregate =
+          semantic_alignment_aggregate_cost(dimension_costs, weights);
+      truth_cost[left][right] = aggregate;
+      truth_cost[right][left] = aggregate;
+    }
+  }
+
+  std::vector<std::vector<std::pair<std::size_t, std::uint64_t>>>
+      cells_by_predicted(predicted_clusters);
+  for (const auto &[cell, count] : contingency) {
+    cells_by_predicted[static_cast<std::size_t>(cell.second)].push_back(
+        {static_cast<std::size_t>(cell.first), count});
+  }
+
+  std::vector<std::vector<long double>> cost(
+      assignment_size, std::vector<long double>(assignment_size, 0.0L));
+  for (std::size_t predicted = 0; predicted < predicted_clusters; ++predicted) {
+    for (std::size_t target_truth = 0; target_truth < truth_groups;
+         ++target_truth) {
+      CompensatedSum total;
+      for (const auto &[source_truth, count] : cells_by_predicted[predicted]) {
+        total.add(static_cast<long double>(count) *
+                  truth_cost[source_truth][target_truth]);
+      }
+      cost[predicted][target_truth] =
+          validated_bounded_sum(total.value(), predicted_marginal[predicted],
+                                "semantic alignment matrix");
+    }
+    for (std::size_t dummy_truth = truth_groups; dummy_truth < assignment_size;
+         ++dummy_truth) {
+      cost[predicted][dummy_truth] =
+          static_cast<long double>(predicted_marginal[predicted]);
+    }
+  }
+
+  const auto assignment = lexicographic_min_assignment(cost);
+  SemanticCostAlignment result;
+  result.mapping =
+      build_alignment_mapping(assignment, truth_marginal, predicted_marginal);
+  if (options.detail == ClusteringEvaluationDetail::Full) {
+    result.error_masses.emplace();
+    result.error_masses->reserve(contingency.size());
+  }
+
+  std::vector<CompensatedSum> dimension_totals(dimensions);
+  CompensatedSum aggregate_total;
+  for (const auto &[cell, count] : contingency) {
+    const auto source_truth = static_cast<std::size_t>(cell.first);
+    const auto predicted = static_cast<std::size_t>(cell.second);
+    const auto assigned_truth =
+        result.mapping.predicted_to_truth_group[predicted];
+    std::vector<double> output_dimension_costs;
+    if (result.error_masses.has_value()) {
+      output_dimension_costs.reserve(dimensions);
+    }
+    if (assigned_truth == kUnmatchedAlignmentIndex) {
+      std::fill(dimension_costs.begin(), dimension_costs.end(), 1.0L);
+    } else {
+      const auto target_truth = static_cast<std::size_t>(assigned_truth);
+      for (std::size_t dimension = 0; dimension < dimensions; ++dimension) {
+        dimension_costs[dimension] = semantic_alignment_dimension_cost(
+            truth_vectors[source_truth][dimension],
+            truth_vectors[target_truth][dimension],
+            options.semantic_ranges[dimension], options.power);
+      }
+    }
+    for (std::size_t dimension = 0; dimension < dimensions; ++dimension) {
+      dimension_totals[dimension].add(static_cast<long double>(count) *
+                                      dimension_costs[dimension]);
+      if (result.error_masses.has_value()) {
+        output_dimension_costs.push_back(
+            static_cast<double>(dimension_costs[dimension]));
+      }
+    }
+    const auto aggregate =
+        assigned_truth == kUnmatchedAlignmentIndex
+            ? 1.0L
+            : semantic_alignment_aggregate_cost(dimension_costs, weights);
+    aggregate_total.add(static_cast<long double>(count) * aggregate);
+    if (assigned_truth == cell.first) {
+      result.exact_overlap_observation_count =
+          checked_add(result.exact_overlap_observation_count, count,
+                      "semantic alignment exact overlap");
+    }
+    if (result.error_masses.has_value()) {
+      result.error_masses->push_back({cell.first, cell.second, assigned_truth,
+                                      count, static_cast<double>(aggregate),
+                                      std::move(output_dimension_costs)});
+    }
+  }
+
+  const auto bounded_total = validated_bounded_sum(
+      aggregate_total.value(), observations, "semantic alignment total");
+  result.normalized_cost = defined_metric(
+      ClusteringMetricId::SemanticAlignmentCost,
+      static_cast<double>(bounded_total /
+                          static_cast<long double>(observations)),
+      observations);
+  result.dimensions.reserve(dimensions);
+  for (std::size_t dimension = 0; dimension < dimensions; ++dimension) {
+    const auto bounded_dimension =
+        validated_bounded_sum(dimension_totals[dimension].value(), observations,
+                              "semantic alignment dimension total");
+    result.dimensions.push_back(
+        {static_cast<std::int64_t>(dimension),
+         defined_metric(
+             ClusteringMetricId::SemanticAlignmentDimensionError,
+             static_cast<double>(bounded_dimension /
+                                 static_cast<long double>(observations)),
+             observations)});
+  }
+  if (result.exact_overlap_observation_count > observations) {
+    throw std::logic_error(
+        "clustering evaluation semantic alignment overlap is inconsistent");
+  }
+  result.nonoverlap_observation_count =
+      observations - result.exact_overlap_observation_count;
+  return result;
+}
+
 template <typename Scalar>
 [[nodiscard]] std::vector<Scalar>
 semantic_key(const torch::TensorAccessor<Scalar, 2> &truth,
@@ -936,12 +1554,15 @@ template <typename Scalar>
 
   std::map<std::vector<Scalar>, std::int64_t> truth_index;
   std::vector<std::int64_t> truth_representative_rows;
+  std::vector<std::vector<Scalar>> truth_vectors;
   truth_representative_rows.reserve(unique_truth.size());
+  truth_vectors.reserve(unique_truth.size());
   for (const auto &[key, representative_row] : unique_truth) {
     const auto index =
         static_cast<std::int64_t>(truth_representative_rows.size());
     truth_index.emplace(key, index);
     truth_representative_rows.push_back(representative_row);
+    truth_vectors.push_back(key);
   }
 
   std::vector<std::uint64_t> truth_marginal(unique_truth.size(), 0);
@@ -1011,13 +1632,45 @@ template <typename Scalar>
   result.fragmentation = compute_fragmentation_metrics(
       contingency, truth_marginal, pairs, options.detail);
 
-  if (options.detail == ClusteringEvaluationDetail::Full) {
-    ClusteringPartitionDetail partition;
-    partition.predicted_ids = torch::tensor(predicted_ids, torch::kLong);
+  const auto observations_u64 = static_cast<std::uint64_t>(observations);
+  const auto exact_alignment_requested =
+      options.alignment == AlignmentEvaluationMode::Exact ||
+      options.alignment == AlignmentEvaluationMode::Both;
+  const auto semantic_alignment_requested =
+      options.alignment == AlignmentEvaluationMode::Semantic ||
+      options.alignment == AlignmentEvaluationMode::Both;
+  if (exact_alignment_requested) {
+    result.exact_alignment = compute_exact_overlap_alignment(
+        contingency, truth_marginal, predicted_marginal, observations_u64,
+        options.detail);
+  }
+  if (semantic_alignment_requested) {
+    result.semantic_alignment = compute_semantic_cost_alignment(
+        truth_vectors, contingency, truth_marginal, predicted_marginal, options,
+        observations_u64);
+  }
+
+  torch::Tensor canonical_predicted_ids;
+  torch::Tensor canonical_truth_vectors;
+  const auto alignment_requested =
+      options.alignment != AlignmentEvaluationMode::None;
+  if (alignment_requested ||
+      options.detail == ClusteringEvaluationDetail::Full) {
+    canonical_predicted_ids = torch::tensor(predicted_ids, torch::kLong);
     const auto representative_index =
         torch::tensor(truth_representative_rows, torch::kLong);
-    partition.truth_vectors =
+    canonical_truth_vectors =
         truth_output_values.index_select(0, representative_index).contiguous();
+  }
+  if (alignment_requested) {
+    result.alignment_identities = ClusteringAlignmentIdentities{
+        canonical_predicted_ids, canonical_truth_vectors};
+  }
+
+  if (options.detail == ClusteringEvaluationDetail::Full) {
+    ClusteringPartitionDetail partition;
+    partition.predicted_ids = canonical_predicted_ids;
+    partition.truth_vectors = canonical_truth_vectors;
 
     const auto nonzero = static_cast<std::int64_t>(contingency.size());
     partition.contingency.truth_group_indices =
@@ -1096,6 +1749,22 @@ effective_evaluation_options(const ClusteringEvaluationOptions &options,
   default:
     throw std::invalid_argument(
         "clustering evaluation semantic mode is invalid");
+  }
+  switch (options.alignment) {
+  case AlignmentEvaluationMode::None:
+  case AlignmentEvaluationMode::Exact:
+  case AlignmentEvaluationMode::Semantic:
+  case AlignmentEvaluationMode::Both:
+    break;
+  default:
+    throw std::invalid_argument(
+        "clustering evaluation alignment mode is invalid");
+  }
+  if ((options.alignment == AlignmentEvaluationMode::Semantic ||
+       options.alignment == AlignmentEvaluationMode::Both) &&
+      options.semantic != SemanticEvaluationMode::Power) {
+    throw std::invalid_argument("clustering evaluation semantic alignment "
+                                "requires power semantic evaluation");
   }
   if (options.power != 1 && options.power != 2) {
     throw std::invalid_argument(

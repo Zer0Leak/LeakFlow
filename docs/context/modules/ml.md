@@ -65,9 +65,9 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   cross-validated vs `scipy.optimize.linear_sum_assignment`), `reorder_confusion_columns`
   (diagonalise for plotting), and `matched_clustering_scores` (accuracy +
   per-class precision/recall/F1).
-- `clustering_evaluation.hpp`: Phase A1/A2's core-free, GMM-independent
-  `evaluate_clustering(...)` API. It accepts arbitrary int64-representable
-  predicted IDs `[N]`/`[U,N]` and numeric semantic truth
+- `clustering_evaluation.hpp`: the core-free, GMM-independent
+  `evaluate_clustering(...)` API through Phase A3. It accepts arbitrary
+  int64-representable predicted IDs `[N]`/`[U,N]` and numeric semantic truth
   `[N,D]`/`[U,N,D]`, groups truth by exact full-vector equality, and returns a
   structured per-unit result. Current results include deterministic sparse
   contingency detail, checked 64-bit unordered-pair counts, ARI, arithmetic
@@ -78,7 +78,11 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   semantic impurity micro/macro and per-dimension/per-cluster records,
   merge-error rate and conditional severity, plus fragmentation micro/macro and
   per-group records. Semantic records remain discoverable as unavailable in
-  exact-only mode; fragmentation remains available.
+  exact-only mode; fragmentation remains available. Optional rectangular
+  exact-overlap and semantic-cost alignments are separate records with canonical
+  mapping identities, deterministic predicted-major ties, unmatched marginal
+  supports, exact per-group scores, semantic per-dimension errors, and
+  Full-detail contingency-mass error records.
 
 The current pipeline `ClusteringStats` is intentionally narrower than the active
 Phase A evaluator. It accepts scalar truth IDs, emits a dense reordered confusion
@@ -97,8 +101,10 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
   and the complete exact metric set.
 - **A2 done:** semantic merge rate/severity, micro/macro/per-dimension and
   per-cluster impurity, and micro/macro/per-group fragmentation.
-- **A3 next:** exact-overlap and semantic-cost rectangular alignments.
-- **A4 pending:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
+- **A3 done:** exact-overlap and semantic-cost rectangular alignments, including
+  both rectangular directions, strict tie behavior, and fixed semantic dummy
+  penalty semantics.
+- **A4 next:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
   alignment, optional combined quality, summaries, and persistence in
   `leakflow_plugins_ml`.
 - Support exact-only evaluation without ranges. Semantic mode uses an explicit
@@ -122,7 +128,11 @@ not compute metrics, assignments, or clustering labels.
 - A2 semantic and fragmentation metrics are checked against `p=1`/`p=2`
   hand fixtures, batch-local ranges, power-mode numeric dtypes, zero weights,
   undefined denominators, and non-quadratic stress cases.
-- Hand-check the remaining combined-score and alignment cases.
+- A3 alignments are checked with hand-computed `G<K` and `G>K` fixtures,
+  mappings that deliberately differ by objective, both powers, `D=1/2/4`,
+  batches, zero weights, dtype edges, strict ties, and large-N/small-assignment
+  stress.
+- Hand-check the remaining combined-score case in A4.
 - Cover arbitrary IDs, rectangular mappings, `D=1/2/4`, unit batching/alignment,
   all undefined denominators, invalid ranges/weights/power, overflow, and a
   non-quadratic stress case.
