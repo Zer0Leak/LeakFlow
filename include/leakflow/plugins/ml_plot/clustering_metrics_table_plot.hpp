@@ -13,7 +13,7 @@
 namespace leakflow::plugins::ml_plot {
 
 // ML-to-plot bridge: translates a structured clustering-evaluation payload
-// into generic TableView rows. It never evaluates metrics or alignments.
+// into generic TableView tabs. It never evaluates metrics or alignments.
 class ClusteringMetricsTablePlot final : public Element {
 public:
   explicit ClusteringMetricsTablePlot(
@@ -33,8 +33,14 @@ public:
 
 protected:
   void property_changed(std::string_view name) override;
+  void live_driven_changed() override;
 
 private:
+  // Resolve auto/accumulate/replace into the read-only active mode. auto
+  // follows pipeline liveness, matching the standard plot update contract.
+  bool resolve_accumulate();
+  void update_active_update_mode();
+
   std::shared_ptr<leakflow::plot::TableView> view_;
   std::int64_t run_sequence_ = 0;
 };

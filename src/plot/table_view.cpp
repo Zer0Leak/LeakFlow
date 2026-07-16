@@ -108,6 +108,108 @@ column_indexes(const std::vector<std::string> &columns,
   return result;
 }
 
+void validate_row_selector(const std::vector<std::string> &columns,
+                           const TableFrame &frame,
+                           const std::optional<TableRowSelector> &selector) {
+  if (!selector) {
+    return;
+  }
+  if (selector->key.empty()) {
+    throw std::invalid_argument(
+        "TableView row selector requires a non-empty shared key");
+  }
+  if (selector->column.empty() ||
+      std::ranges::count(columns, selector->column) != 1) {
+    throw std::invalid_argument(
+        "TableView row selector requires exactly one matching column");
+  }
+  for (std::size_t left = 0; left < selector->values.size(); ++left) {
+    for (std::size_t right = left + 1; right < selector->values.size();
+         ++right) {
+      if (selector->values[left].value == selector->values[right].value) {
+        throw std::invalid_argument(
+            "TableView row selector requires unique typed values");
+      }
+    }
+  }
+  const auto column = static_cast<std::size_t>(std::distance(
+      columns.begin(), std::ranges::find(columns, selector->column)));
+  for (const auto &row : frame.rows) {
+    if (column >= row.size() || !row[column].sort_value ||
+        std::ranges::none_of(selector->values, [&](const auto &choice) {
+          return choice.value == *row[column].sort_value;
+        })) {
+      throw std::invalid_argument(
+          "TableView row selector rows require a declared typed value");
+    }
+  }
+}
+
+[[nodiscard]] std::size_t row_selector_column(const TableSnapshot &snapshot) {
+  const auto found =
+      std::ranges::find(snapshot.columns, snapshot.row_selector->column);
+  return static_cast<std::size_t>(
+      std::distance(snapshot.columns.begin(), found));
+}
+
+[[nodiscard]] bool
+same_row_selector_identity(const std::optional<TableRowSelector> &left,
+                           const std::optional<TableRowSelector> &right) {
+  if (left.has_value() != right.has_value()) {
+    return false;
+  }
+  return !left || (left->key == right->key && left->column == right->column);
+}
+
+void merge_row_selector_values(TableRowSelector &target,
+                               const TableRowSelector &source) {
+  target.label = source.label;
+  for (const auto &choice : source.values) {
+    if (std::ranges::none_of(target.values, [&](const auto &existing) {
+          return existing.value == choice.value;
+        })) {
+      target.values.push_back(choice);
+    }
+  }
+}
+
+void prune_selected_row_values(
+    const std::vector<TableSnapshot> &snapshots,
+    std::map<std::string, TableCell::SortValue> &selected_values) {
+  std::erase_if(selected_values, [&snapshots](const auto &selected) {
+    return std::ranges::none_of(snapshots, [&selected](const auto &snapshot) {
+      return snapshot.row_selector &&
+             snapshot.row_selector->key == selected.first &&
+             std::ranges::any_of(snapshot.row_selector->values,
+                                 [&selected](const auto &choice) {
+                                   return choice.value == selected.second;
+                                 });
+    });
+  });
+}
+
+using RowSelectorValues =
+    std::map<std::string, std::vector<TableRowSelectorValue>>;
+
+[[nodiscard]] RowSelectorValues
+shared_row_selector_values(const std::vector<TableSnapshot> &snapshots) {
+  RowSelectorValues result;
+  for (const auto &snapshot : snapshots) {
+    if (!snapshot.row_selector) {
+      continue;
+    }
+    auto &values = result[snapshot.row_selector->key];
+    for (const auto &choice : snapshot.row_selector->values) {
+      if (std::ranges::none_of(values, [&](const auto &existing) {
+            return existing.value == choice.value;
+          })) {
+        values.push_back(choice);
+      }
+    }
+  }
+  return result;
+}
+
 [[nodiscard]] TableFrame
 remap_frame_columns(const TableFrame &frame,
                     const std::vector<std::string> &source_columns,
@@ -142,14 +244,49 @@ void draw_centered_text(const char *text, const ImVec4 &color) {
   ImGui::TextColored(color, "%s", text);
 }
 
-[[nodiscard]] bool draw_table_snapshot(TableSnapshot &snapshot,
-                                       float height_budget) {
+void draw_row_selector_slider(int &selected_index,
+                              const std::vector<TableRowSelectorValue> &choices,
+                              std::string_view selector_label) {
+  if (choices.size() <= 1) {
+    return;
+  }
+
+  ImGui::SetNextItemWidth(-1.0F);
+  ImGui::SliderInt("##row_selector", &selected_index, 0,
+                   static_cast<int>(choices.size()) - 1, "");
+  selected_index =
+      std::clamp(selected_index, 0, static_cast<int>(choices.size()) - 1);
+
+  // The slider position and logical value are different concepts: index 0 may
+  // select Unit 3. Draw both from the post-interaction selection so the label
+  // and filtered rows change together in the same frame.
+  const auto &selected_choice =
+      choices[static_cast<std::size_t>(selected_index)];
+  const auto caption = "[" + std::to_string(selected_index) +
+                       "]: " + std::string(selector_label) + " " +
+                       selected_choice.label;
+  const auto item_min = ImGui::GetItemRectMin();
+  const auto item_max = ImGui::GetItemRectMax();
+  const auto text_size = ImGui::CalcTextSize(caption.c_str());
+  const auto text_position = ImVec2(
+      item_min.x +
+          std::max(0.0F, (item_max.x - item_min.x - text_size.x) * 0.5F),
+      item_min.y +
+          std::max(0.0F, (item_max.y - item_min.y - text_size.y) * 0.5F));
+  ImGui::GetWindowDrawList()->AddText(
+      text_position, ImGui::GetColorU32(ImGuiCol_Text), caption.c_str());
+}
+
+[[nodiscard]] bool draw_table_snapshot(
+    TableSnapshot &snapshot, const RowSelectorValues &shared_selector_values,
+    std::map<std::string, TableCell::SortValue> &selected_row_values,
+    float height_budget, bool show_snapshot_title = true) {
   if (snapshot.frames.empty() || snapshot.columns.empty()) {
     return false;
   }
   const auto content_top = ImGui::GetCursorPosY();
   ImGui::PushID(static_cast<int>(snapshot.id));
-  if (!snapshot.title.empty()) {
+  if (show_snapshot_title && !snapshot.title.empty()) {
     ImGui::SeparatorText(snapshot.title.c_str());
   }
   if (ImGui::SmallButton("Clear")) {
@@ -164,6 +301,41 @@ void draw_centered_text(const char *text, const ImVec4 &color) {
       (snapshot.cursor < 0 || snapshot.cursor >= frame_count) ? frame_count - 1
                                                               : snapshot.cursor;
   const auto &frame = snapshot.frames[static_cast<std::size_t>(frame_index)];
+
+  std::optional<std::size_t> selector_column;
+  std::optional<TableCell::SortValue> selected_row_value;
+  if (snapshot.row_selector) {
+    selector_column = row_selector_column(snapshot);
+    const auto choices =
+        shared_selector_values.find(snapshot.row_selector->key);
+    if (choices != shared_selector_values.end() && !choices->second.empty()) {
+      auto selected = selected_row_values.find(snapshot.row_selector->key);
+      auto selected_position =
+          selected == selected_row_values.end()
+              ? choices->second.end()
+              : std::ranges::find(choices->second, selected->second,
+                                  &TableRowSelectorValue::value);
+      if (selected_position == choices->second.end()) {
+        selected = selected_row_values
+                       .insert_or_assign(snapshot.row_selector->key,
+                                         choices->second.front().value)
+                       .first;
+        selected_position = choices->second.begin();
+      }
+      auto selected_index = static_cast<int>(
+          std::distance(choices->second.begin(), selected_position));
+      const auto &selector_label = snapshot.row_selector->label.empty()
+                                       ? snapshot.row_selector->column
+                                       : snapshot.row_selector->label;
+      draw_row_selector_slider(selected_index, choices->second, selector_label);
+      const auto &selected_choice =
+          choices->second[static_cast<std::size_t>(selected_index)];
+      selected->second = selected_choice.value;
+      selected_row_value = selected_choice.value;
+    } else {
+      selector_column.reset();
+    }
+  }
 
   const auto column_count = static_cast<int>(snapshot.columns.size());
   const auto &style = ImGui::GetStyle();
@@ -292,6 +464,11 @@ void draw_centered_text(const char *text, const ImVec4 &color) {
     }
     for (const auto row_index : row_order) {
       const auto &row = frame.rows[row_index];
+      if (selector_column &&
+          !table_row_matches_selector(frame, row_index, *selector_column,
+                                      *selected_row_value)) {
+        continue;
+      }
       ImGui::TableNextRow();
       for (int column = 0; column < column_count; ++column) {
         ImGui::TableSetColumnIndex(column);
@@ -346,10 +523,11 @@ void draw_centered_text(const char *text, const ImVec4 &color) {
   return false;
 }
 
-void draw_table_group_window(std::string_view group,
-                             std::vector<TableSnapshot *> &snapshots,
-                             int group_index,
-                             std::vector<std::uint64_t> &clear_ids) {
+void draw_table_group_window(
+    std::string_view group, std::vector<TableSnapshot *> &snapshots,
+    int group_index, const RowSelectorValues &shared_selector_values,
+    std::map<std::string, TableCell::SortValue> &selected_row_values,
+    std::vector<std::uint64_t> &clear_ids) {
   std::string title;
   for (const auto *snapshot : snapshots) {
     if (!snapshot->title.empty()) {
@@ -380,9 +558,96 @@ void draw_table_group_window(std::string_view group,
       if (index != 0) {
         ImGui::Spacing();
       }
-      if (draw_table_snapshot(*snapshots[index], budget)) {
+      if (draw_table_snapshot(*snapshots[index], shared_selector_values,
+                              selected_row_values, budget)) {
         clear_ids.push_back(snapshots[index]->id);
       }
+    }
+  }
+  ImGui::End();
+}
+
+[[nodiscard]] std::string tab_label_for(const TableSnapshot &snapshot) {
+  if (!snapshot.tab_label.empty()) {
+    return snapshot.tab_label;
+  }
+  if (!snapshot.title.empty()) {
+    return snapshot.title;
+  }
+  if (!snapshot.element_name.empty()) {
+    return snapshot.element_name;
+  }
+  return "Table";
+}
+
+void draw_tabbed_table_group_window(
+    std::string_view group, std::vector<TableSnapshot *> &snapshots,
+    int group_index, const RowSelectorValues &shared_selector_values,
+    std::map<std::string, TableCell::SortValue> &selected_row_values,
+    std::vector<std::uint64_t> &clear_ids) {
+  std::stable_sort(snapshots.begin(), snapshots.end(),
+                   [](const auto *left, const auto *right) {
+                     return left->tab_order < right->tab_order;
+                   });
+  std::string title;
+  for (const auto *snapshot : snapshots) {
+    if (!snapshot->title.empty()) {
+      title = snapshot->title;
+      break;
+    }
+  }
+  if (title.empty()) {
+    title = group.empty() || group == "default" ? "Table" : std::string(group);
+  }
+
+  // Tabs and stacked snapshots with the same logical group deliberately use
+  // different hidden window IDs, so mixed layouts never share ImGui state.
+  const auto window_id = title + "##table_tabs_group_" + std::string(group);
+  ImGui::SetNextWindowPos(
+      ImVec2(72.0F + 36.0F * static_cast<float>(group_index),
+             72.0F + 36.0F * static_cast<float>(group_index)),
+      ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(720.0F, 520.0F), ImGuiCond_FirstUseEver);
+  if (ImGui::Begin(window_id.c_str())) {
+    const auto group_text = "group: " + std::string(group);
+    ImGui::TextUnformatted(group_text.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear all")) {
+      for (const auto *snapshot : snapshots) {
+        clear_ids.push_back(snapshot->id);
+      }
+    }
+
+    if (ImGui::BeginTabBar("##table_group_tabs")) {
+      std::map<std::string, std::size_t> label_counts;
+      for (const auto *snapshot : snapshots) {
+        ++label_counts[tab_label_for(*snapshot)];
+      }
+      for (auto *snapshot : snapshots) {
+        auto visible_label = tab_label_for(*snapshot);
+        // A comparison group may contain more than one producer using the
+        // same domain label (for example, two "Overview" tabs). Keep the
+        // common single-producer case terse and disambiguate duplicates with
+        // the generic producer identity.
+        if (label_counts.at(visible_label) > 1) {
+          visible_label += " (" +
+                           (snapshot->element_name.empty()
+                                ? "table " + std::to_string(snapshot->id)
+                                : snapshot->element_name) +
+                           ")";
+        }
+        const auto tab_id =
+            visible_label + "###table_tab_" + std::to_string(snapshot->id);
+        if (ImGui::BeginTabItem(tab_id.c_str())) {
+          const auto height_budget = ImGui::GetContentRegionAvail().y;
+          if (draw_table_snapshot(*snapshot, shared_selector_values,
+                                  selected_row_values, height_budget, false)) {
+            clear_ids.push_back(snapshot->id);
+          }
+          ImGui::EndTabItem();
+        }
+      }
+      ImGui::EndTabBar();
     }
   }
   ImGui::End();
@@ -418,9 +683,20 @@ std::vector<std::size_t> table_row_order(const TableFrame &frame,
   return order;
 }
 
+bool table_row_matches_selector(const TableFrame &frame, std::size_t row_index,
+                                std::size_t column_index,
+                                const TableCell::SortValue &selected_value) {
+  return row_index < frame.rows.size() &&
+         column_index < frame.rows[row_index].size() &&
+         frame.rows[row_index][column_index].sort_value.has_value() &&
+         *frame.rows[row_index][column_index].sort_value == selected_value;
+}
+
 void TableView::push(std::string element_name, const TableUpdate &update) {
   const auto lock = std::scoped_lock(mutex_);
   auto group = update.group.empty() ? std::string("default") : update.group;
+
+  validate_row_selector(update.columns, update.frame, update.row_selector);
 
   if (update.update_mode == TableUpdateMode::AppendRows) {
     static_cast<void>(column_indexes(update.columns, "AppendRows"));
@@ -439,25 +715,49 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
     fresh.element_name = std::move(element_name);
     snapshot = &snapshots_.emplace_back(std::move(fresh));
   }
-  snapshot->group = std::move(group);
-  snapshot->title = update.title;
   const auto previous_columns = snapshot->columns;
+  const auto previous_selector = snapshot->row_selector;
+  const auto selector_schema_changed =
+      !same_row_selector_identity(previous_selector, update.row_selector);
+  if (update.update_mode == TableUpdateMode::AppendRows &&
+      !snapshot->frames.empty() && selector_schema_changed) {
+    throw std::invalid_argument(
+        "TableView AppendRows cannot change the row selector schema");
+  }
+  auto next_selector = update.row_selector;
+  if (!selector_schema_changed && previous_selector && next_selector &&
+      update.update_mode != TableUpdateMode::ReplaceFrame &&
+      (update.update_mode == TableUpdateMode::AppendRows ||
+       previous_columns == update.columns)) {
+    next_selector = previous_selector;
+    merge_row_selector_values(*next_selector, *update.row_selector);
+  }
+  snapshot->group = std::move(group);
+  snapshot->group_layout = update.group_layout;
+  snapshot->tab_label = update.tab_label;
+  snapshot->tab_order = update.tab_order;
+  snapshot->row_selector = std::move(next_selector);
+  snapshot->title = update.title;
   switch (update.update_mode) {
   case TableUpdateMode::AppendFrame:
-    if (snapshot->columns != update.columns && !snapshot->frames.empty()) {
-      // Headers are snapshot-wide; do not reinterpret retained history using a
-      // different positional schema.
+    if ((snapshot->columns != update.columns || selector_schema_changed) &&
+        !snapshot->frames.empty()) {
+      // Headers and selector schema are snapshot-wide; do not reinterpret
+      // retained history using unrelated presentation metadata.
       snapshot->frames.clear();
+      snapshot->cursor = -1;
     }
     snapshot->columns = update.columns;
     snapshot->frames.push_back(update.frame);
     break;
   case TableUpdateMode::ReplaceFrame:
-    if (snapshot->columns != update.columns && snapshot->frames.size() > 1) {
-      // Column headers are snapshot-wide. Starting a new schema cannot
-      // leave older history frames interpreted under unrelated headers.
+    if ((snapshot->columns != update.columns || selector_schema_changed) &&
+        snapshot->frames.size() > 1) {
+      // Column headers and selector schema are snapshot-wide. Starting a new
+      // schema cannot leave older history interpreted under unrelated metadata.
       snapshot->frames.clear();
     }
+    snapshot->cursor = -1;
     snapshot->columns = update.columns;
     if (snapshot->frames.empty()) {
       snapshot->frames.push_back(update.frame);
@@ -512,10 +812,21 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
   // Trim history: 0 keeps everything, otherwise cap to max_history (1 =
   // replace).
   if (update.max_history != 0) {
+    std::size_t removed = 0;
     while (snapshot->frames.size() > update.max_history) {
       snapshot->frames.pop_front();
+      ++removed;
+    }
+    if (snapshot->cursor >= 0 && removed != 0) {
+      const auto old_cursor = static_cast<std::size_t>(snapshot->cursor);
+      snapshot->cursor =
+          old_cursor < removed ? 0 : static_cast<int>(old_cursor - removed);
+    }
+    if (snapshot->cursor >= static_cast<int>(snapshot->frames.size())) {
+      snapshot->cursor = -1;
     }
   }
+  prune_selected_row_values(snapshots_, selected_row_values_);
 }
 
 bool TableView::erase(std::string_view element_name) {
@@ -524,7 +835,15 @@ bool TableView::erase(std::string_view element_name) {
   std::erase_if(snapshots_, [element_name](const auto &snapshot) {
     return snapshot.element_name == element_name;
   });
+  prune_selected_row_values(snapshots_, selected_row_values_);
   return snapshots_.size() != previous_size;
+}
+
+bool TableView::contains(std::string_view element_name) const {
+  const auto lock = std::scoped_lock(mutex_);
+  return std::ranges::any_of(snapshots_, [element_name](const auto &snapshot) {
+    return snapshot.element_name == element_name;
+  });
 }
 
 bool TableView::update_presentation(std::string_view element_name,
@@ -542,6 +861,51 @@ bool TableView::update_presentation(std::string_view element_name,
   return true;
 }
 
+bool TableView::select_row_value(std::string_view selector_key,
+                                 TableCell::SortValue value) {
+  const auto lock = std::scoped_lock(mutex_);
+  const auto available =
+      std::ranges::any_of(snapshots_, [&](const auto &snapshot) {
+        return snapshot.row_selector &&
+               snapshot.row_selector->key == selector_key &&
+               std::ranges::any_of(
+                   snapshot.row_selector->values,
+                   [&](const auto &choice) { return choice.value == value; });
+      });
+  if (!available) {
+    return false;
+  }
+  selected_row_values_.insert_or_assign(std::string(selector_key),
+                                        std::move(value));
+  return true;
+}
+
+std::optional<TableCell::SortValue>
+TableView::selected_row_value(std::string_view selector_key) const {
+  const auto lock = std::scoped_lock(mutex_);
+  const auto selected = selected_row_values_.find(std::string(selector_key));
+  return selected == selected_row_values_.end()
+             ? std::nullopt
+             : std::optional<TableCell::SortValue>(selected->second);
+}
+
+bool TableView::select_history_frame(std::string_view element_name,
+                                     std::optional<std::size_t> frame_index) {
+  const auto lock = std::scoped_lock(mutex_);
+  const auto snapshot =
+      std::ranges::find_if(snapshots_, [element_name](const auto &candidate) {
+        return candidate.element_name == element_name;
+      });
+  if (snapshot == snapshots_.end() || snapshot->frames.empty() ||
+      (frame_index && *frame_index >= snapshot->frames.size())) {
+    return false;
+  }
+  snapshot->cursor = !frame_index || *frame_index == snapshot->frames.size() - 1
+                         ? -1
+                         : static_cast<int>(*frame_index);
+  return true;
+}
+
 const std::vector<TableSnapshot> &TableView::snapshots() const {
   const auto lock = std::scoped_lock(mutex_);
   return snapshots_;
@@ -554,26 +918,40 @@ std::vector<TableSnapshot> TableView::snapshots_copy() const {
 
 void TableView::draw(const PlotDrawContext & /*context*/) {
   const auto lock = std::scoped_lock(mutex_);
-  std::map<std::string, std::vector<TableSnapshot *>> groups;
+  const auto selector_values = shared_row_selector_values(snapshots_);
+  std::map<std::string, std::vector<TableSnapshot *>> stacked_groups;
+  std::map<std::string, std::vector<TableSnapshot *>> tabbed_groups;
   for (auto &snapshot : snapshots_) {
+    auto &groups = snapshot.group_layout == TableGroupLayout::Tabs
+                       ? tabbed_groups
+                       : stacked_groups;
     groups[snapshot.group].push_back(&snapshot);
   }
   auto group_index = 0;
   std::vector<std::uint64_t> clear_ids;
-  for (auto &[group, snapshots] : groups) {
-    draw_table_group_window(group, snapshots, group_index, clear_ids);
+  for (auto &[group, snapshots] : stacked_groups) {
+    draw_table_group_window(group, snapshots, group_index, selector_values,
+                            selected_row_values_, clear_ids);
+    ++group_index;
+  }
+  for (auto &[group, snapshots] : tabbed_groups) {
+    draw_tabbed_table_group_window(group, snapshots, group_index,
+                                   selector_values, selected_row_values_,
+                                   clear_ids);
     ++group_index;
   }
   if (!clear_ids.empty()) {
     std::erase_if(snapshots_, [&clear_ids](const auto &snapshot) {
       return std::ranges::find(clear_ids, snapshot.id) != clear_ids.end();
     });
+    prune_selected_row_values(snapshots_, selected_row_values_);
   }
 }
 
 void TableView::clear() {
   const auto lock = std::scoped_lock(mutex_);
   snapshots_.clear();
+  selected_row_values_.clear();
   next_id_ = 1;
 }
 

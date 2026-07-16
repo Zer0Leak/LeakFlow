@@ -19,7 +19,7 @@ AES knowledge lives here.
 - `leakflow_plugins_ml` (wraps the numeric layer in pipeline elements/payloads).
 - `leakflow_plugins_ml_plot` (implemented in A4; links `leakflow_plugins_ml` and
   `leakflow_plot` and translates the evaluation payload into generic
-  `TableView` data only).
+  tabbed `TableView` data only).
 
 The pipeline **elements** that wrap these APIs live in the `leakflow_plugins_ml`
 family (klass `Analyze/Clustering/...`, `Analyze/Evaluation/Clustering`,
@@ -96,8 +96,13 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   options plus only bounded labels-side `payload.cluster.*` producer metadata;
   it does not own typed `Units` or copy `payload.parameter.*` metadata.
 - `ClusteringMetricsTablePlot`: ML→plot bridge with a `sink` input. It translates
-  structured results into generic `TableView` rows and adds direct
-  evaluation-buffer `payload.parameter.*` metadata without recomputation.
+  structured results into generic `TableView` tab groups and adds direct
+  evaluation-buffer `payload.parameter.*` metadata without recomputation. Its
+  tabs are Overview, Exact, Semantic, Fragmentation, Combined, Alignment, and
+  Parameters. Overview uses one row per run and unit; family tabs retain each
+  stored `MetricValue` exactly once; Parameters records context once per run.
+  Unit-bearing tabs share a view-local selector keyed by the typed unit ids on
+  the evaluation `Buffer`.
 
 The current pipeline `ClusteringStats` is intentionally narrower than the active
 Phase A evaluator. It accepts scalar truth IDs, emits a dense reordered confusion
@@ -124,13 +129,17 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
   `evaluation.*` options, and bounded generic `payload.cluster.*` capture only
   from labels metadata in `leakflow_plugins_ml`; plus
   `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. The table reuses
-  generic `TableView`, accepts
-  explicitly stamped `payload.parameter.*` metadata on its input `Buffer`, and
-  exposes collision-proof `parameter.payload.<name>` and
-  `parameter.metadata.<name>` columns. `update_mode` is
-  `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls are
-  `UiControl`. It does not introspect arbitrary upstream properties, flatten the
-  structured payload into metadata, or recompute metrics.
+  generic domain-free `TableView` tabs and accepts explicitly stamped
+  `payload.parameter.*` metadata on its input `Buffer`. Overview compares one
+  run/unit per row using headline metrics and core producer/experiment
+  parameters. Exact, Semantic, Fragmentation, Combined, and Alignment contain
+  every stored `MetricValue` exactly once, with `↑`/`↓` direction labels;
+  Parameters presents effective/captured context once per run. `update_mode` is
+  `UiControl`/`ElementUi`, accepts `auto|accumulate|replace`, and publishes its
+  read-only resolved `active_update_mode`; auto follows liveness. Group/title
+  and view-local unit/tab/clear/sort controls are `UiControl`. Accumulation
+  retains comparison rows and run history. It does not introspect arbitrary upstream properties,
+  flatten the structured payload into metadata, or recompute metrics.
 - Support exact-only evaluation without ranges. Semantic mode uses an explicit
   normalized power cost with configured ranges/weights and `power=1|2` (default
   2). Keep undefined value, reason, support, direction, family, and averaging in
@@ -163,9 +172,10 @@ or clustering labels.
   all undefined denominators, invalid ranges/weights/power, overflow, and a
   non-quadratic stress case.
 - A4 coverage includes payload summary/effective options and bounded
-  producer-parameter capture, plus table translation, explicit
-  `payload.parameter.*` metadata, replace/append, clear, per-column sorting, and
-  no-recomputation behavior.
+  producer-parameter capture, plus tab translation, one-row-per-run/unit
+  overview, every-value-once family coverage, parameters once per run, explicit
+  `payload.parameter.*` metadata, accumulate/replace history, typed-unit selection, clear, per-tab column
+  sorting, and no-recomputation behavior.
 - Preserve all current `ClusteringStats` tests and pipeline behavior.
 
 ## Contracts

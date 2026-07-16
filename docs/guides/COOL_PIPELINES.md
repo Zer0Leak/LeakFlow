@@ -455,9 +455,9 @@ This extended version selects the profiling PoIs, extracts those columns from
 the attack traces, clusters them with an 81-component GMM, and evaluates the
 clusters directly against the vector truth `(HW(m), HW(y))`. The structured
 metrics, effective evaluator options, and captured GMM parameters are shown in
-a sortable comparison table. The same selected PoIs are also re-correlated on
-the attack traces and shown beside the profiling scores. One `Hdf5FileSrc`
-supplies aligned traces, plaintexts, and the fixed key.
+a sortable tabbed comparison table. The same selected PoIs are also
+re-correlated on the attack traces and shown beside the profiling scores. One
+`Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
 
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
@@ -475,7 +475,7 @@ leakflow --log-level warning run --graph \
    PoiTablePlot@tbl(title=\"Profiling vs attack PoIs\",reference_label=profiling,current_label=attack,precision=3); \
    GaussianMixture@gmm(n_components=81,covariance_type=full,n_init=1,max_iter=100,seed=0); \
    ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,combined_quality=true); \
-   ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=append); \
+   ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=accumulate); \
    @corr_src ! @poi ! @poi_tee; \
    @poi_tee.src_0 ! @tbl.reference; \
    @poi_tee.src_1 ! @poi2idx ! @featsel.indexes; \
@@ -503,22 +503,49 @@ only the shared units. Match them — both `[0]`, or both left at the full range
 a meaningful comparison. The units each buffer carries show as `units=[…]` in a
 `Summary` and in the `--graph` buffer inspector.
 
-`update_mode=append` keeps each re-evaluation as additional table rows, which is
-useful when changing `GaussianMixture` parameters such as `covariance_type` or
-`n_components` while Idle. Use `update_mode=replace` to keep only the newest
-evaluation. Click any table header to sort ascending or descending; use the
-table's **Clear** button to remove that plotter's rows without clearing other
-plot views. Effective evaluator options come from the structured payload. The
-GMM parameters explicitly captured from the labels buffer's
-`payload.cluster.*` metadata are `method`, `n_components`, `covariance_type`,
-and `converged`; explicit experiment parameters can be stamped on the evaluation
-buffer as `payload.parameter.*` metadata. The table keeps the sources
-collision-proof as
-`parameter.payload.<name>` and `parameter.metadata.<name>` columns. Stamp an
-experiment parameter on `@eval.evaluation` (or its outgoing link), as the graph
-does above; do not expect `payload.parameter.*` on labels/truth to pass through
-the evaluator's Analyze-boundary metadata forwarding. If `A` selects another
-dataset, update the example `payload.parameter.dataset=key_01` stamp too.
+The metrics window has seven tabs:
+
+- **Overview** is the place to start. It shows one row per run and unit, with
+  observation/group/cluster counts, headline quality metrics, and the core GMM
+  and experiment parameters needed to compare configurations.
+- **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
+  contain the complete stored metric detail without duplicating a metric across
+  tabs. `↑` after a metric means higher is better; `↓` means lower is better.
+  These direction markers are part of the metric label; the arrow drawn on a
+  column header shows the current table sort direction.
+- **Parameters** shows effective evaluator settings, captured GMM context, and
+  explicit experiment metadata once per run instead of repeating them on every
+  metric row.
+
+`detail=full` and `alignment=both` are intentionally kept in this example: the
+family tabs make the resulting per-dimension, per-cluster, per-group, and both
+alignment records manageable. `update_mode=accumulate` keeps each
+re-evaluation for comparison, which is useful when changing `GaussianMixture`
+parameters such as `covariance_type` or `n_components` while Idle. Use
+`update_mode=replace` to keep only the newest evaluation, or the default
+`update_mode=auto` to accumulate for live-driven input and replace otherwise.
+`active_update_mode` reports that resolved choice. When the evaluation contains
+multiple units, a horizontal **Unit** slider on Overview and the metric-family
+tabs filters the copied rows to one typed unit; the selection follows you across
+tabs, while Parameters remains run-wide. To exercise it with this example,
+change both `CorrelationPoiToIndexes(units=[0])` and
+`AesLeakage(units=[0])` to the same multi-unit set, such as `[0,1]`. Click a
+header within the current tab to sort ascending or descending. The table's
+**Clear** button clears that tab;
+**Clear all** removes every table in this comparison group from the tabbed
+metrics window without clearing other plot views.
+These display actions use stored results and do not refit the GMM or recompute
+clustering evaluation.
+
+Effective evaluator options come from the structured payload. The GMM
+parameters explicitly captured from the labels buffer's `payload.cluster.*`
+metadata include `method`, `n_components`, `covariance_type`, and `converged`;
+explicit experiment parameters can be stamped on the evaluation buffer as
+`payload.parameter.*` metadata. Stamp an experiment parameter on
+`@eval.evaluation` (or its outgoing link), as the graph does above; do not expect
+`payload.parameter.*` on labels/truth to pass through the evaluator's
+Analyze-boundary metadata forwarding. If `A` selects another dataset, update the
+example `payload.parameter.dataset=key_01` stamp too.
 
 `out/key05_sub.h5` is only an example subset path; point `A` at an existing
 HDF5 file. Alternatively, keep the selected full key file and add

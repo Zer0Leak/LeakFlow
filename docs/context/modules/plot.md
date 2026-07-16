@@ -39,7 +39,7 @@ Tests:
   `AttackStatsPayload`. Depends on `leakflow_plugins_crypto` + `leakflow_plot`.
 - `leakflow_plugins_ml_plot` (**implemented in A4**): ML→plot bridge for
   `ClusteringEvaluationPayload`. A4 added only
-  `ClusteringMetricsTablePlot`, which fills the existing generic `TableView`.
+  `ClusteringMetricsTablePlot`, which fills generic named `TableView` tabs.
   The target depends on `leakflow_plugins_ml` + `leakflow_plot`; clustering
   result translation does not belong in a generic view or in
   `leakflow_plugins_plot`.
@@ -166,8 +166,14 @@ final result), so it needs no live/offline switch.
 
 A4 extended the generic table contract with typed sort values, stable single-key
 ascending/descending row ordering, replace-frame and append-row updates,
-schema-union remapping, and per-producer erase. Missing/NaN sort values remain
-last in either direction. The view still knows nothing about clustering fields.
+schema-union remapping, per-producer erase, and explicitly ordered named tab
+groups. Optional row selectors carry bridge-supplied typed choices plus the
+named generic column holding each row's typed key, and share view-local
+selection through an opaque key; the clustering bridge uses this for units.
+Tabs organize generic tables and their histories; their
+names, order, and cell schemas come from the bridge. Missing/NaN sort values
+remain last in either direction. The view still knows nothing about clustering
+families, metric names, units, or parameters.
 
 `ScorePlot`, the element that fills a `ScoreView`, lives in the separate
 `leakflow_plugins_crypto_plot` target (depends on `leakflow_plugins_crypto` +
@@ -185,37 +191,49 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md` (A4).
 
 `ClusteringMetricsTablePlot` is the only clustering visualization in A4. Its
 `sink` pad reads `ClusteringEvaluationPayload` and translates stored records
-into the existing domain-free `TableView`:
+into named tabs in the existing domain-free `TableView`:
 
-- exact, semantic, fragmentation, alignment, per-dimension, and support metrics
-  remain structured rows; undefined values display `N/A` with reason/support;
-- effective evaluator options and typed-unit/count context from the enclosing
-  `Buffer` are visible; the payload does not own typed units;
-- bounded generic producer parameters captured by `ClusteringEvaluate` from
-  labels metadata under `payload.cluster.*` are visible;
-- explicitly stamped `payload.parameter.*` metadata on the evaluation buffer is
-  accepted as additional display parameters; arbitrary metadata namespaces and
-  upstream properties are not inspected;
-- payload entries use `parameter.payload.<name>` columns and direct input
-  metadata uses `parameter.metadata.<name>`, so identical suffixes cannot
-  collide;
-- `replace` updates the current table from the latest payload, while `append`
-  retains the existing comparison content and adds the new translated result;
-- clear empties the retained table state, consistent with `PlotRuntime::clear()`;
-- any column can be selected as the stable `asc` or `desc` sort key using
-  deterministic generic `TableView` sorting. Numeric cells sort numerically,
-  text cells lexically, unavailable cells follow defined cells in either
-  direction, and equal keys retain source order.
+- **Overview** has one row per run and typed unit. It leads with observation,
+  truth-group, and predicted-cluster counts; headline exact/semantic/
+  fragmentation/combined metrics; and the core producer and explicit
+  experiment parameters needed to compare runs without scanning detail rows.
+- **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
+  partition the structured metric records by family. Across those tabs every
+  stored `MetricValue` appears exactly once, including per-dimension,
+  per-cluster, and per-group detail. Undefined values display `N/A` with their
+  reason and support. `↑` means higher is better and `↓` means lower is better;
+  these metric-direction markers are distinct from the selected header's sort
+  arrow.
+- **Parameters** presents effective evaluator options, bounded labels-side
+  `payload.cluster.*` producer context, and explicitly stamped
+  `payload.parameter.*` experiment metadata once per run rather than repeating
+  them on every metric row. Payload and direct-metadata names remain
+  collision-proof; arbitrary metadata namespaces and upstream properties are
+  not inspected.
+- `replace` refreshes all tabs from the latest payload. `accumulate` retains
+  comparison rows in Overview/Parameters and run history in every family tab.
+  `auto` selects accumulate for a live-driven pipeline and replace otherwise;
+  `active_update_mode` exposes that resolved choice read-only.
+- Unit-bearing tabs share a horizontal selector when more than one typed unit
+  is present. Choices use the bridge-supplied complete typed-unit axis, so a
+  sparse optional tab cannot change the selection merely because it has no row
+  for that unit. It filters copied rows only; Parameters remains run-wide.
+- A tab's **Clear** removes that tab; **Clear all** removes every tabbed table in
+  that comparison group. Both remain consistent with `PlotRuntime::clear()`.
+- Each tab supports deterministic stable `asc`/`desc` column sorting. Numeric
+  cells sort numerically, text cells lexically, unavailable cells follow defined
+  cells in either direction, and equal keys retain source order.
 
-`update_mode` is `SinkDisplay`/`ElementUi`, so an Idle change re-derives the sink
-display from its cached input without upstream work. `group` and `title` are
-`UiControl`/`ElementUi`; the Clear button and header sorting are view-local UI
-controls. These operations use copied table/payload data. The bridge never calls
-the evaluator or Hungarian solver, and generic sorting belongs in `TableView`,
-not a clustering branch in `PlotRuntime`. Headless A4 coverage checks
-deterministic translation, undefined states, captured parameters,
-replace/append, clear, sorting, history/reset, and property effects.
-ImGui/ImPlot rendering remains a manual smoke check.
+`update_mode` is `UiControl`/`ElementUi`, so an Idle change resolves immediately
+without replaying cached input; the next buffer uses the selected mode. `group`
+and `title` are `UiControl`/`ElementUi`; unit selection, tabs, Clear, and header
+sorting are view-local UI controls. These operations use copied table/payload data. The bridge never calls
+the evaluator or Hungarian solver, and generic tabs/sorting belong in
+`TableView`, not a clustering branch in `PlotRuntime`. Headless A4 coverage
+checks deterministic tab translation, every-value-once placement, overview and
+parameter cardinality, undefined states, accumulate/replace history, typed-unit selection, clear, sorting,
+reset, and property effects. ImGui/ImPlot rendering remains a manual smoke
+check.
 
 ## Deferred Clustering Metric Views (Unblocked)
 

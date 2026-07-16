@@ -35,20 +35,26 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    bounded generic producer parameters from the labels buffer's
    `payload.cluster.*` metadata; typed unit identity stays on the output
    `Buffer`. `leakflow_plugins_ml_plot` and its
-   `ClusteringMetricsTablePlot` are implemented. The table reuses `TableView`,
-   accepts explicitly stamped `payload.parameter.*` metadata on its `sink` input
-   buffer, and exposes payload and metadata parameters separately as
-   `parameter.payload.<name>` and `parameter.metadata.<name>`. Its `update_mode`
-   is `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls
-   are `UiControl`. It never recomputes evaluation or introspects arbitrary
-   upstream properties; `ClusteringStats` stays unchanged.
+   `ClusteringMetricsTablePlot` are implemented. The bridge fills domain-free
+   `TableView` tab groups: Overview, Exact, Semantic, Fragmentation, Combined,
+   Alignment, and Parameters. Overview is one row per run and unit with counts,
+   headline metrics, and core producer/experiment parameters. Family tabs expose
+   every stored `MetricValue` exactly once; Parameters presents effective,
+   captured, and explicitly stamped `payload.parameter.*` values once per run.
+   Metric labels show `↑` or `↓` direction. Its `update_mode` is
+   `UiControl`/`ElementUi` with `auto|accumulate|replace` and a read-only
+   `active_update_mode`; `auto` follows liveness. Group/title and view-local
+   unit selection, tabs, clear, and sorting are also `UiControl`. Accumulation
+   preserves comparison rows/history without recomputation. It never
+   introspects arbitrary upstream properties; `ClusteringStats` stays unchanged.
 5. **Deferred follow-up** — add versioned payload persistence, then the generic
    `MetricView`/`ClusteringMetricsPlot` and `ClusteringMatrixPlot` bridge work.
    Those views consume stored payload results and never recompute evaluation or
    alignment.
 
-A4 is deliberately table-only: it added the ML→plot bridge and generic table
-behavior, but not persistence, `MetricView`, or matrix plotting.
+A4 is deliberately table-only: it added the ML→plot bridge and generic,
+domain-free tabbed-table behavior, but not persistence, `MetricView`, or matrix
+plotting.
 Other previously discussed candidates (Zarr parity, CPA plot refinement,
 overlay/correlation plot polish, and Kyber / ML-KEM hypotheses) remain deferred
 rather than folded into this sequence.

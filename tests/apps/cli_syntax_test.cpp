@@ -455,7 +455,7 @@ int main()
     {
         auto clustering_table = leakflow::cli::build_builtin_pipeline_from_expression(
             "ClusteringEvaluate@evaluation; "
-            "ClusteringMetricsTablePlot@metrics(update_mode=append); "
+            "ClusteringMetricsTablePlot@metrics(update_mode=accumulate); "
             "@evaluation.evaluation{payload.parameter.dataset=fixture} ! @metrics.sink");
         if (!expect(clustering_table.pipeline.elements_by_type("ClusteringMetricsTablePlot").size() == 1,
                 "built-in factory did not create ClusteringMetricsTablePlot")) {

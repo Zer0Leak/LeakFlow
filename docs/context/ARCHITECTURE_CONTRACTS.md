@@ -589,19 +589,23 @@ silently change with `ClusteringEvaluate` available.
 
 Evaluator properties that affect numeric results are `payload-output` with
 downstream invalidation. `ClusteringMetricsTablePlot.update_mode` is
-`SinkDisplay`/`ElementUi`: changing it re-derives the sink display from cached
-input without rerunning upstream. `group` and `title` are
-`UiControl`/`ElementUi`. Clear and column sorting are view-local UI controls. A
-plot edit must never trigger GMM fitting or metric/alignment recomputation.
+`UiControl`/`ElementUi`, accepts `auto|accumulate|replace`, and has a read-only
+`active_update_mode` (`UiControl`/`None`). `auto` resolves to accumulate when the
+element is live-driven and replace otherwise. Changing the selector does not
+replay cached input; subsequent buffers use the resolved choice. `group` and
+`title` are `UiControl`/`ElementUi`. Unit selection, clear, and column sorting
+are view-local UI controls. A plot edit must never trigger GMM fitting or
+metric/alignment recomputation.
 
 The A4 table bridge is presentation-only. Its `sink` pad exposes metrics,
 undefined reasons and supports, effective options, typed-unit/count context,
-and the bounded captured parameters. Its update contract is `replace|append`;
-clear empties its retained table state; and each column supports deterministic
-stable ascending or descending ordering. These operations use copied
-table/payload data and never invoke the evaluator or Hungarian solver. Any
-generic sorting support belongs in `TableView`, not in a clustering-specific
-`PlotRuntime` branch.
+and the bounded captured parameters. Its update contract is
+`auto|accumulate|replace`; unit-bearing tabs expose one synchronized view-local
+selector using typed `Buffer.units()` identities; clear empties retained table
+state; and each column supports deterministic stable ascending or descending
+ordering. These operations use copied table/payload data and never invoke the
+evaluator or Hungarian solver. Generic selection and sorting support belongs in
+`TableView`, not in a clustering-specific `PlotRuntime` branch.
 
 ## Future Plugin Boundaries
 

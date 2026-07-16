@@ -59,7 +59,9 @@ support:
   `ClusteringEvaluationPayload` boundary, including typed-unit
   propagation/alignment.
 - `leakflow_plugins_ml_plot` exists and provides the table-only
-  `ClusteringMetricsTablePlot` bridge into generic `TableView` data.
+  `ClusteringMetricsTablePlot` bridge. It fills domain-free `TableView` tab
+  groups with an Overview plus Exact, Semantic, Fragmentation, Combined,
+  Alignment, and Parameters tables.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
   guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
   difference-of-means ranking with an optional best-difference trace output,
@@ -389,11 +391,17 @@ ML plugin elements:
 
 ML plot bridge:
 
-- `ClusteringMetricsTablePlot`: consumes that result on `sink`, presents metrics
-  and collision-proof `parameter.payload.*` / `parameter.metadata.*` columns,
-  and supports replace/append, clear, and stable column sorting without numeric
-  recomputation. `update_mode` is `SinkDisplay`/`ElementUi`; group/title and
-  view-local clear/sort behavior are `UiControl`.
+- `ClusteringMetricsTablePlot`: consumes that result on `sink`. Overview has one
+  row per run and unit with counts, headline metrics, and core producer plus
+  experiment parameters. Exact, Semantic, Fragmentation, Combined, and
+  Alignment contain every stored `MetricValue` exactly once, while Parameters
+  presents effective/captured parameters once per run. Metric labels use `↑` or
+  `↓` for their optimization direction. Accumulate/replace, synchronized typed-
+  unit selection, clear, tab-local stable column sorting, and tab history operate
+  only on copied display data and never recompute evaluation. `update_mode` is
+  `UiControl`/`ElementUi` with `auto|accumulate|replace` and read-only
+  `active_update_mode`; auto follows liveness. Group/title and view-local
+  unit/tab/clear/sort behavior are `UiControl`.
 
 Core plugin elements:
 

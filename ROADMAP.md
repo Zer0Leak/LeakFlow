@@ -2035,8 +2035,10 @@ Implementation sequence:
   `ClusteringEvaluate`, typed-unit alignment, bounded summaries and captured
   parameters, descriptor registration, and compatibility tests. It added the
   `leakflow_plugins_ml_plot` bridge with `ClusteringMetricsTablePlot`, reusing
-  generic `TableView` for metrics and captured parameters with
-  `replace|append`, clear, and deterministic per-column `asc|desc` behavior.
+  generic `TableView` tab groups for an Overview plus Exact, Semantic,
+  Fragmentation, Combined, Alignment, and Parameters tables, with
+  `auto|accumulate|replace`, a synchronized typed-unit selector, clear, and
+  deterministic per-column `asc|desc` behavior.
 
 Locked decisions:
 
@@ -2070,15 +2072,24 @@ Delivered A4 integration:
   labels buffer's `payload.cluster.*` metadata. Typed unit identity remains on
   the output `Buffer`, not inside `ClusteringEvaluationPayload`.
 - `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. Its `sink` pad
-  consumes the structured payload and fills the existing generic `TableView`.
-  Payload parameters and explicitly stamped evaluation-buffer
-  `payload.parameter.*` metadata use separate collision-proof columns,
-  `parameter.payload.<name>` and `parameter.metadata.<name>`. `update_mode` is
-  `SinkDisplay`/`ElementUi`; group/title and view-local clear/sort controls are
-  `UiControl`.
-- Typed-unit alignment, pipeline behavior, table translation,
-  `replace|append`, clear, and stable per-column ascending/descending sorting
-  are covered. A1–A3 cover the conventional scikit-learn fixtures,
+  consumes the structured payload and fills generic named table tabs. Overview
+  has one row per run and unit, with counts, headline metrics, and the core
+  producer/experiment parameters needed for comparison. Exact, Semantic,
+  Fragmentation, Combined, and Alignment retain every stored `MetricValue`
+  exactly once in its family tab; Parameters shows captured payload and
+  explicitly stamped evaluation-buffer `payload.parameter.*` values once per
+  run. Metric labels carry higher-is-better (`↑`) or lower-is-better (`↓`)
+  direction without requiring separate taxonomy columns. `update_mode` is a
+  `UiControl`/`ElementUi` selector with read-only `active_update_mode`; `auto`
+  resolves to accumulate for live-driven pipelines and replace otherwise.
+  Group/title and view-local unit/tab/clear/sort controls are also `UiControl`.
+- `TableView` remains domain-free: its reusable tab grouping, typed sorting,
+  append/replace updates, synchronized row selectors, and clear behavior know
+  only generic tables and cells, never clustering families or metric names.
+- Typed-unit alignment, pipeline behavior, tab translation, every-value-once
+  coverage, `auto|accumulate|replace`, multi-unit selection, clear, and stable per-column
+  ascending/descending sorting are covered. A1–A3 cover the conventional
+  scikit-learn fixtures,
   hand-computed semantic, fragmentation, and alignment cases, exact
   degeneracies, both rectangular directions, deterministic assignment ties,
   arbitrary IDs, `D=1/2/4`, numeric batches/dtypes/validation, all current
@@ -2109,9 +2120,10 @@ Exit criteria:
   result/payload for batched and unbatched inputs.
 - Undefined/value/support/direction/averaging semantics are explicit and tested.
 - Numeric reference, pipeline, table-bridge, and compatibility tests pass.
-- The table exposes metrics, effective evaluator options, and bounded explicitly
-  captured parameters with deterministic replace/append, clear, and per-column
-  sorting behavior, without recomputing evaluation.
+- The tabbed table exposes one-row-per-run/unit overview comparisons, every
+  stored metric value exactly once in the family tabs, and parameters once per
+  run, with deterministic accumulation/replacement, a synchronized typed-unit
+  selector, clear, and per-tab column sorting, without recomputing evaluation.
 - Existing `ClusteringStats ! HeatmapPlot` pipelines remain valid.
 - No plotting dependency enters core, `leakflow_ml`, or `leakflow_plugins_ml`;
   the A4 table dependency is isolated in `leakflow_plugins_ml_plot`.
