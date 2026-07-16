@@ -1,7 +1,8 @@
 # Clustering Evaluation and Metric Visualization
 
-Status: implementation plan only. No code in this document is implemented merely
-by accepting this design.
+Status: implementation in progress. Phase A1 (exact numeric core) is implemented;
+Phase A2 is next. Phase A as a whole and all Phase B visualization work remain
+incomplete.
 
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
@@ -11,6 +12,19 @@ AES, Kyber, a fixed number of semantic dimensions, or a fixed number of classes.
 ## Phase Split
 
 Implementation is deliberately split into two phases.
+
+Current Phase A slices:
+
+- **A1 — exact numeric core (implemented):** core-free result/options contract,
+  vector-truth grouping, deterministic sparse contingency detail, conventional
+  exact metrics, explicit pair-score undefined/support semantics, and numeric
+  tests.
+- **A2 — semantic and fragmentation metrics (next):** normalized power-cost
+  validation and aggregate/detail metrics.
+- **A3 — rectangular alignments (pending):** exact-overlap and semantic-cost
+  assignments with unmatched support.
+- **A4 — pipeline contract (pending):** payload, evaluator element, typed-unit
+  alignment, summary, persistence, registration, and pipeline tests.
 
 ### Phase A — Full Clustering Evaluation Metrics
 

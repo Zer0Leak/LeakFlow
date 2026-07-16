@@ -65,34 +65,40 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   cross-validated vs `scipy.optimize.linear_sum_assignment`), `reorder_confusion_columns`
   (diagonalise for plotting), and `matched_clustering_scores` (accuracy +
   per-class precision/recall/F1).
+- `clustering_evaluation.hpp`: Phase A1's core-free, GMM-independent
+  `evaluate_clustering(...)` API. It accepts arbitrary int64-representable
+  predicted IDs `[N]`/`[U,N]` and numeric semantic truth
+  `[N,D]`/`[U,N,D]`, groups truth by exact full-vector equality, and returns a
+  structured per-unit result. Current results include deterministic sparse
+  contingency detail, checked 64-bit unordered-pair counts, ARI, arithmetic
+  AMI, homogeneity, completeness, V-measure, purity, pair
+  precision/recall/F1, and arithmetic NMI. Metric records carry value,
+  denominator support, descriptor metadata, and explicit undefined reasons.
 
-The current pipeline `ClusteringStats` is intentionally narrower than the next
-planned evaluator. It accepts scalar truth IDs, emits a dense reordered confusion
+The current pipeline `ClusteringStats` is intentionally narrower than the active
+Phase A evaluator. It accepts scalar truth IDs, emits a dense reordered confusion
 tensor, and attaches ARI/NMI/purity/matched scores as metadata. Its square
 matching and tensor-output contract is retained for compatibility with existing
 `ClusteringStats ! HeatmapPlot` graphs.
 
-## Planned Evaluation Phases (Not Implemented)
+## Active Evaluation Sequence
 
 Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
-- Add a GMM-independent `evaluate_clustering(...)` API and structured
-  `ClusteringEvaluationResult` in `leakflow_ml`.
-- Accept labels `[N]`/`[U,N]` and vector semantic truth
-  `[N,D]`/`[U,N,D]`; derive exact groups from full-vector equality.
-- Add ARI, arithmetic AMI, homogeneity, completeness, V-measure, pair
-  precision/recall/F1, purity, compatibility NMI, semantic merge rate/severity and
-  micro/macro/per-dimension impurity, micro/macro/per-group fragmentation, plus
-  requested exact-overlap and semantic-cost rectangular alignments.
+- **A1 done:** GMM-independent `evaluate_clustering(...)`, structured
+  `ClusteringEvaluationResult`, vector-truth exact grouping, sparse contingency,
+  and the complete exact metric set.
+- **A2 next:** semantic merge rate/severity, micro/macro/per-dimension impurity,
+  and micro/macro/per-group fragmentation.
+- **A3 pending:** exact-overlap and semantic-cost rectangular alignments.
+- **A4 pending:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
+  alignment, summaries, and persistence in `leakflow_plugins_ml`.
 - Support exact-only evaluation without ranges. Semantic mode uses an explicit
   normalized power cost with configured ranges/weights and `power=1|2` (default
   2). Keep undefined value, reason, support, direction, family, and averaging in
   every metric record.
-- Add `ClusteringEvaluate` and `ClusteringEvaluationPayload` in
-  `leakflow_plugins_ml`, including typed-unit alignment, bounded summaries, and
-  versioned persistence.
 - Do not mutate `ClusteringStats`; it remains the legacy matrix adapter.
 
 ### Phase B — Metric Visualization
@@ -104,8 +110,11 @@ not compute metrics, assignments, or clustering labels.
 
 ### Planned Validation
 
-- Cross-validate conventional metrics against checked-in scikit-learn fixtures.
-- Hand-check semantic, pair, fragmentation, combined-score, and alignment cases.
+- A1 conventional metrics are cross-validated against checked-in scikit-learn
+  fixtures, with degeneracy, symmetry, arbitrary-ID, vector/batch/dtype,
+  validation, sparse-detail, and repeated-marginal AMI stress coverage.
+- Hand-check the remaining semantic, fragmentation, combined-score, and
+  alignment cases.
 - Cover arbitrary IDs, rectangular mappings, `D=1/2/4`, unit batching/alignment,
   all undefined denominators, invalid ranges/weights/power, overflow, and a
   non-quadratic stress case.

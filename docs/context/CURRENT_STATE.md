@@ -50,8 +50,8 @@ support:
   AES first-round S-box leakage helpers, including `y(0)`..`y(7)` S-box output
   bit channels.
 - `leakflow_ml` exists and provides generic Torch numeric APIs for Gaussian
-  mixtures, constrained Sinkhorn transport, and the current scalar-class
-  clustering metrics.
+  mixtures, constrained Sinkhorn transport, the legacy scalar-class clustering
+  metrics, and the Phase A1 vector-truth exact clustering evaluator.
 - `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
   and `ClusteringStats`, including typed-unit propagation/alignment.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
@@ -204,10 +204,11 @@ Delivered: `FakeLiveSrc` (reads a Torch `.pt`, emits one `Buffer` per axis-0 row
 real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative stop,
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
-state machine), and §14 (CLI cookbook). The next planned ML sequence is full
-clustering evaluation followed by clustering-metric visualization; it is design
-only and still requires an explicit implementation request. Zarr parity remains
-a separate deferred candidate.
+state machine), and §14 (CLI cookbook). Full clustering evaluation Phase A is
+now active: its A1 exact numeric core is implemented, with semantic metrics,
+alignments, and pipeline integration still pending. Clustering-metric
+visualization remains the follow-up phase. Zarr parity remains a separate
+deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -343,6 +344,12 @@ ML:
 - Current `clustering_metrics` APIs: confusion matrix, purity, ARI, arithmetic
   NMI, square Hungarian matching/reordering, and matched accuracy/per-class
   precision/recall/F1.
+- `evaluate_clustering(...)`: core-free Phase A1 evaluation for arbitrary
+  int64-representable labels `[N]`/`[U,N]` and exact vector truth
+  `[N,D]`/`[U,N,D]`. It returns deterministic sparse contingency detail, checked
+  unordered-pair counts, ARI, arithmetic AMI, homogeneity, completeness,
+  V-measure, purity, pair precision/recall/F1, and arithmetic NMI with explicit
+  value/support/undefined semantics.
 
 ML plugin elements:
 
@@ -418,10 +425,10 @@ Logging:
 
 ## Not Implemented Yet
 
-- Full vector-semantic clustering evaluation: `[N,D]`/`[U,N,D]` truth, AMI,
-  homogeneity/completeness/V-measure, pair metrics, semantic merge
-  rate/severity/impurity, fragmentation, rectangular alignments, explicit
-  undefined/support semantics, and `ClusteringEvaluationPayload`.
+- Remaining full clustering-evaluation work after A1: normalized semantic power
+  costs; semantic merge rate/severity/impurity; fragmentation; rectangular
+  exact/semantic alignments; and `ClusteringEvaluationPayload` /
+  `ClusteringEvaluate` pipeline integration and persistence.
 - Clustering evaluation table/metric/matrix plot bridge
   (`leakflow_plugins_ml_plot`). Design for both planned phases:
   `docs/design/clustering_evaluation_metrics.md`.

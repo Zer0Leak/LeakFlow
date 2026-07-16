@@ -27,3 +27,13 @@ target_link_libraries(leakflow_ml_clustering_metrics_tests
 )
 leakflow_configure_test_target(leakflow_ml_clustering_metrics_tests)
 add_test(NAME leakflow_ml_clustering_metrics COMMAND leakflow_ml_clustering_metrics_tests)
+
+add_executable(leakflow_ml_clustering_evaluation_tests
+    clustering_evaluation_test.cpp
+)
+target_link_libraries(leakflow_ml_clustering_evaluation_tests
+    PRIVATE
+        leakflow_ml
+)
+leakflow_configure_test_target(leakflow_ml_clustering_evaluation_tests)
+add_test(NAME leakflow_ml_clustering_evaluation COMMAND leakflow_ml_clustering_evaluation_tests)

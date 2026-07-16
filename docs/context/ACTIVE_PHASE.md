@@ -4,25 +4,33 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-**No implementation phase is active.** The live-streaming phase, AES CPA/report
-slice, HDF5 tensor-dataset slice, and profiling phase are implemented. The next
-ML sequence is now planned, but source work still requires an explicit request.
+**Full Clustering Evaluation Metrics (Phase A) is active.** A1, the exact
+numeric evaluator, is implemented and green. A2, semantic power-cost and
+fragmentation metrics, is the next bounded slice. Phase B plotting remains
+blocked until the complete Phase A payload contract is frozen.
 
-## Planned Next ML Sequence (DESIGN ONLY)
+## Active ML Sequence
 
 Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 
-1. **Full Clustering Evaluation Metrics** — add a GMM-independent evaluator in
-   `leakflow_ml`, plus `ClusteringEvaluate` and a structured
-   `ClusteringEvaluationPayload` in `leakflow_plugins_ml`. Inputs are arbitrary
-   labels `[N]`/`[U,N]` and vector truth `[N,D]`/`[U,N,D]`. Deliver the full
-   exact, semantic merge/impurity, fragmentation, and optional alignment result
-   set with explicit undefined/support semantics. Keep `ClusteringStats`
-   unchanged as the legacy tensor/confusion adapter.
-2. **Clustering Metric Visualization** — after the result contract is green, add
-   `leakflow_plugins_ml_plot`. Its table/metric/matrix elements consume the
-   structured payload and fill domain-free plot views; they do not recompute
-   evaluation or alignment.
+1. **A1 — exact numeric core (done)** — `leakflow_ml` now provides the
+   GMM-independent `evaluate_clustering(...)` API and structured numeric result.
+   It accepts arbitrary int64-representable labels `[N]`/`[U,N]`, vector truth
+   `[N,D]`/`[U,N,D]`, exact full-vector groups, sparse contingency detail, and
+   the complete conventional exact metric set with explicit pair-score
+   undefined/support semantics.
+2. **A2 — semantic and fragmentation metrics (next)** — add validated normalized
+   power costs (`power=1|2`), semantic merge/impurity results, and
+   fragmentation results to the numeric contract.
+3. **A3 — rectangular alignments** — add distinct exact-overlap and
+   semantic-cost assignments with unmatched support.
+4. **A4 — pipeline result contract** — add `ClusteringEvaluate`, structured
+   `ClusteringEvaluationPayload`, typed-unit alignment, bounded summaries, and
+   versioned persistence while keeping `ClusteringStats` unchanged.
+5. **Clustering Metric Visualization (Phase B)** — after the result contract is
+   green, add `leakflow_plugins_ml_plot`. Its table/metric/matrix elements
+   consume the structured payload and fill domain-free plot views; they do not
+   recompute evaluation or alignment.
 
 The two phases must not be combined. The first phase has no plotting changes;
 the second phase depends on its frozen payload contract. Other previously

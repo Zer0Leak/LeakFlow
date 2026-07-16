@@ -1,6 +1,7 @@
 find_package(Torch REQUIRED)
 
 add_library(leakflow_ml
+    clustering_evaluation.cpp
     clustering_metrics.cpp
     gaussian_mixture.cpp
     sinkhorn.cpp
