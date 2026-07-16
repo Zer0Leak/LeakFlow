@@ -4,10 +4,11 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-**Full Clustering Evaluation Metrics (Phase A) is active.** A1, the exact
-numeric evaluator, is implemented and green. A2, semantic power-cost and
-fragmentation metrics, is the next bounded slice. Phase B plotting remains
-blocked until the complete Phase A payload contract is frozen.
+**Full Clustering Evaluation Metrics (Phase A) is active.** A1 exact numeric
+evaluation and A2 semantic/fragmentation metrics are implemented and green. A3,
+rectangular exact-overlap and semantic-cost alignments, is the next bounded
+slice. Phase B plotting remains blocked until the complete Phase A payload
+contract is frozen.
 
 ## Active ML Sequence
 
@@ -19,14 +20,15 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    `[N,D]`/`[U,N,D]`, exact full-vector groups, sparse contingency detail, and
    the complete conventional exact metric set with explicit pair-score
    undefined/support semantics.
-2. **A2 — semantic and fragmentation metrics (next)** — add validated normalized
-   power costs (`power=1|2`), semantic merge/impurity results, and
-   fragmentation results to the numeric contract.
-3. **A3 — rectangular alignments** — add distinct exact-overlap and
+2. **A2 — semantic and fragmentation metrics (done)** — validated normalized
+   power costs (`power=1|2`), semantic merge/impurity aggregates and details,
+   and fragmentation aggregates and details are now in the numeric contract.
+3. **A3 — rectangular alignments (next)** — add distinct exact-overlap and
    semantic-cost assignments with unmatched support.
 4. **A4 — pipeline result contract** — add `ClusteringEvaluate`, structured
    `ClusteringEvaluationPayload`, typed-unit alignment, bounded summaries, and
-   versioned persistence while keeping `ClusteringStats` unchanged.
+   versioned persistence, plus the default-off optional combined-quality
+   record/property, while keeping `ClusteringStats` unchanged.
 5. **Clustering Metric Visualization (Phase B)** — after the result contract is
    green, add `leakflow_plugins_ml_plot`. Its table/metric/matrix elements
    consume the structured payload and fill domain-free plot views; they do not

@@ -51,7 +51,8 @@ support:
   bit channels.
 - `leakflow_ml` exists and provides generic Torch numeric APIs for Gaussian
   mixtures, constrained Sinkhorn transport, the legacy scalar-class clustering
-  metrics, and the Phase A1 vector-truth exact clustering evaluator.
+  metrics, and the Phase A1/A2 vector-truth exact, semantic, and fragmentation
+  evaluator.
 - `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
   and `ClusteringStats`, including typed-unit propagation/alignment.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
@@ -205,10 +206,10 @@ real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative sto
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
 state machine), and §14 (CLI cookbook). Full clustering evaluation Phase A is
-now active: its A1 exact numeric core is implemented, with semantic metrics,
-alignments, and pipeline integration still pending. Clustering-metric
-visualization remains the follow-up phase. Zarr parity remains a separate
-deferred candidate.
+now active: its A1 exact numeric core and A2 semantic/fragmentation metrics are
+implemented, with alignments and pipeline integration still pending.
+Clustering-metric visualization remains the follow-up phase. Zarr parity remains
+a separate deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -350,6 +351,12 @@ ML:
   unordered-pair counts, ARI, arithmetic AMI, homogeneity, completeness,
   V-measure, purity, pair precision/recall/F1, and arithmetic NMI with explicit
   value/support/undefined semantics.
+- Phase A2 extends that result with explicit `off|power` semantic evaluation,
+  strict ranges/weights and `power=1|2`, semantic impurity micro/macro and
+  per-dimension/per-cluster records, merge-error rate and conditional severity,
+  and fragmentation micro/macro and per-group records. Global detail stays
+  bounded; Full detail retains singleton clusters/groups as explicit unavailable
+  records. The `p=1` and `p=2` kernels avoid observation-pair enumeration.
 
 ML plugin elements:
 
@@ -425,10 +432,10 @@ Logging:
 
 ## Not Implemented Yet
 
-- Remaining full clustering-evaluation work after A1: normalized semantic power
-  costs; semantic merge rate/severity/impurity; fragmentation; rectangular
-  exact/semantic alignments; and `ClusteringEvaluationPayload` /
-  `ClusteringEvaluate` pipeline integration and persistence.
+- Remaining full clustering-evaluation work after A2: rectangular
+  exact/semantic alignments; the default-off optional combined-quality record;
+  and `ClusteringEvaluationPayload` / `ClusteringEvaluate` pipeline integration
+  and persistence.
 - Clustering evaluation table/metric/matrix plot bridge
   (`leakflow_plugins_ml_plot`). Design for both planned phases:
   `docs/design/clustering_evaluation_metrics.md`.

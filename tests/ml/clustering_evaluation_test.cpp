@@ -37,6 +37,17 @@ bool metric_close(const leakflow::ml::MetricValue &metric, double target,
   return true;
 }
 
+bool metric_undefined(const leakflow::ml::MetricValue &metric,
+                      leakflow::ml::MetricUndefinedReason reason,
+                      std::uint64_t support, const std::string &message) {
+  if (metric.defined() || metric.undefined_reason != reason ||
+      metric.support_count != support) {
+    std::cerr << message << ": undefined state mismatch\n";
+    return false;
+  }
+  return true;
+}
+
 template <typename Function> bool throws_invalid_argument(Function function) {
   try {
     function();
@@ -106,13 +117,16 @@ int main() {
   // Stable descriptors keep generic payload/plot code independent of field-name
   // switches.
   {
-    const auto descriptors = exact_clustering_metric_descriptors();
-    if (!expect(descriptors.size() == 10,
+    const auto exact_descriptors = exact_clustering_metric_descriptors();
+    const auto descriptors = clustering_metric_descriptors();
+    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 20,
                 "descriptors: wrong exact metric count")) {
       return 1;
     }
-    if (!expect(descriptors.front().name == "adjusted_rand_index" &&
-                    descriptors.back().name == "normalized_mutual_information",
+    if (!expect(exact_descriptors.front().name == "adjusted_rand_index" &&
+                    exact_descriptors.back().name ==
+                        "normalized_mutual_information" &&
+                    descriptors.back().name == "fragmentation_per_group",
                 "descriptors: names/order wrong")) {
       return 1;
     }
@@ -122,6 +136,19 @@ int main() {
                     purity.direction == MetricDirection::HigherIsBetter &&
                     purity.averaging == MetricAveraging::Micro,
                 "descriptors: purity metadata wrong")) {
+      return 1;
+    }
+    const auto &semantic = clustering_metric_descriptor(
+        ClusteringMetricId::SemanticImpurityDimensionMicro);
+    const auto &fragmentation =
+        clustering_metric_descriptor(ClusteringMetricId::FragmentationMacro);
+    if (!expect(semantic.family == MetricFamily::Semantic &&
+                    semantic.direction == MetricDirection::LowerIsBetter &&
+                    semantic.averaging == MetricAveraging::PerDimension &&
+                    fragmentation.family == MetricFamily::Fragmentation &&
+                    fragmentation.direction == MetricDirection::LowerIsBetter &&
+                    fragmentation.averaging == MetricAveraging::Macro,
+                "descriptors: A2 metadata wrong")) {
       return 1;
     }
   }
@@ -140,7 +167,7 @@ int main() {
     const auto result = evaluate_clustering(predicted, truth, options);
     const auto &unit = only_unit(result);
 
-    if (!expect(result.schema_version == 1 && !result.batched &&
+    if (!expect(result.schema_version == 2 && !result.batched &&
                     result.observation_count == 6 &&
                     result.semantic_dimension_count == 2 &&
                     result.effective_options.detail == options.detail &&
@@ -514,6 +541,317 @@ int main() {
     }
   }
 
+  // A2 mixed semantic fixture: merge impurity and fragmentation differ, and
+  // both p=1 and p=2 have hand-computed reference values.
+  {
+    const auto truth = torch::tensor(
+        {{0, 0}, {0, 0}, {0, 0}, {1, 0}, {1, 0}, {0, 2}}, torch::kLong);
+    const auto predicted =
+        torch::tensor({10, 10, 20, 10, 20, 10}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {2.0, 4.0};
+    options.semantic_weights = {1.0, 1.0};
+    options.power = 1;
+
+    const auto result = evaluate_clustering(predicted, truth, options);
+    const auto &unit = only_unit(result);
+    const auto &semantic = unit.semantic;
+    if (!expect(result.effective_options.semantic ==
+                        SemanticEvaluationMode::Power &&
+                    result.effective_options.semantic_ranges ==
+                        options.semantic_ranges &&
+                    result.effective_options.semantic_weights ==
+                        options.semantic_weights &&
+                    result.effective_options.power == 1,
+                "A2 p1: effective semantic options wrong") ||
+        !expect(unit.pair_counts.true_positive == 1 &&
+                    unit.pair_counts.false_positive == 6 &&
+                    unit.pair_counts.false_negative == 3 &&
+                    unit.pair_counts.predicted_within_cluster_pairs == 7 &&
+                    unit.pair_counts.true_within_group_pairs == 4,
+                "A2 p1: pair counts wrong") ||
+        !metric_close(semantic.micro_impurity, 1.0 / 4.0,
+                      "A2 p1: micro impurity") ||
+        !metric_close(semantic.macro_impurity, 1.0 / 4.0,
+                      "A2 p1: macro impurity") ||
+        !metric_close(semantic.merge_error_rate, 6.0 / 7.0,
+                      "A2 p1: merge rate") ||
+        !metric_close(semantic.conditional_merge_error_severity, 7.0 / 24.0,
+                      "A2 p1: merge severity")) {
+      return 1;
+    }
+    if (!expect(semantic.micro_impurity.support_count == 7 &&
+                    semantic.macro_impurity.support_count == 2 &&
+                    semantic.merge_error_rate.support_count == 7 &&
+                    semantic.conditional_merge_error_severity.support_count ==
+                        6,
+                "A2 p1: semantic supports wrong") ||
+        !expect(semantic.dimensions.size() == 2 &&
+                    semantic.dimensions[0].dimension_index == 0 &&
+                    semantic.dimensions[1].dimension_index == 1 &&
+                    semantic.dimensions[0].micro_impurity.support_count == 7 &&
+                    semantic.dimensions[0].macro_impurity.support_count == 2 &&
+                    semantic.dimensions[1].micro_impurity.support_count == 7 &&
+                    semantic.dimensions[1].macro_impurity.support_count == 2,
+                "A2 p1: per-dimension envelope wrong") ||
+        !metric_close(semantic.dimensions[0].micro_impurity, 2.0 / 7.0,
+                      "A2 p1: dimension 0 micro") ||
+        !metric_close(semantic.dimensions[0].macro_impurity, 3.0 / 8.0,
+                      "A2 p1: dimension 0 macro") ||
+        !metric_close(semantic.dimensions[1].micro_impurity, 3.0 / 14.0,
+                      "A2 p1: dimension 1 micro") ||
+        !metric_close(semantic.dimensions[1].macro_impurity, 1.0 / 8.0,
+                      "A2 p1: dimension 1 macro")) {
+      return 1;
+    }
+    if (!expect(semantic.cluster_details.has_value() &&
+                    semantic.cluster_details->size() == 2 &&
+                    semantic.cluster_details->at(0).observation_count == 4 &&
+                    semantic.cluster_details->at(1).observation_count == 2 &&
+                    semantic.cluster_details->at(0).impurity.support_count ==
+                        6 &&
+                    semantic.cluster_details->at(1).impurity.support_count == 1,
+                "A2 p1: cluster details wrong") ||
+        !metric_close(semantic.cluster_details->at(0).impurity, 1.0 / 4.0,
+                      "A2 p1: cluster 0 impurity") ||
+        !metric_close(semantic.cluster_details->at(1).impurity, 1.0 / 4.0,
+                      "A2 p1: cluster 1 impurity")) {
+      return 1;
+    }
+
+    const auto &fragmentation = unit.fragmentation;
+    if (!metric_close(fragmentation.micro, 3.0 / 4.0,
+                      "A2: fragmentation micro") ||
+        !metric_close(fragmentation.macro, 5.0 / 6.0,
+                      "A2: fragmentation macro") ||
+        !expect(fragmentation.micro.support_count == 4 &&
+                    fragmentation.macro.support_count == 2 &&
+                    fragmentation.group_details.has_value() &&
+                    fragmentation.group_details->size() == 3,
+                "A2: fragmentation supports/details wrong") ||
+        !metric_close(fragmentation.group_details->at(0).fragmentation,
+                      2.0 / 3.0, "A2: group A fragmentation") ||
+        !expect(fragmentation.group_details->at(0).observation_count == 3 &&
+                    fragmentation.group_details->at(0)
+                            .fragmentation.support_count == 3 &&
+                    fragmentation.group_details->at(2).observation_count == 2 &&
+                    fragmentation.group_details->at(2)
+                            .fragmentation.support_count == 1,
+                "A2: group detail supports wrong") ||
+        !metric_undefined(fragmentation.group_details->at(1).fragmentation,
+                          MetricUndefinedReason::NoTrueWithinGroupPairs, 0,
+                          "A2: singleton group fragmentation") ||
+        !metric_close(fragmentation.group_details->at(2).fragmentation, 1.0,
+                      "A2: group B fragmentation")) {
+      return 1;
+    }
+    if (!expect(close(*semantic.micro_impurity.value,
+                      *semantic.merge_error_rate.value *
+                          *semantic.conditional_merge_error_severity.value),
+                "A2 p1: impurity identity failed")) {
+      return 1;
+    }
+
+    const auto permutation = torch::tensor({5, 2, 4, 0, 3, 1}, torch::kLong);
+    const auto &permuted = only_unit(
+        evaluate_clustering(predicted.index_select(0, permutation),
+                            truth.index_select(0, permutation), options));
+    if (!expect(close(*semantic.micro_impurity.value,
+                      *permuted.semantic.micro_impurity.value) &&
+                    close(*semantic.macro_impurity.value,
+                          *permuted.semantic.macro_impurity.value) &&
+                    close(*semantic.conditional_merge_error_severity.value,
+                          *permuted.semantic.conditional_merge_error_severity
+                               .value) &&
+                    close(*fragmentation.micro.value,
+                          *permuted.fragmentation.micro.value) &&
+                    close(*fragmentation.macro.value,
+                          *permuted.fragmentation.macro.value),
+                "A2 p1: observation permutation changed metrics")) {
+      return 1;
+    }
+
+    options.power = 2;
+    const auto &squared =
+        only_unit(evaluate_clustering(predicted, truth, options)).semantic;
+    if (!metric_close(squared.micro_impurity, 1.0 / 8.0,
+                      "A2 p2: micro impurity") ||
+        !metric_close(squared.macro_impurity, 1.0 / 8.0,
+                      "A2 p2: macro impurity") ||
+        !metric_close(squared.conditional_merge_error_severity, 7.0 / 48.0,
+                      "A2 p2: merge severity") ||
+        !metric_close(squared.dimensions[0].micro_impurity, 1.0 / 7.0,
+                      "A2 p2: dimension 0 micro") ||
+        !metric_close(squared.dimensions[0].macro_impurity, 3.0 / 16.0,
+                      "A2 p2: dimension 0 macro") ||
+        !metric_close(squared.dimensions[1].micro_impurity, 3.0 / 28.0,
+                      "A2 p2: dimension 1 micro") ||
+        !metric_close(squared.dimensions[1].macro_impurity, 1.0 / 16.0,
+                      "A2 p2: dimension 1 macro") ||
+        !metric_close(squared.cluster_details->at(0).impurity, 1.0 / 8.0,
+                      "A2 p2: cluster 0 impurity") ||
+        !metric_close(squared.cluster_details->at(1).impurity, 1.0 / 8.0,
+                      "A2 p2: cluster 1 impurity")) {
+      return 1;
+    }
+  }
+
+  // Zero-weight dimensions stay visible in per-dimension metrics but do not
+  // contribute to aggregate semantic impurity.
+  {
+    const auto truth = torch::tensor({{0, 0}, {0, 2}, {1, 0}}, torch::kLong);
+    const auto predicted = torch::zeros({3}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {2.0, 2.0};
+    options.semantic_weights = {1.0, 0.0};
+    options.power = 2;
+    const auto &unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    if (!metric_close(unit.semantic.micro_impurity, 1.0 / 6.0,
+                      "zero weight: micro impurity") ||
+        !metric_close(unit.semantic.macro_impurity, 1.0 / 6.0,
+                      "zero weight: macro impurity") ||
+        !metric_close(unit.semantic.merge_error_rate, 1.0,
+                      "zero weight: merge rate") ||
+        !metric_close(unit.semantic.conditional_merge_error_severity, 1.0 / 6.0,
+                      "zero weight: severity") ||
+        !metric_close(unit.semantic.dimensions[0].micro_impurity, 1.0 / 6.0,
+                      "zero weight: dimension 0") ||
+        !metric_close(unit.semantic.dimensions[1].micro_impurity, 2.0 / 3.0,
+                      "zero weight: dimension 1") ||
+        !metric_undefined(unit.fragmentation.micro,
+                          MetricUndefinedReason::NoTrueWithinGroupPairs, 0,
+                          "zero weight: fragmentation micro") ||
+        !metric_undefined(unit.fragmentation.macro,
+                          MetricUndefinedReason::NoEligibleTruthGroups, 0,
+                          "zero weight: fragmentation macro")) {
+      return 1;
+    }
+  }
+
+  // Exact-only mode keeps semantic records discoverable, while fragmentation
+  // remains available without semantic ranges.
+  {
+    const auto truth = torch::tensor({{0, 0}, {0, 0}, {1, 0}}, torch::kLong);
+    const auto predicted = torch::tensor({0, 0, 1}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    const auto result = evaluate_clustering(predicted, truth, options);
+    const auto &unit = only_unit(result);
+    if (!expect(result.effective_options.semantic ==
+                        SemanticEvaluationMode::Off &&
+                    result.effective_options.semantic_ranges.empty() &&
+                    result.effective_options.semantic_weights.empty(),
+                "semantic off: effective options wrong") ||
+        !metric_undefined(unit.semantic.micro_impurity,
+                          MetricUndefinedReason::SemanticDisabled, 1,
+                          "semantic off: micro") ||
+        !metric_undefined(unit.semantic.macro_impurity,
+                          MetricUndefinedReason::SemanticDisabled, 1,
+                          "semantic off: macro") ||
+        !metric_undefined(unit.semantic.merge_error_rate,
+                          MetricUndefinedReason::SemanticDisabled, 1,
+                          "semantic off: merge rate") ||
+        !metric_undefined(unit.semantic.conditional_merge_error_severity,
+                          MetricUndefinedReason::SemanticDisabled, 0,
+                          "semantic off: severity") ||
+        !expect(unit.semantic.dimensions.size() == 2 &&
+                    unit.semantic.cluster_details.has_value() &&
+                    unit.semantic.cluster_details->size() == 2,
+                "semantic off: details missing") ||
+        !metric_close(unit.fragmentation.micro, 0.0,
+                      "semantic off: fragmentation micro") ||
+        !metric_close(unit.fragmentation.macro, 0.0,
+                      "semantic off: fragmentation macro")) {
+      return 1;
+    }
+  }
+
+  // No predicted pairs and no merge errors are distinct undefined conditions;
+  // fragmentation can still be a defined maximum.
+  {
+    ClusteringEvaluationOptions options;
+    options.detail = ClusteringEvaluationDetail::Full;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0};
+    const auto split =
+        only_unit(evaluate_clustering(torch::tensor({0, 1, 2}, torch::kLong),
+                                      scalar_truth({0, 0, 1}), options));
+    if (!metric_undefined(split.semantic.micro_impurity,
+                          MetricUndefinedReason::NoPredictedWithinClusterPairs,
+                          0, "A2 split: micro") ||
+        !metric_undefined(split.semantic.macro_impurity,
+                          MetricUndefinedReason::NoEligiblePredictedClusters, 0,
+                          "A2 split: macro") ||
+        !metric_undefined(split.semantic.merge_error_rate,
+                          MetricUndefinedReason::NoPredictedWithinClusterPairs,
+                          0, "A2 split: merge rate") ||
+        !metric_undefined(split.semantic.conditional_merge_error_severity,
+                          MetricUndefinedReason::NoMergeErrorPairs, 0,
+                          "A2 split: severity") ||
+        !metric_close(split.fragmentation.micro, 1.0,
+                      "A2 split: fragmentation micro") ||
+        !metric_close(split.fragmentation.macro, 1.0,
+                      "A2 split: fragmentation macro")) {
+      return 1;
+    }
+
+    const auto perfect = only_unit(
+        evaluate_clustering(torch::tensor({9, 9, -2, -2}, torch::kLong),
+                            scalar_truth({0, 0, 1, 1}), options));
+    if (!expect(perfect.semantic.dimensions.size() == 1 &&
+                    perfect.semantic.cluster_details.has_value() &&
+                    perfect.fragmentation.group_details.has_value(),
+                "A2 perfect: detail envelope wrong") ||
+        !metric_close(perfect.semantic.micro_impurity, 0.0,
+                      "A2 perfect: micro impurity") ||
+        !metric_close(perfect.semantic.macro_impurity, 0.0,
+                      "A2 perfect: macro impurity") ||
+        !metric_close(perfect.semantic.merge_error_rate, 0.0,
+                      "A2 perfect: merge rate") ||
+        !metric_undefined(perfect.semantic.conditional_merge_error_severity,
+                          MetricUndefinedReason::NoMergeErrorPairs, 0,
+                          "A2 perfect: severity") ||
+        !metric_close(perfect.fragmentation.micro, 0.0,
+                      "A2 perfect: fragmentation micro") ||
+        !metric_close(perfect.fragmentation.macro, 0.0,
+                      "A2 perfect: fragmentation macro") ||
+        !expect(perfect.semantic.micro_impurity.support_count == 2 &&
+                    perfect.semantic.macro_impurity.support_count == 2 &&
+                    perfect.fragmentation.micro.support_count == 2 &&
+                    perfect.fragmentation.macro.support_count == 2,
+                "A2 perfect: supports wrong")) {
+      return 1;
+    }
+
+    const auto one_group = only_unit(evaluate_clustering(
+        torch::zeros({4}, torch::kLong), scalar_truth({5, 5, 5, 5}), options));
+    if (!metric_close(one_group.semantic.micro_impurity, 0.0,
+                      "A2 one-group: micro impurity") ||
+        !metric_close(one_group.semantic.macro_impurity, 0.0,
+                      "A2 one-group: macro impurity") ||
+        !metric_close(one_group.semantic.merge_error_rate, 0.0,
+                      "A2 one-group: merge rate") ||
+        !metric_undefined(one_group.semantic.conditional_merge_error_severity,
+                          MetricUndefinedReason::NoMergeErrorPairs, 0,
+                          "A2 one-group: severity") ||
+        !metric_close(one_group.fragmentation.micro, 0.0,
+                      "A2 one-group: fragmentation micro") ||
+        !metric_close(one_group.fragmentation.macro, 0.0,
+                      "A2 one-group: fragmentation macro") ||
+        !expect(one_group.semantic.micro_impurity.support_count == 6 &&
+                    one_group.semantic.macro_impurity.support_count == 1 &&
+                    one_group.fragmentation.micro.support_count == 6 &&
+                    one_group.fragmentation.macro.support_count == 1,
+                "A2 one-group: supports wrong")) {
+      return 1;
+    }
+  }
+
   // Leading units are evaluated independently and may have different G and K.
   {
     const auto truth0 = torch::tensor(
@@ -552,6 +890,43 @@ int main() {
                     !result.units[1].partition_detail.has_value(),
                 "batched: global detail unexpectedly materialized partition "
                 "data")) {
+      return 1;
+    }
+  }
+
+  // Semantic range validation is per unit, and D=4 batched evaluation retains
+  // one result per unit without materializing full details in Global mode.
+  {
+    const auto truth0 = torch::tensor(
+        {{0, 0, 0, 0}, {0, 0, 0, 0}, {1, 0, 0, 0}, {1, 0, 0, 0}}, torch::kLong);
+    const auto truth1 = torch::tensor(
+        {{5, 1, 2, 3}, {5, 1, 2, 3}, {5, 1, 2, 3}, {6, 1, 2, 3}}, torch::kLong);
+    const auto predicted = torch::stack({
+        torch::tensor({9, 9, -2, -2}, torch::kLong),
+        torch::tensor({0, 1, 2, 2}, torch::kLong),
+    });
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0, 1.0, 1.0, 1.0};
+    const auto result =
+        evaluate_clustering(predicted, torch::stack({truth0, truth1}), options);
+    if (!expect(result.effective_options.semantic_weights ==
+                        std::vector<double>({1.0, 1.0, 1.0, 1.0}) &&
+                    result.units[0].semantic.dimensions.size() == 4 &&
+                    result.units[1].semantic.dimensions.size() == 4 &&
+                    !result.units[0].semantic.cluster_details.has_value() &&
+                    !result.units[1].fragmentation.group_details.has_value(),
+                "A2 batched: effective options/global detail wrong") ||
+        !metric_close(result.units[0].semantic.micro_impurity, 0.0,
+                      "A2 batched: unit 0 impurity") ||
+        !metric_close(result.units[0].fragmentation.micro, 0.0,
+                      "A2 batched: unit 0 fragmentation") ||
+        !metric_close(result.units[1].semantic.micro_impurity, 1.0 / 4.0,
+                      "A2 batched: unit 1 impurity") ||
+        !metric_close(result.units[1].semantic.merge_error_rate, 1.0,
+                      "A2 batched: unit 1 merge rate") ||
+        !metric_close(result.units[1].fragmentation.micro, 1.0,
+                      "A2 batched: unit 1 fragmentation")) {
       return 1;
     }
   }
@@ -596,6 +971,48 @@ int main() {
                         .partition_detail->truth_vectors.scalar_type() ==
                     torch::kUInt8,
                 "dtype: byte truth dtype was not retained")) {
+      return 1;
+    }
+  }
+
+  // Power semantics preserve small differences around large integral values and
+  // handle signed floating coordinates without converting truth to scalar IDs.
+  {
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {1.0};
+    options.power = 2;
+    const std::int64_t large0 = 9'007'199'254'740'992LL;
+    const std::int64_t large1 = 9'007'199'254'740'993LL;
+    const auto large_integral = only_unit(evaluate_clustering(
+        torch::zeros({2}, torch::kLong),
+        torch::tensor({large0, large1}, torch::kLong).reshape({2, 1}),
+        options));
+    if (!metric_close(large_integral.semantic.micro_impurity, 1.0,
+                      "A2 dtype: adjacent large int64 values")) {
+      return 1;
+    }
+
+    auto wide_truth = torch::empty(
+        {2, 1}, torch::TensorOptions().dtype(c10::ScalarType::UInt64));
+    wide_truth.data_ptr<std::uint64_t>()[0] =
+        std::numeric_limits<std::uint64_t>::max() - 1;
+    wide_truth.data_ptr<std::uint64_t>()[1] =
+        std::numeric_limits<std::uint64_t>::max();
+    const auto wide_integral = only_unit(evaluate_clustering(
+        torch::zeros({2}, torch::kLong), wide_truth, options));
+    if (!metric_close(wide_integral.semantic.micro_impurity, 1.0,
+                      "A2 dtype: adjacent uint64 values")) {
+      return 1;
+    }
+
+    options.semantic_ranges = {2.0};
+    options.power = 1;
+    const auto floating = only_unit(evaluate_clustering(
+        torch::zeros({2}, torch::kLong),
+        torch::tensor({-1.5, 0.5}, torch::kFloat64).reshape({2, 1}), options));
+    if (!metric_close(floating.semantic.micro_impurity, 1.0,
+                      "A2 dtype: signed floating values")) {
       return 1;
     }
   }
@@ -735,6 +1152,126 @@ int main() {
                 "validation: duplicate dimension names accepted")) {
       return 1;
     }
+
+    ClusteringEvaluationOptions missing_ranges;
+    missing_ranges.semantic = SemanticEvaluationMode::Power;
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, missing_ranges));
+                }),
+                "validation: power semantics without ranges accepted")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions wrong_range_count;
+    wrong_range_count.semantic_ranges = {1.0, 1.0};
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, wrong_range_count));
+                }),
+                "validation: semantic range count mismatch accepted")) {
+      return 1;
+    }
+
+    for (const auto invalid_range :
+         {0.0, -1.0, std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()}) {
+      ClusteringEvaluationOptions invalid;
+      invalid.semantic = SemanticEvaluationMode::Power;
+      invalid.semantic_ranges = {invalid_range};
+      if (!expect(throws_invalid_argument([&] {
+                    static_cast<void>(evaluate_clustering(
+                        valid_predicted, valid_truth, invalid));
+                  }),
+                  "validation: invalid semantic range accepted")) {
+        return 1;
+      }
+    }
+
+    ClusteringEvaluationOptions wrong_weight_count;
+    wrong_weight_count.semantic = SemanticEvaluationMode::Power;
+    wrong_weight_count.semantic_ranges = {1.0};
+    wrong_weight_count.semantic_weights = {1.0, 1.0};
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, wrong_weight_count));
+                }),
+                "validation: semantic weight count mismatch accepted")) {
+      return 1;
+    }
+
+    for (const auto invalid_weight :
+         {-1.0, std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()}) {
+      ClusteringEvaluationOptions invalid;
+      invalid.semantic = SemanticEvaluationMode::Power;
+      invalid.semantic_ranges = {1.0};
+      invalid.semantic_weights = {invalid_weight};
+      if (!expect(throws_invalid_argument([&] {
+                    static_cast<void>(evaluate_clustering(
+                        valid_predicted, valid_truth, invalid));
+                  }),
+                  "validation: invalid semantic weight accepted")) {
+        return 1;
+      }
+    }
+
+    ClusteringEvaluationOptions zero_weights;
+    zero_weights.semantic = SemanticEvaluationMode::Power;
+    zero_weights.semantic_ranges = {1.0};
+    zero_weights.semantic_weights = {0.0};
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, zero_weights));
+                }),
+                "validation: all-zero semantic weights accepted")) {
+      return 1;
+    }
+
+    for (const auto invalid_power : {0, 3}) {
+      ClusteringEvaluationOptions invalid;
+      invalid.semantic = SemanticEvaluationMode::Power;
+      invalid.semantic_ranges = {1.0};
+      invalid.power = invalid_power;
+      if (!expect(throws_invalid_argument([&] {
+                    static_cast<void>(evaluate_clustering(
+                        valid_predicted, valid_truth, invalid));
+                  }),
+                  "validation: invalid semantic power accepted")) {
+        return 1;
+      }
+    }
+
+    ClusteringEvaluationOptions out_of_range;
+    out_of_range.semantic = SemanticEvaluationMode::Power;
+    out_of_range.semantic_ranges = {0.5};
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, out_of_range));
+                }),
+                "validation: out-of-range semantic coordinate accepted")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions invalid_semantic_mode;
+    invalid_semantic_mode.semantic = static_cast<SemanticEvaluationMode>(99);
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, invalid_semantic_mode));
+                }),
+                "validation: unknown semantic mode accepted")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions invalid_detail;
+    invalid_detail.detail = static_cast<ClusteringEvaluationDetail>(99);
+    if (!expect(throws_invalid_argument([&] {
+                  static_cast<void>(evaluate_clustering(
+                      valid_predicted, valid_truth, invalid_detail));
+                }),
+                "validation: unknown detail mode accepted")) {
+      return 1;
+    }
   }
 
   // Sparse high-cardinality case: Z grows with N, not with G*K.
@@ -810,6 +1347,61 @@ int main() {
                 "near-singleton stress: partition counts wrong") ||
         !metric_close(unit.exact.adjusted_mutual_information, 0.0,
                       "near-singleton stress: AMI", 1.0e-10)) {
+      return 1;
+    }
+  }
+
+  // A2 p=1 stress: one large predicted cluster must use sorting/prefix sums,
+  // not explicit observation-pair enumeration.
+  {
+    constexpr std::int64_t observations = 20'000;
+    const auto truth =
+        torch::arange(observations, torch::kLong).reshape({observations, 1});
+    const auto predicted = torch::zeros({observations}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {static_cast<double>(observations - 1)};
+    options.power = 1;
+    const auto &unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto expected = static_cast<double>(observations + 1) /
+                          (3.0 * static_cast<double>(observations - 1));
+    if (!metric_close(unit.semantic.micro_impurity, expected,
+                      "A2 p1 stress: micro impurity", 1.0e-12) ||
+        !metric_close(unit.semantic.macro_impurity, expected,
+                      "A2 p1 stress: macro impurity", 1.0e-12) ||
+        !metric_close(unit.semantic.merge_error_rate, 1.0,
+                      "A2 p1 stress: merge rate") ||
+        !metric_close(unit.semantic.conditional_merge_error_severity, expected,
+                      "A2 p1 stress: severity", 1.0e-12) ||
+        !expect(unit.semantic.micro_impurity.support_count ==
+                        unit.pair_counts.total_pairs &&
+                    unit.semantic.macro_impurity.support_count == 1,
+                "A2 p1 stress: supports wrong")) {
+      return 1;
+    }
+  }
+
+  // A2 p=2 stress independently exercises the stable linear-time moments path.
+  {
+    constexpr std::int64_t observations = 50'000;
+    const auto truth =
+        torch::arange(observations, torch::kLong).reshape({observations, 1});
+    const auto predicted = torch::zeros({observations}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {static_cast<double>(observations - 1)};
+    options.power = 2;
+    const auto &unit =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto n = static_cast<double>(observations);
+    const auto expected = n * (n + 1.0) / (6.0 * (n - 1.0) * (n - 1.0));
+    if (!metric_close(unit.semantic.micro_impurity, expected,
+                      "A2 p2 stress: micro impurity", 1.0e-12) ||
+        !metric_close(unit.semantic.macro_impurity, expected,
+                      "A2 p2 stress: macro impurity", 1.0e-12) ||
+        !metric_close(unit.semantic.conditional_merge_error_severity, expected,
+                      "A2 p2 stress: severity", 1.0e-12)) {
       return 1;
     }
   }

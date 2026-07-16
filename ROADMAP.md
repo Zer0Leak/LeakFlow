@@ -2000,9 +2000,10 @@ Exit criteria:
 
 ## Active Phase: Full Clustering Evaluation Metrics
 
-Status: **in progress**. Phase A1, the exact numeric evaluator, is implemented;
-the semantic metric slice is next. Phase A is not complete until its numeric,
-alignment, payload, persistence, and pipeline exit criteria are all green.
+Status: **in progress**. Phase A1 (exact numeric evaluation) and A2 (semantic
+and fragmentation metrics) are implemented; rectangular alignments are next.
+Phase A is not complete until its alignment, payload, persistence, and pipeline
+exit criteria are all green.
 
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Phase A).
@@ -2020,14 +2021,16 @@ Implementation sequence:
   arithmetic AMI, homogeneity, completeness, V-measure, purity, pair
   precision/recall/F1, and arithmetic NMI; explicit undefined reasons/supports;
   deterministic normalization and checked 64-bit unordered-pair counts.
-- **A2 — semantic and fragmentation metrics (next):** normalized power-cost
-  options/validation, merge rate and conditional severity, impurity, and
-  fragmentation aggregates/details.
-- **A3 — rectangular alignments (pending):** separate exact-overlap and
+- **A2 — semantic and fragmentation metrics (done):** explicit
+  `off|power` semantics, validated ranges/weights and `power=1|2`, micro/macro/
+  per-dimension/per-cluster impurity, merge rate and conditional severity, and
+  micro/macro/per-group fragmentation with full-detail records.
+- **A3 — rectangular alignments (next):** separate exact-overlap and
   semantic-cost assignments with unmatched support.
 - **A4 — pipeline contract (pending):** `ClusteringEvaluationPayload`,
   `ClusteringEvaluate`, typed-unit alignment, summaries, persistence, descriptor
-  registration, and compatibility tests.
+  registration, the default-off optional combined-quality record/property, and
+  compatibility tests.
 
 Locked decisions:
 
@@ -2055,16 +2058,15 @@ Locked decisions:
 
 Remaining work:
 
-- Extend the evaluator options/result model with semantic and fragmentation
-  records and aggregated kernels.
 - Add rectangular alignment support with hand-checked reference fixtures.
 - Add `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
-  alignment, and a versioned persistence codec.
+  alignment, optional combined quality, and a versioned persistence codec.
 - Validate semantic metrics and alignments with hand-computed cases, then cover
-  unit alignment and pipeline/persistence behavior. A1 already covers the
-  conventional scikit-learn fixtures, exact degeneracies, arbitrary IDs,
-  `D=1/2/4`, numeric batches/dtypes/validation, undefined pair metrics, and a
-  non-quadratic expected-MI stress case.
+  unit alignment and pipeline/persistence behavior. A1/A2 already cover the
+  conventional scikit-learn fixtures, hand-computed semantic/fragmentation
+  cases, exact degeneracies, arbitrary IDs, `D=1/2/4`, numeric
+  batches/dtypes/validation, all current undefined denominators, and
+  non-quadratic AMI/semantic stress cases.
 
 Out of scope:
 

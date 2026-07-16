@@ -1,8 +1,8 @@
 # Clustering Evaluation and Metric Visualization
 
-Status: implementation in progress. Phase A1 (exact numeric core) is implemented;
-Phase A2 is next. Phase A as a whole and all Phase B visualization work remain
-incomplete.
+Status: implementation in progress. Phase A1 (exact numeric core) and Phase A2
+(semantic and fragmentation metrics) are implemented; Phase A3 is next. Phase A
+as a whole and all Phase B visualization work remain incomplete.
 
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
@@ -19,12 +19,16 @@ Current Phase A slices:
   vector-truth grouping, deterministic sparse contingency detail, conventional
   exact metrics, explicit pair-score undefined/support semantics, and numeric
   tests.
-- **A2 — semantic and fragmentation metrics (next):** normalized power-cost
-  validation and aggregate/detail metrics.
-- **A3 — rectangular alignments (pending):** exact-overlap and semantic-cost
+- **A2 — semantic and fragmentation metrics (implemented):** normalized
+  power-cost validation and aggregate/detail metrics. Supplied semantic
+  configuration is validated even in `off` mode but ranges are not required;
+  semantic records then carry `semantic_disabled`. Full detail retains
+  singleton cluster/group records with explicit undefined reasons.
+- **A3 — rectangular alignments (next):** exact-overlap and semantic-cost
   assignments with unmatched support.
 - **A4 — pipeline contract (pending):** payload, evaluator element, typed-unit
-  alignment, summary, persistence, registration, and pipeline tests.
+  alignment, the default-off optional combined-quality record/property, summary,
+  persistence, registration, and pipeline tests.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
@@ -355,6 +359,11 @@ No semantic power cost is applied to a fragmented pair: equal semantic vectors
 have zero semantic cost, while the error is their separation.
 
 ## 6. Optional Combined Quality
+
+Implementation scheduling: this optional record and its default-off property
+are deliberately deferred to A4, when the pipeline payload and property
+contract are frozen. A2 reports both component metrics but does not calculate
+the composite.
 
 A composite score may be requested for ranking experiments, but it is never the
 only reported result.
