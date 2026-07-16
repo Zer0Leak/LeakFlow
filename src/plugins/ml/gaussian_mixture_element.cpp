@@ -140,6 +140,9 @@ ElementDescriptor GaussianMixtureElement::descriptor()
             make_element_metadata_descriptor(
                 "payload.cluster.n_components", std::int64_t{}, "number of clusters", {"81"}),
             make_element_metadata_descriptor(
+                "payload.cluster.n_features", std::int64_t{},
+                "number of input features per observation", {"50"}),
+            make_element_metadata_descriptor(
                 "payload.cluster.covariance_type", std::string(), "component covariance form", {"full", "diagonal"}),
             make_element_metadata_descriptor(
                 "payload.cluster.converged", std::string(), "whether every unit converged", {"true", "false"}),
@@ -226,6 +229,7 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
     report_progress(1.0, "done", 0, 0, leakflow::ProgressStatus::Completed);
     const auto labels = fit.labels.to(torch::kInt64).contiguous();
     const bool converged = fit.converged.all().item<bool>();
+    const auto n_features = payload->tensor().size(payload->tensor().dim() - 1);
 
     auto label_payload = leakflow::base::TorchTensorPayload(labels);
     Buffer output{label_payload.caps()};
@@ -234,6 +238,7 @@ std::optional<Buffer> GaussianMixtureElement::process(std::optional<Buffer> inpu
     output.set_units(input->units());
     output.set_metadata("payload.cluster.method", "gaussian-mixture");
     output.set_metadata("payload.cluster.n_components", std::to_string(options.n_components));
+    output.set_metadata("payload.cluster.n_features", std::to_string(n_features));
     output.set_metadata("payload.cluster.covariance_type",
         options.covariance_type == leakflow::ml::GmmCovarianceType::Full ? "full" : "diagonal");
     output.set_metadata("payload.cluster.converged", converged ? "true" : "false");

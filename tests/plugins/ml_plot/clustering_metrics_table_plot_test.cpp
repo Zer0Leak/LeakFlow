@@ -199,6 +199,7 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   ml::ExactOverlapAlignment exact_alignment;
   exact_alignment.matched_accuracy = defined_metric(
       ml::ClusteringMetricId::ExactAlignmentMatchedAccuracy, 0.92, 6);
+  exact_alignment.aligned_column_to_predicted_cluster = {1, 0, 2};
   exact_alignment.truth_group_details =
       std::vector<ml::ExactAlignmentTruthGroupDetail>{std::move(exact_group)};
   unit.exact_alignment = std::move(exact_alignment);
@@ -219,6 +220,19 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
       },
   };
   unit.semantic_alignment = std::move(semantic_alignment);
+
+  ml::ClusteringPartitionDetail partition;
+  partition.predicted_ids = torch::tensor({10, 20, 30}, torch::kInt64);
+  partition.truth_vectors =
+      torch::tensor({{0, 0}, {0, 1}, {1, 0}}, torch::kInt64);
+  partition.contingency.truth_group_indices =
+      torch::tensor({0, 1, 2}, torch::kInt64);
+  partition.contingency.predicted_cluster_indices =
+      torch::tensor({1, 0, 2}, torch::kInt64);
+  partition.contingency.counts = torch::tensor({2, 2, 2}, torch::kInt64);
+  partition.contingency.truth_group_count = 3;
+  partition.contingency.predicted_cluster_count = 3;
+  unit.partition_detail = std::move(partition);
 
   result.units.push_back(std::move(unit));
   return result;
@@ -260,7 +274,8 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
 
 [[nodiscard]] leakflow::Buffer
 evaluation_buffer(ml::ClusteringEvaluationResult result = evaluation_result(),
-                  bool add_seed = false) {
+                  bool add_seed = false,
+                  std::optional<std::string> feature_count = "100") {
   ml_plugin::ClusteringEvaluationPayload::Parameters parameters{
       {"evaluation.power", "999"},
       {"evaluation.note", "future-option"},
@@ -268,6 +283,9 @@ evaluation_buffer(ml::ClusteringEvaluationResult result = evaluation_result(),
       {"labels.cluster.n_components", "3"},
       {"metric", "payload-header-collision"},
   };
+  if (feature_count) {
+    parameters.emplace("labels.cluster.n_features", *feature_count);
+  }
   auto payload = std::make_shared<ml_plugin::ClusteringEvaluationPayload>(
       std::move(result), std::move(parameters));
   leakflow::Buffer buffer{
@@ -437,7 +455,6 @@ int main() {
       return 1;
     }
   }
-
   // Auto follows graph liveness, while explicit values continue to override
   // it. Linking is enough to propagate liveness; no GUI or pipeline run is
   // needed for this contract check.
@@ -478,6 +495,19 @@ int main() {
     multi_result.units.back().combined_quality.reset();
     multi_result.units.back().exact_alignment.reset();
     multi_result.units.back().semantic_alignment.reset();
+    multi_result.units.back().truth_group_count = 2;
+    multi_result.units.back().predicted_cluster_count = 2;
+    auto &second_partition = *multi_result.units.back().partition_detail;
+    second_partition.predicted_ids = torch::tensor({-5, 42}, torch::kInt64);
+    second_partition.truth_vectors =
+        torch::tensor({{2, 2}, {3, 3}}, torch::kInt64);
+    second_partition.contingency.truth_group_indices =
+        torch::tensor({0, 1}, torch::kInt64);
+    second_partition.contingency.predicted_cluster_indices =
+        torch::tensor({0, 1}, torch::kInt64);
+    second_partition.contingency.counts = torch::tensor({3, 3}, torch::kInt64);
+    second_partition.contingency.truth_group_count = 2;
+    second_partition.contingency.predicted_cluster_count = 2;
     auto multi_buffer = evaluation_buffer(std::move(multi_result));
     multi_buffer.set_units(leakflow::Units::of({2, 7}));
     auto multi_view = std::make_shared<plot::TableView>();
@@ -547,6 +577,228 @@ int main() {
         return 1;
       }
     }
+    const auto &multi_heatmap = snapshot_for(multi_snapshots, "Heatmap");
+    const auto &pages = multi_heatmap.frames.back().heatmap->pages;
+    if (!expect(
+            pages.size() == 2 &&
+                pages[0].selector_value ==
+                    plot::TableCell::SortValue(std::int64_t{2}) &&
+                pages[0].rows == 3 && pages[0].cols == 3 &&
+                pages[1].selector_value ==
+                    plot::TableCell::SortValue(std::int64_t{7}) &&
+                pages[1].rows == 2 && pages[1].cols == 2 &&
+                pages[1].col_labels == std::vector<std::string>{"-5", "42"} &&
+                pages[1].caption.find("raw contingency") != std::string::npos,
+            "Heatmap pages lost ragged shapes or typed unit identities")) {
+      return 1;
+    }
+  }
+
+  // Global detail intentionally omits contingency storage. Keep the tab stable
+  // and explain the requirement instead of recomputing labels or counts.
+  {
+    auto global_result = evaluation_result();
+    global_result.effective_options.detail =
+        ml::ClusteringEvaluationDetail::Global;
+    global_result.units.front().partition_detail.reset();
+    auto global_view = std::make_shared<plot::TableView>();
+    ml_plot::ClusteringMetricsTablePlot global(global_view, "global");
+    (void)global.process(evaluation_buffer(std::move(global_result)));
+    const auto global_snapshots = global_view->snapshots_copy();
+    const auto &global_heatmap = snapshot_for(global_snapshots, "Heatmap");
+    const auto &page = global_heatmap.frames.back().heatmap->pages.front();
+    if (!expect(page.unavailable_reason ==
+                        "requires ClusteringEvaluate(detail=full)" &&
+                    page.data.empty() && page.rows == 0 && page.cols == 0,
+                "Global-detail Heatmap did not expose an unavailable page")) {
+      return 1;
+    }
+  }
+
+  // Valid sparse results can describe matrices too large for an interactive
+  // dense copy. The bridge must stop before allocating such a page.
+  {
+    auto huge_result = evaluation_result();
+    auto &unit = huge_result.units.front();
+    unit.truth_group_count = 1001;
+    unit.predicted_cluster_count = 1000;
+    unit.partition_detail->contingency.truth_group_count = 1001;
+    unit.partition_detail->contingency.predicted_cluster_count = 1000;
+    auto huge_view = std::make_shared<plot::TableView>();
+    ml_plot::ClusteringMetricsTablePlot huge(huge_view, "huge");
+    (void)huge.process(evaluation_buffer(std::move(huge_result)));
+    const auto huge_snapshots = huge_view->snapshots_copy();
+    const auto &page = snapshot_for(huge_snapshots, "Heatmap")
+                           .frames.back()
+                           .heatmap->pages.front();
+    if (!expect(page.unavailable_reason ==
+                        "combined unit contingencies exceed the 1,000,000-cell "
+                        "per-frame display limit" &&
+                    page.data.empty(),
+                "oversized sparse contingency was densified for display")) {
+      return 1;
+    }
+  }
+
+  // The dense display budget applies to the complete multi-unit frame rather
+  // than independently allowing one million cells for every unit.
+  {
+    auto aggregate_result = evaluation_result();
+    auto &unit = aggregate_result.units.front();
+    unit.observation_count = 600'000;
+    unit.truth_group_count = 600;
+    unit.predicted_cluster_count = 1000;
+    unit.exact_alignment.reset();
+    auto &partition = *unit.partition_detail;
+    partition.predicted_ids = torch::arange(1000, torch::kInt64);
+    partition.truth_vectors =
+        torch::arange(1200, torch::kInt64).reshape({600, 2});
+    std::vector<std::int64_t> truth_indices;
+    std::vector<std::int64_t> predicted_indices;
+    truth_indices.reserve(1000);
+    predicted_indices.reserve(1000);
+    for (std::int64_t truth = 0; truth < 600; ++truth) {
+      for (auto predicted = truth; predicted < 1000; predicted += 600) {
+        truth_indices.push_back(truth);
+        predicted_indices.push_back(predicted);
+      }
+    }
+    partition.contingency.truth_group_indices = torch::tensor(truth_indices);
+    partition.contingency.predicted_cluster_indices =
+        torch::tensor(predicted_indices);
+    partition.contingency.counts = torch::full({1000}, 600, torch::kInt64);
+    partition.contingency.truth_group_count = 600;
+    partition.contingency.predicted_cluster_count = 1000;
+    aggregate_result.observation_count = 600'000;
+    aggregate_result.units.push_back(unit);
+    auto aggregate_buffer = evaluation_buffer(std::move(aggregate_result));
+    aggregate_buffer.set_units(leakflow::Units::of({2, 7}));
+    auto aggregate_view = std::make_shared<plot::TableView>();
+    ml_plot::ClusteringMetricsTablePlot aggregate(aggregate_view, "aggregate");
+    (void)aggregate.process(std::move(aggregate_buffer));
+    const auto aggregate_snapshots = aggregate_view->snapshots_copy();
+    const auto &pages = snapshot_for(aggregate_snapshots, "Heatmap")
+                            .frames.back()
+                            .heatmap->pages;
+    if (!expect(
+            pages.size() == 2 && pages[0].data.empty() &&
+                pages[1].data.empty() &&
+                pages[0].unavailable_reason ==
+                    "combined unit contingencies exceed the 1,000,000-cell "
+                    "per-frame display limit" &&
+                pages[1].unavailable_reason == pages[0].unavailable_reason,
+            "multi-unit heatmap exceeded the aggregate dense display budget")) {
+      return 1;
+    }
+  }
+
+  const auto rejects_malformed_heatmap =
+      [](ml::ClusteringEvaluationResult malformed) {
+        ml_plot::ClusteringMetricsTablePlot table(
+            std::make_shared<plot::TableView>(), "malformed-heatmap");
+        return throws_invalid_argument([&] {
+          (void)table.process(evaluation_buffer(std::move(malformed)));
+        });
+      };
+
+  // The payload contract stores canonical CPU int64 COO arrays. The plot
+  // bridge must not silently truncate forged floating identifiers or counts.
+  {
+    auto malformed = evaluation_result();
+    malformed.units.front().partition_detail->predicted_ids =
+        torch::tensor({10.0, 20.0, 30.0});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "floating predicted IDs were truncated for Heatmap")) {
+      return 1;
+    }
+  }
+  {
+    auto malformed = evaluation_result();
+    malformed.units.front().partition_detail->contingency.counts =
+        torch::tensor({2.0, 2.0, 2.0});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "floating contingency counts were truncated for Heatmap")) {
+      return 1;
+    }
+  }
+
+  // Canonical evaluator output has strictly ordered unique positive cells,
+  // complete row/column support, and an exact observation total.
+  {
+    auto malformed = evaluation_result();
+    auto &contingency = malformed.units.front().partition_detail->contingency;
+    contingency.truth_group_indices = torch::tensor({0, 0, 2});
+    contingency.predicted_cluster_indices = torch::tensor({1, 1, 2});
+    contingency.counts = torch::tensor({1, 1, 4});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "duplicate contingency coordinates were accepted")) {
+      return 1;
+    }
+  }
+  {
+    auto malformed = evaluation_result();
+    malformed.units.front().partition_detail->contingency.counts =
+        torch::tensor({0, 2, 4});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "zero contingency support was accepted")) {
+      return 1;
+    }
+  }
+  {
+    auto malformed = evaluation_result();
+    malformed.units.front().partition_detail->contingency.counts =
+        torch::tensor({1, 2, 2});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "incomplete contingency observation total was accepted")) {
+      return 1;
+    }
+  }
+  {
+    auto malformed = evaluation_result();
+    auto &contingency = malformed.units.front().partition_detail->contingency;
+    contingency.truth_group_indices = torch::tensor({0, 2, 2});
+    contingency.predicted_cluster_indices = torch::tensor({1, 0, 2});
+    contingency.counts = torch::tensor({2, 2, 2});
+    if (!expect(rejects_malformed_heatmap(std::move(malformed)),
+                "empty truth-group support was accepted")) {
+      return 1;
+    }
+  }
+
+  // Feature width is optional producer provenance. Missing or malformed values
+  // remain explicitly unavailable instead of being presented as a valid shape.
+  for (const auto &feature_count : std::vector<std::optional<std::string>>{
+           std::nullopt, "abc", "0", "-2"}) {
+    auto feature_view = std::make_shared<plot::TableView>();
+    ml_plot::ClusteringMetricsTablePlot feature_table(feature_view, "feature");
+    (void)feature_table.process(
+        evaluation_buffer(evaluation_result(), false, feature_count));
+    const auto feature_snapshots = feature_view->snapshots_copy();
+    const auto &feature_overview = snapshot_for(feature_snapshots, "Overview");
+    const auto &feature_cell = feature_overview.frames.back().rows.front().at(
+        column_index(feature_overview, "Features (S)"));
+    if (!expect(feature_cell.text == "N/A" && !feature_cell.sort_value &&
+                    hover_value(feature_cell, "reason").has_value(),
+                "missing or malformed feature width was shown as valid")) {
+      return 1;
+    }
+  }
+
+  // A present exact alignment is authoritative display provenance. Corrupt
+  // stored permutations fail explicitly rather than silently switching modes.
+  {
+    auto malformed_alignment = evaluation_result();
+    malformed_alignment.units.front()
+        .exact_alignment->aligned_column_to_predicted_cluster = {0, 1};
+    ml_plot::ClusteringMetricsTablePlot malformed_table(
+        std::make_shared<plot::TableView>(), "malformed-alignment");
+    if (!expect(throws_invalid_argument([&] {
+                  (void)malformed_table.process(
+                      evaluation_buffer(std::move(malformed_alignment)));
+                }),
+                "wrong-length stored heatmap permutation was accepted")) {
+      return 1;
+    }
   }
 
   // The output Buffer's typed unit axis must map one-to-one to result units;
@@ -581,11 +833,11 @@ int main() {
 
   auto snapshots = view->snapshots_copy();
   const std::vector<std::string> expected_labels{
-      "Overview", "Exact",     "Semantic",  "Fragmentation",
-      "Combined", "Alignment", "Parameters"};
+      "Overview", "Exact",     "Semantic", "Fragmentation",
+      "Combined", "Alignment", "Heatmap",  "Parameters"};
   if (!expect(snapshots.size() == expected_labels.size() &&
                   runtime->has_sessions(),
-              "rich evaluation did not create all seven tabs")) {
+              "rich evaluation did not create all eight tabs")) {
     return 1;
   }
   for (std::size_t index = 0; index < snapshots.size(); ++index) {
@@ -612,8 +864,10 @@ int main() {
           overview.frames.back().rows.size() == 1 &&
               overview_row[column_index(overview, "Run")].text == "1" &&
               overview_row[column_index(overview, "Unit")].text == "5" &&
-              overview_row[column_index(overview, "Observations")].text ==
+              overview_row[column_index(overview, "Observations (N)")].text ==
                   "6" &&
+              overview_row[column_index(overview, "Features (S)")].text ==
+                  "100" &&
               overview_row[column_index(overview, "Truth groups")].text ==
                   "3" &&
               overview_row[column_index(overview, "Predicted clusters")].text ==
@@ -661,6 +915,34 @@ int main() {
     return 1;
   }
 
+  // The Heatmap sheet consumes only the stored Full-detail contingency. The
+  // non-identity exact permutation above must produce a readable diagonal
+  // without invoking an evaluator or assignment solver in the plot bridge.
+  const auto &heatmap = snapshot_for(snapshots, "Heatmap");
+  const auto &heatmap_frame = heatmap.frames.back();
+  if (!expect(heatmap.row_selector.has_value() &&
+                  heatmap.row_selector->key == "metrics.unit" &&
+                  heatmap.columns == std::vector<std::string>{"Unit"} &&
+                  heatmap_frame.heatmap.has_value() &&
+                  heatmap_frame.heatmap->pages.size() == 1,
+              "Heatmap tab did not retain its shared typed-unit page") ||
+      !expect(
+          heatmap_frame.heatmap->pages.front().rows == 3 &&
+              heatmap_frame.heatmap->pages.front().cols == 3 &&
+              heatmap_frame.heatmap->pages.front().data ==
+                  std::vector<double>{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+                                      1.0} &&
+              heatmap_frame.heatmap->pages.front().row_labels ==
+                  std::vector<std::string>{"(hm=0, hy=0)", "(hm=0, hy=1)",
+                                           "(hm=1, hy=0)"} &&
+              heatmap_frame.heatmap->pages.front().col_labels ==
+                  std::vector<std::string>{"20", "10", "30"} &&
+              heatmap_frame.heatmap->pages.front().caption.find(
+                  "exact-overlap aligned") != std::string::npos,
+          "Heatmap tab did not row-normalize and exact-align stored counts")) {
+    return 1;
+  }
+
   // Parameters are long-form and run-wide: every effective option, captured
   // payload parameter, and direct experiment parameter occurs exactly once.
   const auto &parameters = snapshot_for(snapshots, "Parameters");
@@ -675,13 +957,15 @@ int main() {
   }
   if (!expect(!std::ranges::contains(parameters.columns, std::string("Unit")),
               "run-wide Parameters must not repeat per unit") ||
-      !expect(parameter_rows.size() == 15 &&
+      !expect(parameter_rows.size() == 16 &&
                   parameter_identities.size() == parameter_rows.size(),
               "parameters were repeated, lost, or conflated") ||
       !expect(
           parameter_identities.contains({"Evaluator", "power"}) &&
               parameter_identities.contains(
                   {"Clustering", "labels.cluster.covariance_type"}) &&
+              parameter_identities.contains(
+                  {"Clustering", "labels.cluster.n_features"}) &&
               parameter_identities.contains({"Payload", "metric"}) &&
               parameter_identities.contains({"Payload", "evaluation.note"}) &&
               parameter_identities.contains({"Experiment", "dataset"}),
@@ -819,7 +1103,7 @@ int main() {
                   snapshot_for(snapshots, "Overview").frames.size() == 1,
               "accumulate did not retain Overview comparison rows") ||
       !expect(snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                      31 &&
+                      33 &&
                   snapshot_for(snapshots, "Parameters").frames.size() == 1,
               "accumulate repeated or lost long-form parameter rows")) {
     return 1;
@@ -833,6 +1117,13 @@ int main() {
                     std::string(label))) {
       return 1;
     }
+  }
+  if (!expect(snapshot_for(snapshots, "Heatmap").frames.size() == 2 &&
+                  snapshot_for(snapshots, "Heatmap").frames.front().n == 1 &&
+                  snapshot_for(snapshots, "Heatmap").frames.back().n == 2,
+              "Heatmap accumulate did not retain one independent frame per "
+              "run")) {
+    return 1;
   }
 
   // An accumulated run without optional modes retains prior optional history
@@ -888,7 +1179,7 @@ int main() {
   table.set_property("update_mode", std::string("replace"));
   (void)table.process(evaluation_buffer(result_without_optional_modes()));
   snapshots = view->snapshots_copy();
-  if (!expect(snapshots.size() == 5 && !has_snapshot(snapshots, "Combined") &&
+  if (!expect(snapshots.size() == 6 && !has_snapshot(snapshots, "Combined") &&
                   !has_snapshot(snapshots, "Alignment"),
               "replace did not erase stale optional tabs") ||
       !expect(
@@ -898,7 +1189,7 @@ int main() {
               snapshot_for(snapshots, "Exact").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                  15,
+                  16,
           "replace did not retain only the latest run")) {
     return 1;
   }

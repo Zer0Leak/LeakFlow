@@ -7,8 +7,10 @@ This file is the compact phase/task brief for Codex.
 **Full Clustering Evaluation Metrics (Phase A) is implemented.** A1 exact
 numeric evaluation, A2 semantic/fragmentation metrics, A3 rectangular
 alignments, and A4 pipeline/table inspection are complete. No clustering
-follow-up is active by default: persistence, `MetricView`, and matrix plotting
-are unblocked but remain deferred.
+follow-up is active by default: persistence, `MetricView`, and the standalone
+selectable matrix plot are unblocked but remain deferred. A user-requested,
+bounded post-A4 extension adding explicit N/S comparison columns and a same-
+window stored-contingency Heatmap tab is also implemented.
 
 ## Active ML Sequence
 
@@ -37,8 +39,8 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    `Buffer`. `leakflow_plugins_ml_plot` and its
    `ClusteringMetricsTablePlot` are implemented. The bridge fills domain-free
    `TableView` tab groups: Overview, Exact, Semantic, Fragmentation, Combined,
-   Alignment, and Parameters. Overview is one row per run and unit with counts,
-   headline metrics, and core producer/experiment parameters. Family tabs expose
+   Alignment, and Parameters. Overview is one row per run and unit with count
+   context, headline metrics, and core producer/experiment parameters. Family tabs expose
    every stored `MetricValue` exactly once; Parameters presents effective,
    captured, and explicitly stamped `payload.parameter.*` values once per run.
    Metric labels show `↑` or `↓` direction. Its `update_mode` is
@@ -47,14 +49,29 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    unit selection, tabs, clear, and sorting are also `UiControl`. Accumulation
    preserves comparison rows/history without recomputation. It never
    introspects arbitrary upstream properties; `ClusteringStats` stays unchanged.
-5. **Deferred follow-up** — add versioned payload persistence, then the generic
-   `MetricView`/`ClusteringMetricsPlot` and `ClusteringMatrixPlot` bridge work.
+5. **Post-A4 bounded comparison-view extension (done, user-requested)** — GMM
+   supplies fitted feature width through `payload.cluster.n_features`; Overview
+   promotes `Observations (N)` and `Features (S)` to explicit shape columns,
+   showing `N/A` when the producer omitted S while retaining
+   `labels.cluster.n_features` in Parameters. An eighth same-window Heatmap tab
+   uses only stored Full-detail sparse contingency, stored exact-overlap column
+   order when available (raw otherwise), row-normalized copied counts, truth-
+   vector/predicted-ID labels, and a combined 1,000,000-cell per-run display cap
+   across unit pages. It shares typed-
+   unit selection, permits ragged per-unit shapes, appends independent run frames
+   in accumulate mode, and explains Global-detail unavailability. It adds no
+   persistence, new plot element, selectable matrix mode, or recomputation.
+6. **Deferred follow-up** — add versioned payload persistence, then the generic
+   `MetricView`/`ClusteringMetricsPlot` and standalone `ClusteringMatrixPlot`
+   with selectable raw/exact/semantic views and normalization.
    Those views consume stored payload results and never recompute evaluation or
    alignment.
 
-A4 is deliberately table-only: it added the ML→plot bridge and generic,
-domain-free tabbed-table behavior, but not persistence, `MetricView`, or matrix
-plotting.
+A4 remains a bounded table-inspection slice: it added the ML→plot bridge and
+generic, domain-free tabbed table behavior. The subsequent bounded post-A4
+extension added only N/S and the same-window fixed Heatmap; neither slice adds
+persistence, `MetricView`, a standalone `ClusteringMatrixPlot`, or selectable
+matrix/alignment/normalization modes.
 Other previously discussed candidates (Zarr parity, CPA plot refinement,
 overlay/correlation plot polish, and Kyber / ML-KEM hypotheses) remain deferred
 rather than folded into this sequence.

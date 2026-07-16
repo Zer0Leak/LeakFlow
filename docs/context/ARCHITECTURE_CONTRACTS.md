@@ -537,7 +537,9 @@ need in-call checkpoints.
 
 Design of record: `docs/design/clustering_evaluation_metrics.md`. The numeric
 result boundary through Phase A3 and the A4 pipeline/table boundary are
-implemented.
+implemented. A user-requested bounded post-A4 extension adds explicit N/S
+comparison columns and a same-window stored-contingency Heatmap tab without
+changing that numeric boundary.
 
 The full evaluator is split across existing architectural layers:
 
@@ -554,7 +556,9 @@ The full evaluator is split across existing architectural layers:
 - `leakflow_plugins_ml_plot` owns the implemented bridge for
   `ClusteringMetricsTablePlot`. It consumes that payload and fills the existing
   domain-free `TableView`; neither the view nor `PlotRuntime` knows clustering
-  field names. Generic `MetricView` and matrix/heatmap bridge work are deferred.
+  field names. A user-requested post-A4 extension fills generic `TableView`
+  matrix display data for the bounded Heatmap tab; generic `MetricView` and the
+  standalone/selectable matrix-plot bridge remain deferred.
 
 Predicted labels and vector semantic truth are separate inputs. Truth is used
 only after clustering; exact truth groups are derived from full-vector equality,
@@ -569,8 +573,11 @@ when bounded and explicitly derived from the payload.
 `ClusteringEvaluate` captures bounded, generic clustering-producer parameters
 only from its labels input and only when their metadata keys use the
 `payload.cluster.*` prefix (for example method, component count, covariance type,
-and convergence). It stores them beside effective `evaluation.*` options in the
-payload. It does not copy `payload.parameter.*` metadata, inspect arbitrary
+feature count, and convergence). As part of the post-A4 comparison-view
+extension, `GaussianMixture` reports its fitted width as
+`payload.cluster.n_features`. The evaluator stores these values beside effective
+`evaluation.*` options in the payload. It does not copy
+`payload.parameter.*` metadata, inspect arbitrary
 upstream element properties, or flatten the result into metadata.
 `ClusteringMetricsTablePlot` additionally reads explicitly stamped
 `payload.parameter.*` metadata from its evaluation input `Buffer`; unknown
@@ -603,9 +610,22 @@ and the bounded captured parameters. Its update contract is
 `auto|accumulate|replace`; unit-bearing tabs expose one synchronized view-local
 selector using typed `Buffer.units()` identities; clear empties retained table
 state; and each column supports deterministic stable ascending or descending
-ordering. These operations use copied table/payload data and never invoke the
-evaluator or Hungarian solver. Generic selection and sorting support belongs in
-`TableView`, not in a clustering-specific `PlotRuntime` branch.
+ordering.
+
+The user-requested bounded post-A4 extension names Overview's primary shape
+columns `Observations (N)` and `Features (S)`; absent producer feature metadata
+is shown as `N/A`, while Parameters retains `labels.cluster.n_features`. Its
+eighth same-window Heatmap tab densifies only stored Full-detail sparse
+contingency up to a combined 1,000,000 dense cells per run across unit pages,
+applies an already stored exact-overlap column permutation when available (raw
+order otherwise), and row-normalizes copied counts. Its truth-vector rows and
+actual predicted-ID columns, ragged per-unit pages, unavailable state, and
+independent accumulated run frames are bridge-supplied generic display data.
+The bridge rejects stored tensors that violate the canonical CPU/int64 sparse
+contract instead of coercing them. These operations never invoke the evaluator
+or Hungarian solver. Generic selection, sorting, matrix-page, and history
+support belongs in `TableView`, not in a clustering-specific `PlotRuntime`
+branch.
 
 ## Future Plugin Boundaries
 
@@ -624,8 +644,10 @@ Future algorithm or UI features must stay outside core:
   needs domain payloads goes in a bridge plugin, never in `leakflow_plot`.
 - ML→plot bridge elements: `leakflow_plugins_ml_plot`, which reads
   `ClusteringEvaluationPayload` and fills the domain-free `TableView` through
-  `ClusteringMetricsTablePlot`. Later additions may fill a generic `MetricView`
-  and `HeatmapView`, but those are outside A4.
+  `ClusteringMetricsTablePlot`, including its bounded generic Heatmap tab. Later
+  additions may fill a generic `MetricView` and standalone `HeatmapView` bridge
+  with selectable matrix modes, but those are outside A4 and its bounded post-A4
+  extension.
 - GUI: a separate app or plugin layer.
 
 Do not pull future plugin dependencies into core.

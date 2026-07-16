@@ -58,10 +58,10 @@ support:
   `ClusteringStats`, and the structured `ClusteringEvaluate` /
   `ClusteringEvaluationPayload` boundary, including typed-unit
   propagation/alignment.
-- `leakflow_plugins_ml_plot` exists and provides the table-only
+- `leakflow_plugins_ml_plot` exists and provides the bounded
   `ClusteringMetricsTablePlot` bridge. It fills domain-free `TableView` tab
-  groups with an Overview plus Exact, Semantic, Fragmentation, Combined,
-  Alignment, and Parameters tables.
+  groups with Overview, Exact, Semantic, Fragmentation, Combined, Alignment,
+  Heatmap, and Parameters tabs.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
   guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
   difference-of-means ranking with an optional best-difference trace output,
@@ -215,8 +215,10 @@ and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 state machine), and §14 (CLI cookbook). Full clustering evaluation Phase A is
 implemented: A1 exact numeric core, A2 semantic/fragmentation metrics, A3
 rectangular alignments, and A4 pipeline/table inspection are complete. Payload
-persistence, generic metric charts, and matrix plotting are unblocked but remain
-deferred. Zarr parity remains a separate deferred candidate.
+persistence, generic metric charts, and a standalone/selectable clustering
+matrix plot are unblocked but remain deferred. A user-requested bounded post-A4
+extension adds explicit N/S comparison columns and a same-window stored-
+contingency Heatmap tab. Zarr parity remains a separate deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -347,7 +349,8 @@ Crypto:
 ML:
 
 - `GaussianMixture`: batched full/diagonal-covariance EM with multiple
-  initializations and optional size-constrained Sinkhorn assignment.
+  initializations and optional size-constrained Sinkhorn assignment. Its labels
+  output reports the fitted feature width as `payload.cluster.n_features`.
 - `sinkhorn(...)`: generic log-domain entropic optimal transport.
 - Current `clustering_metrics` APIs: confusion matrix, purity, ARI, arithmetic
   NMI, square Hungarian matching/reordering, and matched accuracy/per-class
@@ -391,14 +394,28 @@ ML plugin elements:
 
 ML plot bridge:
 
-- `ClusteringMetricsTablePlot`: consumes that result on `sink`. Overview has one
-  row per run and unit with counts, headline metrics, and core producer plus
-  experiment parameters. Exact, Semantic, Fragmentation, Combined, and
-  Alignment contain every stored `MetricValue` exactly once, while Parameters
-  presents effective/captured parameters once per run. Metric labels use `↑` or
+- `ClusteringMetricsTablePlot`: consumes that result on `sink`. The original A4
+  bridge supplied the metric/parameter tables; a user-requested bounded post-A4
+  extension added the explicit N/S columns and same-window Heatmap described
+  here. Overview has one
+  row per run and unit with explicit `Observations (N)` and `Features (S)` shape
+  columns, counts, headline metrics, and core producer plus experiment
+  parameters. `Features (S)` reads captured `labels.cluster.n_features` and is
+  `N/A` for producers that do not report it. Exact, Semantic, Fragmentation,
+  Combined, and Alignment contain every stored `MetricValue` exactly once, while Parameters
+  presents effective/captured parameters once per run, retaining
+  `labels.cluster.n_features`. Heatmap is the eighth tab: it consumes only stored
+  Full-detail sparse contingency, applies the stored exact-overlap column
+  permutation when present (otherwise raw order), row-normalizes copied counts,
+  and labels rows from truth vectors/dimension names and columns from actual
+  predicted IDs. It shares typed-unit selection, supports ragged per-unit shapes,
+  and caps dense display at a combined 1,000,000 cells per run across unit
+  pages; Global detail and oversized frames show an unavailable reason. Metric
+  labels use `↑` or
   `↓` for their optimization direction. Accumulate/replace, synchronized typed-
-  unit selection, clear, tab-local stable column sorting, and tab history operate
-  only on copied display data and never recompute evaluation. `update_mode` is
+  unit selection, clear, tab-local stable column sorting, and independent
+  per-run table/heatmap history operate only on copied display data and never
+  recompute evaluation or assignment. `update_mode` is
   `UiControl`/`ElementUi` with `auto|accumulate|replace` and read-only
   `active_update_mode`; auto follows liveness. Group/title and view-local
   unit/tab/clear/sort behavior are `UiControl`.
@@ -469,8 +486,11 @@ Logging:
 ## Not Implemented Yet
 
 - Deferred clustering-evaluation work: versioned payload persistence, generic
-  `MetricView`/`ClusteringMetricsPlot`, and `ClusteringMatrixPlot`. Design of
-  record: `docs/design/clustering_evaluation_metrics.md`.
+  `MetricView`/`ClusteringMetricsPlot`, and the standalone
+  `ClusteringMatrixPlot` with selectable raw/exact/semantic matrices and
+  normalization. The bounded row-normalized Heatmap tab is already implemented
+  as the post-A4 extension and does not provide those selectable modes. Design
+  of record: `docs/design/clustering_evaluation_metrics.md`.
 - Zarr tensor-dataset reader/source/converter and the HDF5/Zarr benchmark.
 - Pipeline `Convert` element.
 - Conversion registry.

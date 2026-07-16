@@ -28,3 +28,5 @@ Trace split to choose train/validation/test.
 
 - when click in center0 to make it false it will position the y-axis like auto-fit but without auto-fit. (you could think like, set the auto-fit to true to get desired fit, than set auto-fit to false immediately).
 when click in ceneter0 to make it true, set auto-fit to false, and center y-axis to zero.
+
+- I need to check why PoI for some Units are much worser than for Unit 0. For HW(m) only, for HW(y) seems fine.

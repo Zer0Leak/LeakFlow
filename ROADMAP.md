@@ -2002,8 +2002,10 @@ Exit criteria:
 
 Status: **implemented**. Phase A1 (exact numeric evaluation), A2 (semantic and
 fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline payload
-plus table inspection) are complete. Payload persistence, `MetricView`, and
-matrix plotting were deliberately not part of Phase A.
+plus table inspection) are complete. A user-requested, bounded post-A4 extension
+adds explicit N/S comparison columns and a same-window stored-contingency
+Heatmap tab. Payload persistence, `MetricView`, and a standalone/selectable
+clustering matrix plot remain deferred.
 
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Phase A).
@@ -2039,6 +2041,11 @@ Implementation sequence:
   Fragmentation, Combined, Alignment, and Parameters tables, with
   `auto|accumulate|replace`, a synchronized typed-unit selector, clear, and
   deterministic per-column `asc|desc` behavior.
+- **Post-A4 bounded comparison-view extension (done, user-requested):**
+  `GaussianMixture` reports `payload.cluster.n_features`; Overview promotes N
+  and S to explicit shape columns; and `ClusteringMetricsTablePlot` gains an
+  eighth same-window Heatmap tab over stored Full-detail contingency. This does
+  not add persistence, a new plot element, or selectable matrix modes.
 
 Locked decisions:
 
@@ -2064,7 +2071,7 @@ Locked decisions:
 - Current `ClusteringStats` input/output/caps remain unchanged as the legacy
   confusion-matrix adapter.
 
-Delivered A4 integration:
+Delivered A4 integration and post-A4 bounded extension:
 
 - `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
   alignment, optional combined quality, effective `evaluation.*` parameters,
@@ -2072,22 +2079,41 @@ Delivered A4 integration:
   labels buffer's `payload.cluster.*` metadata. Typed unit identity remains on
   the output `Buffer`, not inside `ClusteringEvaluationPayload`.
 - `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. Its `sink` pad
-  consumes the structured payload and fills generic named table tabs. Overview
-  has one row per run and unit, with counts, headline metrics, and the core
-  producer/experiment parameters needed for comparison. Exact, Semantic,
+  consumes the structured payload and fills generic named table tabs. The
+  original A4 bridge provides Overview, the five metric-family tabs, and
+  Parameters with accumulated/replaced histories, synchronized unit selection,
+  clear, and sorting.
+- The user-requested post-A4 bounded extension makes `GaussianMixture` include
+  `payload.cluster.n_features`, the fitted feature width (S), in captured
+  producer context. Overview
+  has one row per run and unit, led by `Observations (N)` and `Features (S)`
+  (`N/A` when the producer did not report a feature count), followed by counts,
+  headline metrics, and the core producer/experiment parameters needed for
+  comparison. Exact, Semantic,
   Fragmentation, Combined, and Alignment retain every stored `MetricValue`
   exactly once in its family tab; Parameters shows captured payload and
   explicitly stamped evaluation-buffer `payload.parameter.*` values once per
-  run. Metric labels carry higher-is-better (`↑`) or lower-is-better (`↓`)
+  run, including `labels.cluster.n_features` when present. The eighth Heatmap
+  tab materializes only the stored Full-detail sparse contingency, applies the
+  stored exact-overlap column permutation when available (otherwise raw column
+  order), and row-normalizes copied counts. It labels truth-vector rows and
+  actual predicted-ID columns, supports ragged per-unit shapes, shares the typed
+  Unit selector, keeps independent run frames in accumulate mode, and bounds
+  dense display materialization to a combined 1,000,000 cells per run across
+  unit pages. Global detail and oversized frames show an unavailable reason
+  rather than recomputing or overallocating.
+  Metric labels carry higher-is-better (`↑`) or lower-is-better (`↓`)
   direction without requiring separate taxonomy columns. `update_mode` is a
   `UiControl`/`ElementUi` selector with read-only `active_update_mode`; `auto`
   resolves to accumulate for live-driven pipelines and replace otherwise.
   Group/title and view-local unit/tab/clear/sort controls are also `UiControl`.
 - `TableView` remains domain-free: its reusable tab grouping, typed sorting,
-  append/replace updates, synchronized row selectors, and clear behavior know
-  only generic tables and cells, never clustering families or metric names.
+  append/replace updates, synchronized row selectors, generic heatmap frames/
+  pages, and clear behavior know only generic display data, never clustering
+  families or metric names.
 - Typed-unit alignment, pipeline behavior, tab translation, every-value-once
-  coverage, `auto|accumulate|replace`, multi-unit selection, clear, and stable per-column
+  coverage, `auto|accumulate|replace`, multi-unit selection, ragged contingency
+  heatmaps, bounded dense display, clear, and stable per-column
   ascending/descending sorting are covered. A1–A3 cover the conventional
   scikit-learn fixtures,
   hand-computed semantic, fragmentation, and alignment cases, exact
@@ -2098,7 +2124,9 @@ Delivered A4 integration:
 Out of scope:
 
 - Payload persistence, a generic `MetricView`/headline metric chart, and a
-  clustering matrix plot; these are deferred to the follow-up below.
+  standalone `ClusteringMatrixPlot` with selectable raw/exact/semantic alignment
+  and normalization; these are deferred to the follow-up below. The post-A4
+  extension's bounded, fixed row-normalized Heatmap tab is already implemented.
 - GMM fitting changes or using truth during clustering.
 - Removal or silent repurposing of `ClusteringStats`.
 - AES/Kyber-specific class encodings, inferred semantic ranges, arbitrary real
@@ -2123,7 +2151,9 @@ Exit criteria:
 - The tabbed table exposes one-row-per-run/unit overview comparisons, every
   stored metric value exactly once in the family tabs, and parameters once per
   run, with deterministic accumulation/replacement, a synchronized typed-unit
-  selector, clear, and per-tab column sorting, without recomputing evaluation.
+  selector, clear, and per-tab column sorting. Its Heatmap tab visualizes stored
+  Full-detail contingency with bounded row-normalized display and the same run/
+  unit controls, without recomputing evaluation or assignment.
 - Existing `ClusteringStats ! HeatmapPlot` pipelines remain valid.
 - No plotting dependency enters core, `leakflow_ml`, or `leakflow_plugins_ml`;
   the A4 table dependency is isolated in `leakflow_plugins_ml_plot`.
@@ -2135,9 +2165,9 @@ Status: **unblocked by completed A4, but deferred and not implemented**.
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Deferred Follow-up).
 
-Goal: add payload persistence and the visual forms that are intentionally beyond
-A4's table-only inspection contract, without placing clustering semantics in the
-generic plot runtime or recomputing metrics in plot elements.
+Goal: add payload persistence and the visual forms still intentionally beyond
+A4 and its bounded post-A4 comparison-view extension, without placing clustering
+semantics in the generic plot runtime or recomputing metrics in plot elements.
 
 Locked decisions:
 

@@ -454,9 +454,9 @@ Notes:
 This extended version selects the profiling PoIs, extracts those columns from
 the attack traces, clusters them with an 81-component GMM, and evaluates the
 clusters directly against the vector truth `(HW(m), HW(y))`. The structured
-metrics, effective evaluator options, and captured GMM parameters are shown in
-a sortable tabbed comparison table. The same selected PoIs are also
-re-correlated on the attack traces and shown beside the profiling scores. One
+metrics, effective evaluator options, captured GMM parameters, and bounded
+stored-contingency heatmap are shown in one tabbed comparison window. The same
+selected PoIs are also re-correlated on the attack traces and shown beside the profiling scores. One
 `Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
 
 ```bash
@@ -503,11 +503,13 @@ only the shared units. Match them — both `[0]`, or both left at the full range
 a meaningful comparison. The units each buffer carries show as `units=[…]` in a
 `Summary` and in the `--graph` buffer inspector.
 
-The metrics window has seven tabs:
+The metrics window has eight tabs:
 
 - **Overview** is the place to start. It shows one row per run and unit, with
-  observation/group/cluster counts, headline quality metrics, and the core GMM
-  and experiment parameters needed to compare configurations.
+  explicit `Observations (N)` and `Features (S)` columns, group/cluster counts,
+  headline quality metrics, and the core GMM and experiment parameters needed
+  to compare configurations. GMM supplies the feature value from its fitted axis;
+  a producer without `payload.cluster.n_features` displays `N/A`.
 - **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
   contain the complete stored metric detail without duplicating a metric across
   tabs. `↑` after a metric means higher is better; `↓` means lower is better.
@@ -515,7 +517,19 @@ The metrics window has seven tabs:
   column header shows the current table sort direction.
 - **Parameters** shows effective evaluator settings, captured GMM context, and
   explicit experiment metadata once per run instead of repeating them on every
-  metric row.
+  metric row. It retains `labels.cluster.n_features` even though Overview also
+  promotes that value to `Features (S)`.
+- **Heatmap** row-normalizes the stored Full-detail sparse contingency. It uses
+  the stored exact-overlap column permutation when available (raw column order
+  otherwise), labels rows with the canonical truth vectors and dimension names,
+  and labels columns with the actual predicted IDs. It remains rectangular and
+  supports a different shape for every unit. Global detail shows
+  `requires ClusteringEvaluate(detail=full)`; when all unit pages in one run
+  exceed 1,000,000 dense cells in total, they show a display-limit message
+  instead of being allocated. This tab has
+  fixed row normalization and exact alignment when available; selectable
+  raw/semantic alignment and `none|row|col` normalization remain deferred to a
+  standalone matrix plot.
 
 `detail=full` and `alignment=both` are intentionally kept in this example: the
 family tabs make the resulting per-dimension, per-cluster, per-group, and both
@@ -524,10 +538,12 @@ re-evaluation for comparison, which is useful when changing `GaussianMixture`
 parameters such as `covariance_type` or `n_components` while Idle. Use
 `update_mode=replace` to keep only the newest evaluation, or the default
 `update_mode=auto` to accumulate for live-driven input and replace otherwise.
-`active_update_mode` reports that resolved choice. When the evaluation contains
-multiple units, a horizontal **Unit** slider on Overview and the metric-family
-tabs filters the copied rows to one typed unit; the selection follows you across
-tabs, while Parameters remains run-wide. To exercise it with this example,
+`active_update_mode` reports that resolved choice. Heatmap accumulation appends
+one independent matrix frame per evaluation run; it never sums contingency
+counts, while replace keeps only the latest frame. When the evaluation contains
+multiple units, a horizontal **Unit** slider on Overview, the metric-family tabs,
+and Heatmap selects one typed unit; the selection follows you across tabs, while
+Parameters remains run-wide. To exercise it with this example,
 change both `CorrelationPoiToIndexes(units=[0])` and
 `AesLeakage(units=[0])` to the same multi-unit set, such as `[0,1]`. Click a
 header within the current tab to sort ascending or descending. The table's
@@ -539,7 +555,8 @@ clustering evaluation.
 
 Effective evaluator options come from the structured payload. The GMM
 parameters explicitly captured from the labels buffer's `payload.cluster.*`
-metadata include `method`, `n_components`, `covariance_type`, and `converged`;
+metadata include `method`, `n_components`, `covariance_type`, `n_features`, and
+`converged`;
 explicit experiment parameters can be stamped on the evaluation buffer as
 `payload.parameter.*` metadata. Stamp an experiment parameter on
 `@eval.evaluation` (or its outgoing link), as the graph does above; do not expect

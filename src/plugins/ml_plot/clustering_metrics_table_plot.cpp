@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -47,15 +50,18 @@ enum class TableSection : std::uint8_t {
   Fragmentation,
   Combined,
   Alignment,
+  Heatmap,
   Parameters,
 };
 
 inline constexpr std::array all_sections{
-    TableSection::Overview,   TableSection::Exact,
-    TableSection::Semantic,   TableSection::Fragmentation,
-    TableSection::Combined,   TableSection::Alignment,
-    TableSection::Parameters,
+    TableSection::Overview, TableSection::Exact,
+    TableSection::Semantic, TableSection::Fragmentation,
+    TableSection::Combined, TableSection::Alignment,
+    TableSection::Heatmap,  TableSection::Parameters,
 };
+
+inline constexpr std::size_t max_heatmap_display_cells_per_frame = 1'000'000;
 
 [[nodiscard]] std::string_view section_label(TableSection section) {
   switch (section) {
@@ -71,6 +77,8 @@ inline constexpr std::array all_sections{
     return "Combined";
   case TableSection::Alignment:
     return "Alignment";
+  case TableSection::Heatmap:
+    return "Heatmap";
   case TableSection::Parameters:
     return "Parameters";
   }
@@ -260,12 +268,25 @@ struct OverviewParameter {
   std::string value;
 };
 
+[[nodiscard]] std::optional<std::string>
+parameter_value(const std::vector<ParameterRecord> &parameters,
+                std::string_view source, std::string_view name) {
+  const auto found =
+      std::ranges::find_if(parameters, [&](const auto &parameter) {
+        return parameter.source == source && parameter.parameter == name;
+      });
+  return found == parameters.end() ? std::nullopt : std::optional(found->value);
+}
+
 [[nodiscard]] std::vector<OverviewParameter>
 overview_parameters(const std::vector<ParameterRecord> &parameters) {
   std::vector<OverviewParameter> result;
   std::map<std::string, std::size_t> header_counts;
   for (const auto &parameter : parameters) {
     if (parameter.source == "Clustering") {
+      if (parameter.parameter == "labels.cluster.n_features") {
+        continue; // promoted to the explicit Features (S) shape column
+      }
       auto header =
           "Clustering: " + humanize(parameter.parameter.substr(
                                std::string_view("labels.cluster.").size()));
@@ -283,7 +304,9 @@ overview_parameters(const std::vector<ParameterRecord> &parameters) {
   std::size_t selected_index = 0;
   for (const auto &parameter : parameters) {
     const auto selected =
-        parameter.source == "Clustering" || parameter.source == "Experiment";
+        (parameter.source == "Clustering" &&
+         parameter.parameter != "labels.cluster.n_features") ||
+        parameter.source == "Experiment";
     if (!selected) {
       continue;
     }
@@ -447,6 +470,28 @@ metric_rows(const ml::ClusteringEvaluationResult &result) {
   return cell;
 }
 
+[[nodiscard]] plot::TableCell
+optional_integer_cell(const std::optional<std::string> &value) {
+  if (value) {
+    std::int64_t parsed = 0;
+    const auto [end, error] =
+        std::from_chars(value->data(), value->data() + value->size(), parsed);
+    if (error == std::errc{} && end == value->data() + value->size() &&
+        parsed > 0) {
+      return int_cell(parsed);
+    }
+  }
+  auto unavailable = text_cell("N/A");
+  unavailable.sort_value.reset();
+  unavailable.hover.emplace_back(
+      "reason", value ? "clustering producer reported an invalid input "
+                        "feature count: " +
+                            *value
+                      : "clustering producer did not report input feature "
+                        "count");
+  return unavailable;
+}
+
 void append_metric_hover(plot::TableCell &cell, const ml::MetricValue &metric,
                          bool include_reason = true) {
   const auto &descriptor = ml::clustering_metric_descriptor(metric.metric);
@@ -575,8 +620,10 @@ void push_overview(Element &element, plot::TableView &view,
   update.update_mode = accumulate ? plot::TableUpdateMode::AppendRows
                                   : plot::TableUpdateMode::ReplaceFrame;
   update.max_history = 1;
-  update.columns = {"Run", "Unit", "Observations", "Truth groups",
-                    "Predicted clusters"};
+  update.columns = {"Run",          "Unit",         "Observations (N)",
+                    "Features (S)", "Truth groups", "Predicted clusters"};
+  const auto feature_count =
+      parameter_value(parameters, "Clustering", "labels.cluster.n_features");
   const auto selected_parameters = overview_parameters(parameters);
   for (const auto &parameter : selected_parameters) {
     update.columns.push_back(parameter.header);
@@ -595,6 +642,7 @@ void push_overview(Element &element, plot::TableView &view,
     cells.push_back(int_cell(run));
     cells.push_back(int_cell(unit_ids.at(dense_unit)));
     cells.push_back(int_cell(unit.observation_count));
+    cells.push_back(optional_integer_cell(feature_count));
     cells.push_back(int_cell(unit.truth_group_count));
     cells.push_back(int_cell(unit.predicted_cluster_count));
     for (const auto &parameter : selected_parameters) {
@@ -650,6 +698,312 @@ void push_metric_section(Element &element, plot::TableView &view,
     update.frame.rows.push_back(std::move(cells));
   }
   view.push(snapshot_name(element.name(), section), update);
+}
+
+[[nodiscard]] std::string compact_number(const torch::Tensor &value) {
+  std::ostringstream output;
+  if (value.scalar_type() == c10::ScalarType::UInt64) {
+    output << value.item().toUInt64();
+  } else if (c10::isIntegralType(value.scalar_type(), /*includeBool=*/true)) {
+    output << value.item<std::int64_t>();
+  } else {
+    output << std::setprecision(6) << value.item<double>();
+  }
+  return output.str();
+}
+
+[[nodiscard]] std::vector<std::string>
+truth_group_labels(const torch::Tensor &truth_vectors,
+                   const ml::ClusteringEvaluationOptions &options,
+                   std::int64_t rows) {
+  if (!truth_vectors.defined() || truth_vectors.layout() != torch::kStrided ||
+      !truth_vectors.device().is_cpu() ||
+      (!c10::isIntegralType(truth_vectors.scalar_type(),
+                            /*includeBool=*/true) &&
+       !c10::isFloatingType(truth_vectors.scalar_type()))) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap truth-vector tensor contract is "
+        "invalid");
+  }
+  auto values = truth_vectors.contiguous();
+  if (values.dim() != 2 || values.size(0) != rows || values.size(1) <= 0) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap truth-vector shape is invalid");
+  }
+  if (c10::isFloatingType(values.scalar_type()) &&
+      !torch::isfinite(values).all().item<bool>()) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap truth vectors must be finite");
+  }
+  std::vector<std::string> labels;
+  labels.reserve(static_cast<std::size_t>(rows));
+  for (std::int64_t row = 0; row < rows; ++row) {
+    std::ostringstream label;
+    label << '(';
+    for (std::int64_t dimension = 0; dimension < values.size(1); ++dimension) {
+      if (dimension != 0) {
+        label << ", ";
+      }
+      const auto dense_dimension = static_cast<std::size_t>(dimension);
+      label << (dense_dimension < options.dimension_names.size() &&
+                        !options.dimension_names[dense_dimension].empty()
+                    ? options.dimension_names[dense_dimension]
+                    : "d" + std::to_string(dimension))
+            << '=' << compact_number(values.index({row, dimension}));
+    }
+    label << ')';
+    labels.push_back(label.str());
+  }
+  return labels;
+}
+
+struct HeatmapShape {
+  std::int64_t rows = 0;
+  std::int64_t cols = 0;
+  std::size_t row_count = 0;
+  std::size_t col_count = 0;
+};
+
+[[nodiscard]] HeatmapShape
+heatmap_shape(const ml::ClusteringEvaluationUnitResult &unit) {
+  const auto &contingency = unit.partition_detail->contingency;
+  const auto rows = contingency.truth_group_count;
+  const auto cols = contingency.predicted_cluster_count;
+  if (rows <= 0 || cols <= 0 || unit.observation_count <= 0 ||
+      rows != unit.truth_group_count || cols != unit.predicted_cluster_count) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap contingency shape is invalid");
+  }
+  const auto rows_u = static_cast<std::uint64_t>(rows);
+  const auto cols_u = static_cast<std::uint64_t>(cols);
+  if (rows_u > std::numeric_limits<std::size_t>::max() ||
+      cols_u > std::numeric_limits<std::size_t>::max()) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap contingency shape is too large");
+  }
+  return {
+      .rows = rows,
+      .cols = cols,
+      .row_count = static_cast<std::size_t>(rows_u),
+      .col_count = static_cast<std::size_t>(cols_u),
+  };
+}
+
+[[nodiscard]] bool heatmap_frame_exceeds_display_limit(
+    const ml::ClusteringEvaluationResult &result) {
+  std::size_t total_cells = 0;
+  for (const auto &unit : result.units) {
+    if (!unit.partition_detail) {
+      continue;
+    }
+    const auto shape = heatmap_shape(unit);
+    if (shape.row_count >
+        max_heatmap_display_cells_per_frame / shape.col_count) {
+      return true;
+    }
+    const auto cells = shape.row_count * shape.col_count;
+    if (cells > max_heatmap_display_cells_per_frame - total_cells) {
+      return true;
+    }
+    total_cells += cells;
+  }
+  return false;
+}
+
+void require_cpu_int64_vector(const torch::Tensor &tensor,
+                              std::string_view field) {
+  if (!tensor.defined() || tensor.layout() != torch::kStrided ||
+      !tensor.device().is_cpu() || tensor.scalar_type() != torch::kInt64 ||
+      tensor.dim() != 1) {
+    throw std::invalid_argument("ClusteringMetricsTablePlot heatmap " +
+                                std::string(field) +
+                                " must be a CPU strided int64 vector");
+  }
+}
+
+[[nodiscard]] plot::TableHeatmapPage
+heatmap_page(const ml::ClusteringEvaluationUnitResult &unit,
+             const ml::ClusteringEvaluationOptions &options,
+             std::int64_t unit_id, std::int64_t run,
+             bool frame_exceeds_display_limit) {
+  plot::TableHeatmapPage page;
+  page.selector_value = unit_id;
+  page.row_axis_label = "true group";
+  page.col_axis_label = "predicted cluster";
+  if (!unit.partition_detail) {
+    page.unavailable_reason = "requires ClusteringEvaluate(detail=full)";
+    return page;
+  }
+
+  const auto shape = heatmap_shape(unit);
+  if (frame_exceeds_display_limit) {
+    page.unavailable_reason =
+        "combined unit contingencies exceed the 1,000,000-cell per-frame "
+        "display limit";
+    return page;
+  }
+
+  const auto &detail = *unit.partition_detail;
+  const auto rows = shape.rows;
+  const auto cols = shape.cols;
+  const auto row_count = shape.row_count;
+  const auto col_count = shape.col_count;
+
+  require_cpu_int64_vector(detail.predicted_ids, "predicted_ids");
+  auto predicted_ids = detail.predicted_ids.contiguous();
+  if (predicted_ids.numel() != cols) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap predicted-id shape is invalid");
+  }
+  const auto *predicted_id_data = predicted_ids.data_ptr<std::int64_t>();
+  for (std::int64_t index = 1; index < cols; ++index) {
+    if (predicted_id_data[index] <= predicted_id_data[index - 1]) {
+      throw std::invalid_argument(
+          "ClusteringMetricsTablePlot heatmap predicted IDs must be strictly "
+          "increasing");
+    }
+  }
+  std::vector<std::int64_t> column_order(col_count);
+  std::iota(column_order.begin(), column_order.end(), std::int64_t{0});
+  auto exact_aligned = false;
+  if (unit.exact_alignment) {
+    if (unit.exact_alignment->aligned_column_to_predicted_cluster.size() !=
+        col_count) {
+      throw std::invalid_argument(
+          "ClusteringMetricsTablePlot exact heatmap permutation has the wrong "
+          "length");
+    }
+    column_order = unit.exact_alignment->aligned_column_to_predicted_cluster;
+    std::vector<bool> seen(col_count, false);
+    for (const auto canonical_column : column_order) {
+      if (canonical_column < 0 || canonical_column >= cols ||
+          seen[static_cast<std::size_t>(canonical_column)]) {
+        throw std::invalid_argument(
+            "ClusteringMetricsTablePlot exact heatmap permutation is invalid");
+      }
+      seen[static_cast<std::size_t>(canonical_column)] = true;
+    }
+    exact_aligned = true;
+  }
+  std::vector<std::size_t> displayed_column(col_count);
+  for (std::size_t column = 0; column < col_count; ++column) {
+    displayed_column[static_cast<std::size_t>(column_order[column])] = column;
+  }
+
+  require_cpu_int64_vector(detail.contingency.truth_group_indices,
+                           "truth_group_indices");
+  require_cpu_int64_vector(detail.contingency.predicted_cluster_indices,
+                           "predicted_cluster_indices");
+  require_cpu_int64_vector(detail.contingency.counts, "counts");
+  auto truth_indices = detail.contingency.truth_group_indices.contiguous();
+  auto predicted_indices =
+      detail.contingency.predicted_cluster_indices.contiguous();
+  auto counts = detail.contingency.counts.contiguous();
+  if (truth_indices.numel() != predicted_indices.numel() ||
+      truth_indices.numel() != counts.numel()) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap sparse arrays are invalid");
+  }
+
+  page.rows = rows;
+  page.cols = cols;
+  page.data.assign(row_count * col_count, 0.0);
+  const auto *truth_data = truth_indices.data_ptr<std::int64_t>();
+  const auto *predicted_data = predicted_indices.data_ptr<std::int64_t>();
+  const auto *count_data = counts.data_ptr<std::int64_t>();
+  std::vector<std::uint64_t> truth_support(row_count, 0);
+  std::vector<bool> predicted_has_support(col_count, false);
+  std::uint64_t total_support = 0;
+  std::int64_t previous_truth = -1;
+  std::int64_t previous_predicted = -1;
+  for (std::int64_t index = 0; index < counts.numel(); ++index) {
+    const auto truth_group = truth_data[index];
+    const auto predicted_cluster = predicted_data[index];
+    if (truth_group < 0 || truth_group >= rows || predicted_cluster < 0 ||
+        predicted_cluster >= cols || count_data[index] <= 0) {
+      throw std::invalid_argument(
+          "ClusteringMetricsTablePlot heatmap sparse entry is invalid");
+    }
+    if (truth_group < previous_truth ||
+        (truth_group == previous_truth &&
+         predicted_cluster <= previous_predicted)) {
+      throw std::invalid_argument(
+          "ClusteringMetricsTablePlot heatmap sparse coordinates must be "
+          "strictly ordered and unique");
+    }
+    previous_truth = truth_group;
+    previous_predicted = predicted_cluster;
+    const auto count = static_cast<std::uint64_t>(count_data[index]);
+    if (count > std::numeric_limits<std::uint64_t>::max() - total_support) {
+      throw std::invalid_argument(
+          "ClusteringMetricsTablePlot heatmap contingency support overflows");
+    }
+    total_support += count;
+    auto &row_support = truth_support[static_cast<std::size_t>(truth_group)];
+    row_support += count;
+    predicted_has_support[static_cast<std::size_t>(predicted_cluster)] = true;
+    const auto destination =
+        static_cast<std::size_t>(truth_group) * col_count +
+        displayed_column[static_cast<std::size_t>(predicted_cluster)];
+    page.data[destination] = static_cast<double>(count);
+  }
+  if (total_support != static_cast<std::uint64_t>(unit.observation_count) ||
+      std::ranges::any_of(truth_support,
+                          [](const auto support) { return support == 0; }) ||
+      std::ranges::any_of(predicted_has_support,
+                          [](const auto supported) { return !supported; })) {
+    throw std::invalid_argument(
+        "ClusteringMetricsTablePlot heatmap contingency support is "
+        "inconsistent");
+  }
+  for (std::size_t row = 0; row < row_count; ++row) {
+    const auto begin =
+        page.data.begin() + static_cast<std::ptrdiff_t>(row * col_count);
+    const auto end = begin + static_cast<std::ptrdiff_t>(col_count);
+    const auto support = static_cast<double>(truth_support[row]);
+    std::transform(begin, end, begin,
+                   [support](double value) { return value / support; });
+  }
+
+  page.row_labels = truth_group_labels(detail.truth_vectors, options, rows);
+  page.col_labels.reserve(col_count);
+  for (const auto canonical_column : column_order) {
+    page.col_labels.push_back(std::to_string(
+        predicted_id_data[static_cast<std::size_t>(canonical_column)]));
+  }
+  page.caption = "Run " + std::to_string(run) + " - " +
+                 (exact_aligned ? "exact-overlap aligned contingency"
+                                : "raw contingency") +
+                 " - row-normalized";
+  page.vmin = 0.0;
+  page.vmax = 1.0;
+  return page;
+}
+
+void push_heatmap(Element &element, plot::TableView &view,
+                  const ml::ClusteringEvaluationResult &result,
+                  const std::vector<std::int64_t> &unit_ids, std::int64_t run,
+                  bool accumulate) {
+  auto update = base_update(element, TableSection::Heatmap, run);
+  update.row_selector = unit_row_selector(element, unit_ids);
+  update.update_mode = accumulate ? plot::TableUpdateMode::AppendFrame
+                                  : plot::TableUpdateMode::ReplaceFrame;
+  update.max_history = accumulate ? 0 : 1;
+  update.columns = {"Unit"};
+  update.frame.heatmap = plot::TableHeatmapFrame{};
+  update.frame.rows.reserve(result.units.size());
+  update.frame.heatmap->pages.reserve(result.units.size());
+  const auto frame_exceeds_display_limit =
+      heatmap_frame_exceeds_display_limit(result);
+  for (std::size_t dense_unit = 0; dense_unit < result.units.size();
+       ++dense_unit) {
+    const auto unit_id = unit_ids.at(dense_unit);
+    update.frame.rows.push_back({int_cell(unit_id)});
+    update.frame.heatmap->pages.push_back(
+        heatmap_page(result.units[dense_unit], result.effective_options,
+                     unit_id, run, frame_exceeds_display_limit));
+  }
+  view.push(snapshot_name(element.name(), TableSection::Heatmap), update);
 }
 
 void push_parameters(Element &element, plot::TableView &view,
@@ -718,6 +1072,7 @@ std::optional<Buffer> capture_table(Element &element, plot::TableView &view,
     static_cast<void>(
         view.erase(snapshot_name(element.name(), TableSection::Alignment)));
   }
+  push_heatmap(element, view, result, unit_ids, run, accumulate);
   push_parameters(element, view, parameters, run, accumulate);
   return std::nullopt;
 }
@@ -733,7 +1088,7 @@ ElementDescriptor ClusteringMetricsTablePlot::descriptor() {
       .type_name = "ClusteringMetricsTablePlot",
       .klass = "Sink/Plot/Table/ClusteringMetrics",
       .purpose = "show clustering evaluation as readable overview, metric-"
-                 "family, and parameter table tabs",
+                 "family, heatmap, and parameter tabs",
       .input_pads =
           {
               Pad("sink", PadDirection::Input,
@@ -762,7 +1117,7 @@ ElementDescriptor ClusteringMetricsTablePlot::descriptor() {
                   /*writable=*/false),
           },
       .keywords = {"plot", "table", "clustering", "evaluation", "metrics",
-                   "parameters", "ml"},
+                   "heatmap", "parameters", "ml"},
   };
 }
 

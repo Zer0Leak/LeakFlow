@@ -15,6 +15,8 @@ namespace {
 using leakflow::plot::TableCell;
 using leakflow::plot::TableFrame;
 using leakflow::plot::TableGroupLayout;
+using leakflow::plot::TableHeatmapFrame;
+using leakflow::plot::TableHeatmapPage;
 using leakflow::plot::TableRowSelector;
 using leakflow::plot::TableSortDirection;
 using leakflow::plot::TableSortSpec;
@@ -59,6 +61,16 @@ update_with_rows(std::int64_t n, std::vector<std::vector<TableCell>> rows,
 
 int main() {
   namespace plot = leakflow::plot;
+
+  // ImPlot stores row-major heatmap row zero at the maximum Y bound. Tick
+  // coordinates must descend with the row index so labels remain attached to
+  // the corresponding matrix rows without an inverted axis.
+  if (!expect(plot::table_heatmap_row_axis_position(0, 3) == 2.5 &&
+                  plot::table_heatmap_row_axis_position(1, 3) == 1.5 &&
+                  plot::table_heatmap_row_axis_position(2, 3) == 0.5,
+              "heatmap row-label coordinates do not match row-major data")) {
+    return 1;
+  }
 
   // Numeric sorting uses typed values rather than formatted text, is stable
   // for ties, and keeps unavailable/NaN rows last in both directions.
@@ -449,6 +461,167 @@ int main() {
     if (!expect(
             !changed_values.selected_row_value("evaluation.unit").has_value(),
             "replace left a removed selector value observable")) {
+      return 1;
+    }
+  }
+
+  // Heatmap frames reuse tab history and typed selector state while allowing
+  // each selected page to own an independent rectangular shape or an explicit
+  // unavailable reason.
+  {
+    TableView view;
+    auto update = update_with_rows(
+        1, {{cell("3", std::int64_t{3})}, {cell("8", std::int64_t{8})}},
+        TableUpdateMode::AppendFrame, 0);
+    update.columns = {"Unit"};
+    update.row_selector = TableRowSelector{
+        .key = "heatmap.unit",
+        .label = "Unit",
+        .column = "Unit",
+        .values = {{.value = std::int64_t{3}, .label = "3"},
+                   {.value = std::int64_t{8}, .label = "8"}},
+    };
+    update.frame.heatmap = TableHeatmapFrame{
+        .pages =
+            {
+                TableHeatmapPage{
+                    .selector_value = std::int64_t{3},
+                    .caption = "rectangular",
+                    .row_labels = {"a", "b"},
+                    .col_labels = {"x", "y", "z"},
+                    .rows = 2,
+                    .cols = 3,
+                    .data = {1.0, 0.0, 0.0, 0.0, 0.5, 0.5},
+                },
+                TableHeatmapPage{
+                    .selector_value = std::int64_t{8},
+                    .unavailable_reason = "not retained",
+                },
+            },
+    };
+    view.push("heatmap", update);
+    update.frame.n = 2;
+    update.frame.caption = "N = 2";
+    view.push("heatmap", update);
+    auto snapshot = view.snapshots_copy().front();
+    if (!expect(
+            snapshot.frames.size() == 2 &&
+                snapshot.frames.front().heatmap.has_value() &&
+                snapshot.frames.front().heatmap->pages[0].rows == 2 &&
+                snapshot.frames.front().heatmap->pages[0].cols == 3 &&
+                snapshot.frames.front().heatmap->pages[1].unavailable_reason ==
+                    "not retained" &&
+                view.select_row_value("heatmap.unit", std::int64_t{8}),
+            "typed ragged heatmap pages/history were not retained")) {
+      return 1;
+    }
+
+    // AppendFrame history is independent of the unit set carried by each
+    // buffer. Reordering choices must not clear history, and newly seen typed
+    // values extend the shared selector while older pages remain retained.
+    if (!expect(view.select_row_value("heatmap.unit", std::int64_t{3}),
+                "heatmap fixture could not select Unit 3")) {
+      return 1;
+    }
+    auto reordered = update;
+    reordered.frame.n = 3;
+    reordered.frame.rows = {{cell("8", std::int64_t{8})},
+                            {cell("3", std::int64_t{3})}};
+    reordered.row_selector->values = {
+        {.value = std::int64_t{8}, .label = "eight"},
+        {.value = std::int64_t{3}, .label = "3"},
+    };
+    std::swap(reordered.frame.heatmap->pages[0],
+              reordered.frame.heatmap->pages[1]);
+    view.push("heatmap", reordered);
+
+    auto changed_units = reordered;
+    changed_units.frame.n = 4;
+    changed_units.frame.rows = {{cell("8", std::int64_t{8})},
+                                {cell("13", std::int64_t{13})}};
+    changed_units.row_selector->values = {
+        {.value = std::int64_t{8}, .label = "eight (latest)"},
+        {.value = std::int64_t{13}, .label = "13"},
+    };
+    changed_units.frame.heatmap->pages[1] = TableHeatmapPage{
+        .selector_value = std::int64_t{13},
+        .caption = "new unit",
+        .rows = 1,
+        .cols = 2,
+        .data = {0.25, 0.75},
+    };
+    view.push("heatmap", changed_units);
+    snapshot = view.snapshots_copy().front();
+    if (!expect(snapshot.frames.size() == 4 &&
+                    snapshot.frames[2].heatmap->pages[0].selector_value ==
+                        TableCell::SortValue(std::int64_t{8}) &&
+                    snapshot.frames[2].heatmap->pages[1].selector_value ==
+                        TableCell::SortValue(std::int64_t{3}) &&
+                    snapshot.frames[3].heatmap->pages[1].selector_value ==
+                        TableCell::SortValue(std::int64_t{13}) &&
+                    snapshot.row_selector->values.size() == 3 &&
+                    snapshot.row_selector->values[0].value ==
+                        TableCell::SortValue(std::int64_t{3}) &&
+                    snapshot.row_selector->values[1].value ==
+                        TableCell::SortValue(std::int64_t{8}) &&
+                    snapshot.row_selector->values[1].label ==
+                        "eight (latest)" &&
+                    snapshot.row_selector->values[2].value ==
+                        TableCell::SortValue(std::int64_t{13}) &&
+                    view.selected_row_value("heatmap.unit") ==
+                        std::optional<TableCell::SortValue>(std::int64_t{3}) &&
+                    view.select_row_value("heatmap.unit", std::int64_t{13}),
+                "changing/reordered heatmap units cleared history or selector "
+                "state")) {
+      return 1;
+    }
+
+    auto malformed = update;
+    malformed.frame.heatmap->pages[0].data.pop_back();
+    if (!expect(
+            [&] {
+              try {
+                view.push("malformed-heatmap", malformed);
+                return false;
+              } catch (const std::invalid_argument &) {
+                return true;
+              }
+            }(),
+            "heatmap data/shape mismatch was accepted")) {
+      return 1;
+    }
+
+    auto missing_selector = update;
+    missing_selector.row_selector.reset();
+    missing_selector.frame.rows.clear();
+    if (!expect(
+            [&] {
+              try {
+                view.push("missing-selector", missing_selector);
+                return false;
+              } catch (const std::invalid_argument &) {
+                return true;
+              }
+            }(),
+            "multi-page heatmap without a selector was accepted")) {
+      return 1;
+    }
+
+    // A single matrix needs no synthetic selector column or row. The empty
+    // table schema is intentional and the sole page is the renderable content.
+    auto selectorless = update;
+    selectorless.columns.clear();
+    selectorless.row_selector.reset();
+    selectorless.frame.rows.clear();
+    selectorless.frame.heatmap->pages.resize(1);
+    view.push("selectorless-heatmap", selectorless);
+    const auto selectorless_snapshot = view.snapshots_copy().back();
+    if (!expect(
+            selectorless_snapshot.columns.empty() &&
+                !selectorless_snapshot.row_selector.has_value() &&
+                selectorless_snapshot.frames.back().heatmap.has_value() &&
+                selectorless_snapshot.frames.back().heatmap->pages.size() == 1,
+            "selector-less one-page heatmap was not retained for rendering")) {
       return 1;
     }
   }

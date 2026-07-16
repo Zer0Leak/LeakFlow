@@ -91,6 +91,7 @@ int main() {
     labels.set_metadata("payload.layout", "unit/observation");
     labels.set_metadata("payload.cluster.method", "gaussian-mixture");
     labels.set_metadata("payload.cluster.covariance_type", "diagonal");
+    labels.set_metadata("payload.cluster.n_features", "4");
     labels.set_metadata("payload.parameter.seed", "7");
     auto truth = tensor_buffer(torch::tensor(
         {{1.0, 2.0}, {1.0, 2.0}, {3.0, 4.0}, {3.0, 4.0}}, torch::kFloat64));
@@ -122,6 +123,8 @@ int main() {
                         "gaussian-mixture" &&
                     payload->parameters().at(
                         "labels.cluster.covariance_type") == "diagonal" &&
+                    payload->parameters().at("labels.cluster.n_features") ==
+                        "4" &&
                     payload->parameters().at("evaluation.semantic") == "off" &&
                     !payload->parameters().contains("labels.parameter.seed") &&
                     !payload->parameters().contains("truth.cluster.method") &&

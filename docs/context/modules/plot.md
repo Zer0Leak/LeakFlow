@@ -166,14 +166,16 @@ final result), so it needs no live/offline switch.
 
 A4 extended the generic table contract with typed sort values, stable single-key
 ascending/descending row ordering, replace-frame and append-row updates,
-schema-union remapping, per-producer erase, and explicitly ordered named tab
-groups. Optional row selectors carry bridge-supplied typed choices plus the
+schema-union remapping, per-producer erase, and explicitly ordered named table
+groups. The user-requested bounded post-A4 extension added optional generic
+heatmap frames containing ragged selector-keyed pages.
+Optional row selectors carry bridge-supplied typed choices plus the
 named generic column holding each row's typed key, and share view-local
 selection through an opaque key; the clustering bridge uses this for units.
-Tabs organize generic tables and their histories; their
-names, order, and cell schemas come from the bridge. Missing/NaN sort values
-remain last in either direction. The view still knows nothing about clustering
-families, metric names, units, or parameters.
+Tabs organize generic table or heatmap frames and their histories; their names,
+order, cells/matrices, labels, and selector choices come from the bridge.
+Missing/NaN sort values remain last in either direction. The view still knows
+nothing about clustering families, metric names, units, or parameters.
 
 `ScorePlot`, the element that fills a `ScoreView`, lives in the separate
 `leakflow_plugins_crypto_plot` target (depends on `leakflow_plugins_crypto` +
@@ -185,18 +187,24 @@ and hands the `ScoreView` to every `ScorePlot` and the `TableView` to every
 window (`ScorePlot` always stacks; it never overlays). Design:
 `docs/design/plotting.md` (Plot View Architecture) and `docs/design/cpa_attack.md`.
 
-## A4 Clustering Metrics Table (Implemented)
+## Clustering Metrics Table (A4 + Post-A4 Extension Implemented)
 
-Authoritative design: `docs/design/clustering_evaluation_metrics.md` (A4).
+Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 
-`ClusteringMetricsTablePlot` is the only clustering visualization in A4. Its
-`sink` pad reads `ClusteringEvaluationPayload` and translates stored records
-into named tabs in the existing domain-free `TableView`:
+`ClusteringMetricsTablePlot` was added in A4 as a seven-tab table bridge:
+Overview, Exact, Semantic, Fragmentation, Combined, Alignment, and Parameters.
+A user-requested bounded post-A4 extension added explicit N/S comparison
+columns and the eighth same-window Heatmap tab. The current `sink` pad reads
+`ClusteringEvaluationPayload` and translates stored records into named tabs in
+the existing domain-free `TableView`:
 
 - **Overview** has one row per run and typed unit. It leads with observation,
-  truth-group, and predicted-cluster counts; headline exact/semantic/
+  and feature shape columns named `Observations (N)` and `Features (S)`, then
+  truth-group and predicted-cluster counts; headline exact/semantic/
   fragmentation/combined metrics; and the core producer and explicit
   experiment parameters needed to compare runs without scanning detail rows.
+  (S) comes from captured `labels.cluster.n_features`; it is `N/A` when the
+  producer did not report a feature count.
 - **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
   partition the structured metric records by family. Across those tabs every
   stored `MetricValue` appears exactly once, including per-dimension,
@@ -208,10 +216,20 @@ into named tabs in the existing domain-free `TableView`:
   `payload.cluster.*` producer context, and explicitly stamped
   `payload.parameter.*` experiment metadata once per run rather than repeating
   them on every metric row. Payload and direct-metadata names remain
-  collision-proof; arbitrary metadata namespaces and upstream properties are
-  not inspected.
+  collision-proof; `labels.cluster.n_features` remains present even though it is
+  also promoted to Overview's shape column. Arbitrary metadata namespaces and
+  upstream properties are not inspected.
+- **Heatmap** consumes only each unit's stored Full-detail sparse contingency.
+  It uses the stored exact-overlap column permutation when available and raw
+  predicted-column order otherwise, then row-normalizes copied counts. Rows are
+  labeled from canonical truth vectors and effective dimension names; columns
+  use actual predicted IDs. Pages may have different rectangular shapes per
+  typed unit. Global detail displays `requires ClusteringEvaluate(detail=full)`,
+  and unit pages above a combined 1,000,000 dense cells per run display a limit
+  reason instead of being allocated.
 - `replace` refreshes all tabs from the latest payload. `accumulate` retains
-  comparison rows in Overview/Parameters and run history in every family tab.
+  comparison rows in Overview/Parameters and independent run history in every
+  family and Heatmap tab; heatmap counts are never summed across runs.
   `auto` selects accumulate for a live-driven pipeline and replace otherwise;
   `active_update_mode` exposes that resolved choice read-only.
 - Unit-bearing tabs share a horizontal selector when more than one typed unit
@@ -227,24 +245,27 @@ into named tabs in the existing domain-free `TableView`:
 `update_mode` is `UiControl`/`ElementUi`, so an Idle change resolves immediately
 without replaying cached input; the next buffer uses the selected mode. `group`
 and `title` are `UiControl`/`ElementUi`; unit selection, tabs, Clear, and header
-sorting are view-local UI controls. These operations use copied table/payload data. The bridge never calls
-the evaluator or Hungarian solver, and generic tabs/sorting belong in
-`TableView`, not a clustering branch in `PlotRuntime`. Headless A4 coverage
-checks deterministic tab translation, every-value-once placement, overview and
-parameter cardinality, undefined states, accumulate/replace history, typed-unit selection, clear, sorting,
-reset, and property effects. ImGui/ImPlot rendering remains a manual smoke
-check.
+sorting are view-local UI controls. These operations use copied table/payload
+data. The bridge never calls the evaluator or Hungarian solver, and generic
+tabs, sorting, and heatmap pages belong in `TableView`, not a clustering branch
+in `PlotRuntime`. Headless A4 coverage checks deterministic table translation,
+every-value-once placement, overview and parameter cardinality, undefined
+states, accumulate/replace history, typed-unit selection, clear, sorting, reset,
+and property effects. Post-A4 extension coverage checks N/S promotion, ragged
+matrix pages, and bounded densification. ImGui/ImPlot rendering remains a manual
+smoke check.
 
 ## Deferred Clustering Metric Views (Unblocked)
 
-Payload persistence is unblocked by A4 but deferred. A later visual slice may
-add:
+Payload persistence is unblocked by A4 and remains deferred after the bounded
+post-A4 extension. A later visual slice may add:
 
 - `ClusteringMetricsPlot` with a new domain-free `MetricView` for already
   computed headline and per-dimension values;
-- `ClusteringMatrixPlot` with the existing `HeatmapView` for raw contingency,
+- a standalone `ClusteringMatrixPlot` with selectable raw contingency,
   exact-overlap aligned, or semantic-cost aligned stored data and display-only
-  `none|row|col` normalization.
+  `none|row|col` normalization. This is broader than the implemented fixed
+  row-normalized Heatmap tab.
 
 Those additions remain presentation-only and must not recompute metrics,
 assignments, or labels.

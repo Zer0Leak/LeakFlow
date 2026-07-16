@@ -2,8 +2,11 @@
 
 Status: **Phase A implemented**. A1 (exact numeric core), A2 (semantic and
 fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline result
-contract plus table-only inspection) are complete. Payload persistence, generic
-`MetricView`, and matrix plotting are unblocked but remain deferred.
+contract plus bounded table inspection) are complete. A user-requested bounded
+post-A4 comparison-view extension adding explicit N/S columns and an eighth
+same-window Heatmap tab is also implemented. Payload persistence, generic
+`MetricView`, and a standalone/selectable matrix plot are unblocked but remain
+deferred.
 
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
@@ -34,9 +37,16 @@ Implemented Phase A slices:
   typed-unit alignment, bounded summary and parameter capture, registration,
   and pipeline tests. It also adds `ClusteringMetricsTablePlot` in a new
   `leakflow_plugins_ml_plot` bridge, reusing generic `TableView` tab groups for
-  an Overview plus Exact, Semantic, Fragmentation, Combined, Alignment, and
-  Parameters tables, with `auto|accumulate|replace`, synchronized typed-unit
+  Overview, Exact, Semantic, Fragmentation, Combined, Alignment, and Parameters
+  tabs. It provides `auto|accumulate|replace`, synchronized typed-unit
   selection, clear, and deterministic per-tab column `asc|desc` sorting.
+- **Post-A4 bounded comparison-view extension (implemented, user-requested):**
+  `GaussianMixture` reports fitted feature width as
+  `payload.cluster.n_features`; Overview promotes explicit `Observations (N)`
+  and `Features (S)` columns; and the same `ClusteringMetricsTablePlot` gains an
+  eighth same-window Heatmap tab with a bounded row-normalized view of already
+  stored Full-detail contingency. It adds no persistence, new plot element,
+  selectable matrix mode, or numeric recomputation.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
@@ -48,15 +58,19 @@ Phase A owns:
 - exact, semantic-aware, and alignment metrics;
 - bounded summary and effective-option/parameter capture for the structured
   payload;
-- the table-only `leakflow_plugins_ml_plot` bridge and the domain-free tab,
-  sorting, accumulate/replace, row-selection, and clear support required in the existing
-  `TableView`;
+- the bounded `leakflow_plugins_ml_plot` bridge and the domain-free tab, table,
+  sorting, accumulate/replace, row-selection, and clear support required in the
+  existing `TableView`;
 - compatibility with the existing `ClusteringStats` element;
 - numeric, pipeline, and table-bridge tests.
 
-A4 does not add payload persistence, a generic `MetricView`, or matrix plotting.
-The plot dependency is isolated in `leakflow_plugins_ml_plot`; neither
-`leakflow_ml` nor `leakflow_plugins_ml` links plotting.
+A4 did not add payload persistence, a generic `MetricView`, a standalone
+`ClusteringMatrixPlot`, or matrix display. The later user-requested bounded
+post-A4 extension added only explicit N/S columns and a fixed row-normalized
+same-window Heatmap inspection of stored data; it still does not add selectable
+raw/semantic/normalization matrix modes. The plot dependency is isolated in
+`leakflow_plugins_ml_plot`; neither `leakflow_ml` nor `leakflow_plugins_ml`
+links plotting.
 
 ### Deferred Follow-up — Persistence and Additional Visualization (Unblocked)
 
@@ -66,11 +80,12 @@ The deferred follow-up owns:
 - domain-free metric display data/views in `leakflow_plot`;
 - additional clustering-result-to-view elements in the A4-created
   `leakflow_plugins_ml_plot` target;
-- normalized metric charts and result-matrix heatmaps;
+- normalized metric charts and a standalone result-matrix view with selectable
+  stored alignment and normalization modes;
 - headless view-data tests and manual GUI validation.
 
-The follow-up can consume the now-stable A4 results. It must not recompute
-clustering metrics or alignment assignments.
+The follow-up can consume the now-stable A4 result plus post-A4 display
+extension. It must not recompute clustering metrics or alignment assignments.
 
 ## Goals
 
@@ -91,8 +106,10 @@ clustering metrics or alignment assignments.
 - Defining a universal scalar that replaces the complete metric set.
 - Encoding or decoding AES-specific class identifiers.
 - Turning `leakflow_ml` into an SCA-specific library.
-- Adding payload persistence, a generic metric chart, or a clustering matrix
-  plot during A4.
+- Adding payload persistence, a generic metric chart, or a standalone/selectable
+  clustering matrix plot during A4 or the bounded post-A4 extension. That
+  extension's fixed same-window Heatmap is not the deferred standalone/
+  selectable plot.
 
 ## 1. Input Contract
 
@@ -580,8 +597,12 @@ parameters.
 
 The evaluator also captures a bounded set of generic clustering-producer
 parameters only from the labels buffer metadata namespace `payload.cluster.*`
-(for example `method`, `n_components`, `covariance_type`, and `converged`). Captured
-records are scalar, deterministically key-ordered, and subject to explicit
+(for example `method`, `n_components`, `covariance_type`, `n_features`, and
+`converged`). For the user-requested post-A4 comparison-view extension,
+`GaussianMixture` reports its fitted feature-axis width (S) as
+`payload.cluster.n_features`, which is stored as
+`labels.cluster.n_features`. Captured records are scalar, deterministically
+key-ordered, and subject to explicit
 entry/key/value bounds in the public payload contract. Unknown metadata
 namespaces are ignored. The evaluator does not inspect arbitrary upstream
 element properties, copy `payload.parameter.*` metadata, or flatten the
@@ -626,13 +647,20 @@ Metric-affecting properties are `payload-output` with downstream invalidation.
 Display selection is not an evaluator property.
 
 A4 also added `ClusteringMetricsTablePlot` with one `sink` input accepting
-`ClusteringEvaluationPayload`. Its table contract is:
+`ClusteringEvaluationPayload` and seven table tabs: **Overview**, **Exact**,
+**Semantic**, **Fragmentation**, **Combined**, **Alignment**, and
+**Parameters**. The user-requested bounded post-A4 extension promoted N/S in
+Overview and added the eighth same-window **Heatmap** tab. The current tabbed
+inspection contract is:
 
 - organize generic table data into **Overview**, **Exact**, **Semantic**,
-  **Fragmentation**, **Combined**, **Alignment**, and **Parameters** tabs;
-- put one row per run and typed unit in Overview, including count context,
-  headline metrics, and the core producer and explicit experiment parameters
-  needed to compare configurations;
+  **Fragmentation**, **Combined**, **Alignment**, **Heatmap**, and **Parameters**
+  tabs;
+- put one row per run and typed unit in Overview, beginning with
+  `Observations (N)` and `Features (S)`, then count context, headline metrics,
+  and the core producer and explicit experiment parameters needed to compare
+  configurations. The feature value reads `labels.cluster.n_features` and
+  displays `N/A` when the producer did not report it;
 - place every stored `MetricValue` exactly once across the five family tabs,
   preserving value/defined state, averaging, support, scope/item detail, and
   undefined reason; append `↑` or `↓` to the metric label for its direction;
@@ -640,13 +668,26 @@ A4 also added `ClusteringMetricsTablePlot` with one `sink` input accepting
   `payload.cluster.*` parameters stored by the payload, and scalar
   `payload.parameter.*` metadata explicitly stamped on the evaluation input in
   Parameters exactly once per run, while ignoring all other namespaces;
+  `labels.cluster.n_features` remains in Parameters after its Overview promotion;
 - keep payload and direct-input parameter sources collision-proof even when
   their suffixes match;
 - `update_mode=auto|accumulate|replace` (default `auto`) plus read-only
   `active_update_mode=accumulate|replace`; explicit modes override liveness,
   while auto resolves to accumulate when live-driven and replace otherwise;
 - replace refreshes all tabs; accumulate retains comparison rows in Overview
-  and Parameters and one scrub-able run-history frame in each metric-family tab;
+  and Parameters and one scrub-able run-history frame in each metric-family and
+  Heatmap tab. Contingencies from different runs are never summed;
+- fill Heatmap only from each unit's stored Full-detail sparse contingency. Use
+  the stored exact-overlap column permutation when present and canonical raw
+  predicted-column order otherwise; never run an assignment in the bridge;
+- validate the stored CPU/int64 canonical COO contract before densifying; do
+  not coerce malformed identifiers, indices, or counts into display data;
+- row-normalize copied counts, label rows from canonical truth vectors plus
+  effective dimension names, and label columns with actual predicted IDs.
+  Preserve rectangular and ragged per-unit shapes. Global detail produces an
+  unavailable `requires ClusteringEvaluate(detail=full)` page, and a dense shape
+  whose combined unit pages exceed 1,000,000 cells produces explicit
+  display-limit pages;
 - expose a synchronized view-local Unit slider on unit-bearing tabs whenever
   more than one typed unit identity is present; selector choices come from the
   complete output `Buffer.units()` axis, so an optional tab with no rows for the
@@ -663,9 +704,9 @@ A4 also added `ClusteringMetricsTablePlot` with one `sink` input accepting
 `update_mode` is `UiControl`/`ElementUi`; `active_update_mode` is read-only
 `UiControl`/`None`. An Idle change resolves immediately and controls subsequent
 buffers without replaying cached input. `group` and `title` are
-`UiControl`/`ElementUi`. Unit selection, clear, and table sorting are view-local
-UI controls. None of these operations reruns clustering, evaluation, or
-alignment.
+`UiControl`/`ElementUi`. Unit selection, clear, table sorting, and heatmap
+history are view-local UI controls. None of these operations reruns clustering,
+evaluation, or alignment.
 
 ## 10. Compatibility and Migration
 
@@ -682,30 +723,33 @@ to work.
 `ClusteringEvaluate` is a separate element because its vector-truth input and
 structured output are materially different contracts. Existing metric kernels
 may be reused internally. `ClusteringStats` remains the legacy matrix adapter;
-removal is outside A4 and its deferred visualization/persistence follow-up.
+removal is outside A4, the bounded post-A4 extension, and the deferred
+visualization/persistence follow-up.
 
-## 11. Table Inspection and Deferred Visualization Contract
+## 11. Tabbed Inspection and Deferred Visualization Contract
 
-### A4 Table Bridge
+### A4 Table Bridge and Post-A4 Bounded Extension
 
 A4 added `leakflow_plugins_ml_plot`, depending on `leakflow_plugins_ml` and
 `leakflow_plot`. It contains only `ClusteringMetricsTablePlot`. Clustering
 semantics stay in the bridge and do not enter `leakflow_plot`.
 
 The bridge reuses the existing domain-free `TableView`; A4 extended that
-generic view with reusable explicitly ordered named tab groups plus stable
-column sorting, synchronized row facets, and clear/update behavior. It does not
-add another plot-view type. `TableView` stores only generic tab names/order,
-column schemas, cells, histories, and opaque selector metadata; it has no
-clustering-family or unit switch.
+generic view with reusable explicitly ordered named table groups, stable column
+sorting, synchronized row facets, and clear/update behavior. The user-requested
+bounded post-A4 extension added generic heatmap frames and synchronized matrix-
+page facets. It does not add another plot-view type. `TableView` stores only generic
+tab names/order, column schemas, cells, matrix pages/labels, histories, and
+opaque selector metadata; it has no clustering-family or unit switch.
 
 The bridge defines these tabs:
 
-- **Overview:** one row per run and typed unit. Columns include observation,
-  truth-group, and predicted-cluster counts; headline ARI, AMI, pair F1,
+- **Overview:** one row per run and typed unit. Columns begin with
+  `Observations (N)` and `Features (S)`, then truth-group and predicted-cluster
+  counts; headline ARI, AMI, pair F1,
   semantic impurity, fragmentation, and combined-quality metrics; and the core
   clustering-producer and explicit experiment parameters required to compare
-  configurations.
+  configurations. Missing producer feature width is shown as `N/A`.
 - **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment:**
   long-form metric tables with run, unit, scope, item, metric, value, support,
   averaging/defined state, and undefined reason as applicable. Across these
@@ -716,32 +760,44 @@ The bridge defines these tabs:
 - **Parameters:** effective evaluator options, bounded labels-side
   `payload.cluster.*` producer parameters, and explicit evaluation-buffer
   `payload.parameter.*` experiment metadata once per run. Source identity is
-  preserved so same-suffix payload and direct-metadata entries cannot collide.
+  preserved so same-suffix payload and direct-metadata entries cannot collide;
+  captured `labels.cluster.n_features` is retained.
+- **Heatmap:** one generic matrix page per typed unit and run. It displays the
+  stored Full-detail contingency, exact-overlap aligned when the stored
+  permutation exists and raw otherwise, with fixed row normalization. Truth
+  vector/dimension labels and actual predicted IDs remain visible; units may
+  have different rectangular shapes. Global detail and matrices beyond the
+  combined 1,000,000-cell per-run display bound remain inspectable as
+  unavailable pages.
 
 `replace` and `accumulate` have the deterministic all-tab semantics defined in
 Section 9; `auto` follows liveness and exposes its resolved choice through
-`active_update_mode`. All unit-bearing tabs share the selected typed unit while
-Parameters remains unfiltered. **Clear** drops the selected tab and **Clear all** drops the
-retained content from every tabbed table in that comparison group. Each tab
-keeps its own stable `asc`/`desc` sort state; sorting never separates cells that
-belong to one row.
+`active_update_mode`. All unit-bearing tabs, including Heatmap, share the
+selected typed unit while Parameters remains unfiltered. **Clear** drops the
+selected tab and **Clear all** drops the retained content from every tab in that
+comparison group. Each table tab keeps its own stable `asc`/`desc` sort state;
+sorting never separates cells that belong to one row. Heatmap accumulation
+appends independent run frames rather than combining counts.
 Missing optional detail yields an unavailable metric record or an empty family
 tab as appropriate and never triggers numeric recomputation.
 
 The bridge only copies and translates stored data. A fixture-payload test proves
 that it never calls `evaluate_clustering` or an assignment solver. Generic
-`TableView` tab grouping and `PlotRuntime` contain no clustering-field branches.
+`TableView` tab, matrix-page, selector, and history handling and `PlotRuntime`
+contain no clustering-field branches.
 
 ### Deferred Persistence and Views
 
-The following are explicitly deferred beyond A4:
+The following are explicitly deferred beyond A4 and its bounded post-A4
+extension:
 
 - a versioned `ClusteringEvaluationPayload` persistence codec;
 - a domain-free `MetricView` and `ClusteringMetricsPlot` for grouped scalar and
   per-dimension bars; and
-- `ClusteringMatrixPlot`, reusing `HeatmapView` for raw contingency,
-  exact-overlap aligned, or semantic-cost aligned stored results with
-  presentation-only `none|row|col` normalization.
+- a standalone `ClusteringMatrixPlot` with selectable raw contingency,
+  exact-overlap aligned, or semantic-cost aligned stored results and
+  presentation-only `none|row|col` normalization. These choices are not exposed
+  by the fixed post-A4 Heatmap tab.
 
 When added, those views must consume stored payload results and preserve
 unmatched/undefined state. Display selection and normalization must not rerun
@@ -802,14 +858,15 @@ compatibility header into an unrelated catch-all:
   `tests/plugins/ml/{clustering_evaluate_test.cpp,CMakeLists.txt}`;
 - `include/leakflow/plot/table_view.hpp`, `src/plot/table_view.cpp`, and
   `tests/plugins/plot/{table_view_test.cpp,CMakeLists.txt}` for generic sorting,
-  tab grouping, update, and clear behavior;
+  tab grouping, table/heatmap frames, update, and clear behavior;
 - `include/leakflow/plugins/ml_plot`, `src/plugins/ml_plot`, and
   `tests/plugins/ml_plot` trees for `ClusteringMetricsTablePlot` only;
 - root `CMakeLists.txt`, `tests/CMakeLists.txt`, `src/apps/CMakeLists.txt`,
   `src/apps/leakflow/leakflow_cli.cpp`, `src/apps/leakflow_ls/main.cpp`, and
   `tests/apps/{CMakeLists.txt,cli_syntax_test.cpp}` for target, descriptor,
   factory, runtime, CLI, and inspect-tool integration; and
-- `docs/guides/COOL_PIPELINES.md` for the runnable A4 graph.
+- `docs/guides/COOL_PIPELINES.md` for the runnable graph covering A4 and the
+  bounded post-A4 extension.
 
 Current `clustering_metrics.hpp/.cpp` APIs remain available. Shared kernels may
 move only if their public behavior and tests remain compatible.
@@ -886,18 +943,23 @@ The optional combined score is covered with A4's property/payload contract.
 - downstream invalidation after an evaluator property change;
 - unchanged legacy `ClusteringStats` behavior.
 
-### A4 Table-Bridge Tests
+### A4 and Post-A4 Table-Bridge Tests
 
-- deterministic translation from a fixture payload into the seven named generic
-  `TableView` tabs;
-- one Overview row per run and unit with headline metrics, counts, and core
-  producer/experiment parameters;
+- deterministic translation from a fixture payload into the seven A4 table tabs
+  plus the post-A4 Heatmap tab;
+- one Overview row per run and unit with `Observations (N)`, producer-supplied or
+  unavailable `Features (S)`, headline metrics, counts, and core producer/
+  experiment parameters;
 - exact, semantic, fragmentation, combined, alignment, per-dimension/detail,
   direction, support, and undefined-reason records, with every stored
   `MetricValue` placed exactly once across the family tabs;
 - effective options, captured `payload.cluster.*` values, and explicit
   `payload.parameter.*` input metadata once per run in Parameters, preserving
-  collision-proof source identity;
+  collision-proof source identity and the captured GMM feature width;
+- stored-contingency Heatmap exact-column reordering/raw fallback, row
+  normalization, truth-vector/predicted-ID labels, ragged typed-unit pages,
+  malformed sparse-payload rejection, Global-detail unavailability, and the
+  combined 1,000,000-cell per-run bound;
 - `auto|accumulate|replace`, stopped-state resolution, accumulation history,
   synchronized non-contiguous typed-unit selection, explicit clear,
   history/reset, and stable per-tab column `asc|desc` sorting for numeric,
@@ -907,18 +969,19 @@ The optional combined score is covered with A4's property/payload contract.
   call evaluation or assignment code.
 
 ImGui/ImPlot rendering remains manual-only. Manual validation covers one offline
-multi-unit table, the Unit slider, accumulate/clear/sort controls, and an
-Idle-state display-property change.
+multi-unit table/Heatmap, the shared Unit and run-history sliders,
+accumulate/clear/sort controls, and an Idle-state display-property change.
 
 ### Deferred Tests
 
-Codec round trips, `MetricView`/metric-chart data, and matrix/heatmap selection,
-normalization, and unmatched annotations belong to their deferred slices, not
-A4.
+Codec round trips, `MetricView`/metric-chart data, and standalone matrix
+raw/exact/semantic selection, selectable `none|row|col` normalization, and
+unmatched annotations belong to their deferred slices, not A4 or its bounded
+post-A4 extension.
 
 ## 15. Exit Criteria
 
-### Implemented A4 / Phase A
+### Implemented Phase A and Post-A4 Bounded Extension
 
 - The numeric evaluator returns every required exact and fragmentation result,
   plus every semantic and requested alignment result when enabled, for
@@ -934,7 +997,10 @@ A4.
   every stored metric exactly once in the family tabs, and Parameters once per
   run, including deterministic auto/accumulate/replace, synchronized typed-unit
   selection, clear, and per-tab column sorting behavior.
-- Table operations over cached data do not rerun evaluation or alignment.
+- The user-requested post-A4 extension promotes N/S in Overview and adds an
+  eighth same-window Heatmap tab with bounded row-normalized stored-contingency
+  frames and the same unit/run controls.
+- Table/Heatmap operations over copied data do not rerun evaluation or alignment.
 - Existing `ClusteringStats` pipelines and tests remain unchanged and green.
 - No plotting dependency enters ML or core targets; the bridge dependency is
   isolated in `leakflow_plugins_ml_plot`, and no clustering-specific branch
@@ -957,8 +1023,9 @@ A4.
 - Continuous-label or tolerance-based truth equality.
 - GPU-specific kernels.
 - Versioned `ClusteringEvaluationPayload` persistence.
-- Generic `MetricView`/`ClusteringMetricsPlot` and `ClusteringMatrixPlot`.
+- Generic `MetricView`/`ClusteringMetricsPlot` and standalone/selectable
+  `ClusteringMatrixPlot`.
 - Confidence intervals, bootstrap resampling, persistent temporal metric
-  histories, and statistical cross-run comparison beyond A4's in-memory append
-  table.
+  histories, and statistical cross-run comparison beyond the current in-memory
+  append table.
 - Using any evaluation metric as a training objective.

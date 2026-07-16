@@ -54,6 +54,17 @@ int main()
     const auto features = torch::cat(parts, 0); // [180, 4], well separated
 
     leakflow::plugins::ml::GaussianMixtureElement element;
+    const auto descriptor = element.descriptor();
+    bool declares_n_features = false;
+    for (const auto& metadata : descriptor.metadata_set_by_element) {
+        if (metadata.key == "payload.cluster.n_features") {
+            declares_n_features = true;
+            break;
+        }
+    }
+    if (!expect(declares_n_features, "descriptor does not declare n_features metadata")) {
+        return 1;
+    }
     element.set_property("n_components", std::int64_t{k});
     element.set_property("covariance_type", std::string("diagonal"));
     element.set_property("n_init", std::int64_t{3});
@@ -102,6 +113,9 @@ int main()
     if (!expect(output->metadata_or("payload.cluster.n_components", "") == "3", "n_components metadata wrong")) {
         return 1;
     }
+    if (!expect(output->metadata_or("payload.cluster.n_features", "") == "4", "n_features metadata wrong")) {
+        return 1;
+    }
     if (!expect(output->metadata_or("payload.cluster.converged", "") == "true", "converged metadata wrong")) {
         return 1;
     }
@@ -119,6 +133,22 @@ int main()
     if (!expect(progress.reports.back().fraction == 1.0 && progress.reports.back().message == "done"
             && progress.reports.back().status == leakflow::ProgressStatus::Completed,
             "last fit progress report was not completion")) {
+        return 1;
+    }
+
+    // Batched [U,N,S] input reports the same final-axis feature count without
+    // confusing the leading unit or observation axes for features.
+    leakflow::plugins::ml::GaussianMixtureElement batched_element;
+    batched_element.set_property("n_components", std::int64_t{1});
+    batched_element.set_property("covariance_type", std::string("diagonal"));
+    batched_element.set_property("max_iter", std::int64_t{0});
+    const auto batched_features = torch::arange(40, torch::kFloat64).reshape({2, 5, 4});
+    const auto batched_output = batched_element.process(torch_buffer(batched_features));
+    if (!expect(batched_output.has_value(), "batched element produced no output")) {
+        return 1;
+    }
+    if (!expect(batched_output->metadata_or("payload.cluster.n_features", "") == "4",
+            "batched n_features metadata used the wrong axis")) {
         return 1;
     }
 

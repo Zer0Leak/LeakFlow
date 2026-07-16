@@ -68,6 +68,32 @@ struct TableRowSelector {
   std::vector<TableRowSelectorValue> values;
 };
 
+// Optional matrix page rendered inside a tabbed table snapshot. The generic
+// view treats selector_value as an opaque typed page key; a domain bridge owns
+// the matrix meaning, labels, ordering, and any presentation-only
+// normalization applied before the page is copied here. Pages in one frame may
+// have different rectangular shapes.
+struct TableHeatmapPage {
+  TableCell::SortValue selector_value;
+  std::string caption;
+  std::string row_axis_label = "row";
+  std::string col_axis_label = "column";
+  std::vector<std::string> row_labels;
+  std::vector<std::string> col_labels;
+  std::int64_t rows = 0;
+  std::int64_t cols = 0;
+  std::vector<double> data;
+  double vmin = 0.0;
+  double vmax = 1.0;
+  // A non-empty reason represents a deliberately unavailable page. Such a
+  // page carries no matrix allocation but stays selectable and visible.
+  std::string unavailable_reason;
+};
+
+struct TableHeatmapFrame {
+  std::vector<TableHeatmapPage> pages;
+};
+
 enum class TableGroupLayout : std::uint8_t {
   // Preserve the existing behavior: every producer is drawn as a vertically
   // stacked table in its group window.
@@ -82,7 +108,18 @@ struct TableFrame {
   std::int64_t n = 0;  // observation count / trace number for this frame (>= 1)
   std::string caption; // e.g. "N = 5000"
   std::vector<std::vector<TableCell>> rows;
+  // Appended to preserve positional aggregate initialization of table frames.
+  // When present, the frame renders the selected matrix page instead of rows;
+  // rows still carry the selector facet values used by TableRowSelector.
+  std::optional<TableHeatmapFrame> heatmap;
 };
+
+// ImPlot's row-major PlotHeatmap places input row zero nearest the maximum Y
+// bound. Use this coordinate for row-label ticks so labels and matrix rows stay
+// paired without inverting the plot axis. Throws when row_index is outside the
+// declared row count.
+[[nodiscard]] double table_heatmap_row_axis_position(std::size_t row_index,
+                                                     std::size_t row_count);
 
 // Return a stable display order without mutating the stored rows. A missing
 // cell/value and floating NaN sort last for both directions.

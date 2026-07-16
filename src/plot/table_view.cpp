@@ -3,13 +3,16 @@
 #include "plot_render_util.hpp"
 
 #include <imgui.h>
+#include <implot.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <numeric>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,6 +20,15 @@
 #include <vector>
 
 namespace leakflow::plot {
+
+double table_heatmap_row_axis_position(std::size_t row_index,
+                                       std::size_t row_count) {
+  if (row_count == 0 || row_index >= row_count) {
+    throw std::out_of_range("TableView heatmap row index is out of range");
+  }
+  return static_cast<double>(row_count - row_index) - 0.5;
+}
+
 namespace {
 
 [[nodiscard]] bool sort_value_missing(const TableCell::SortValue &value) {
@@ -145,6 +157,73 @@ void validate_row_selector(const std::vector<std::string> &columns,
   }
 }
 
+void validate_heatmap_frame(const TableFrame &frame,
+                            const std::optional<TableRowSelector> &selector) {
+  if (!frame.heatmap) {
+    return;
+  }
+  const auto &pages = frame.heatmap->pages;
+  if (pages.empty()) {
+    throw std::invalid_argument(
+        "TableView heatmap frames require at least one page");
+  }
+  if (!selector && pages.size() != 1) {
+    throw std::invalid_argument(
+        "TableView heatmap frames without a selector require one page");
+  }
+  if (selector && pages.size() != selector->values.size()) {
+    throw std::invalid_argument(
+        "TableView heatmap pages must match the selector choices");
+  }
+
+  for (std::size_t index = 0; index < pages.size(); ++index) {
+    const auto &page = pages[index];
+    if (std::ranges::any_of(
+            pages | std::views::take(index), [&](const auto &previous) {
+              return previous.selector_value == page.selector_value;
+            })) {
+      throw std::invalid_argument(
+          "TableView heatmap pages require unique selector values");
+    }
+    if (selector &&
+        std::ranges::none_of(selector->values, [&](const auto &choice) {
+          return choice.value == page.selector_value;
+        })) {
+      throw std::invalid_argument(
+          "TableView heatmap page uses an undeclared selector value");
+    }
+
+    if (!page.unavailable_reason.empty()) {
+      if (page.rows != 0 || page.cols != 0 || !page.data.empty()) {
+        throw std::invalid_argument(
+            "TableView unavailable heatmap pages cannot carry matrix data");
+      }
+      continue;
+    }
+    if (page.rows <= 0 || page.cols <= 0) {
+      throw std::invalid_argument(
+          "TableView heatmap page dimensions must be positive");
+    }
+    const auto rows = static_cast<std::size_t>(page.rows);
+    const auto cols = static_cast<std::size_t>(page.cols);
+    if (rows > std::numeric_limits<std::size_t>::max() / cols ||
+        page.data.size() != rows * cols) {
+      throw std::invalid_argument(
+          "TableView heatmap page data does not match its shape");
+    }
+    if ((!page.row_labels.empty() && page.row_labels.size() != rows) ||
+        (!page.col_labels.empty() && page.col_labels.size() != cols)) {
+      throw std::invalid_argument(
+          "TableView heatmap labels do not match its shape");
+    }
+    if (!std::isfinite(page.vmin) || !std::isfinite(page.vmax) ||
+        page.vmax <= page.vmin) {
+      throw std::invalid_argument(
+          "TableView heatmap scale must be finite and increasing");
+    }
+  }
+}
+
 [[nodiscard]] std::size_t row_selector_column(const TableSnapshot &snapshot) {
   const auto found =
       std::ranges::find(snapshot.columns, snapshot.row_selector->column);
@@ -165,10 +244,14 @@ void merge_row_selector_values(TableRowSelector &target,
                                const TableRowSelector &source) {
   target.label = source.label;
   for (const auto &choice : source.values) {
-    if (std::ranges::none_of(target.values, [&](const auto &existing) {
-          return existing.value == choice.value;
-        })) {
+    const auto existing = std::ranges::find(target.values, choice.value,
+                                            &TableRowSelectorValue::value);
+    if (existing == target.values.end()) {
       target.values.push_back(choice);
+    } else {
+      // The typed identity and established slider order are stable across
+      // history, while the latest producer-supplied display label wins.
+      existing->label = choice.label;
     }
   }
 }
@@ -277,11 +360,158 @@ void draw_row_selector_slider(int &selected_index,
       text_position, ImGui::GetColorU32(ImGuiCol_Text), caption.c_str());
 }
 
+struct HeatmapAxisTicks {
+  std::vector<double> positions;
+  std::vector<const char *> labels;
+};
+
+[[nodiscard]] HeatmapAxisTicks
+heatmap_axis_ticks(const std::vector<std::string> &labels,
+                   bool first_label_at_axis_max) {
+  HeatmapAxisTicks result;
+  if (labels.empty()) {
+    return result;
+  }
+  const auto position = [&](std::size_t index) {
+    return first_label_at_axis_max
+               ? table_heatmap_row_axis_position(index, labels.size())
+               : static_cast<double>(index) + 0.5;
+  };
+  constexpr std::size_t max_visible_ticks = 18;
+  const auto step = std::max<std::size_t>(
+      1, (labels.size() + max_visible_ticks - 1) / max_visible_ticks);
+  for (std::size_t index = 0; index < labels.size(); index += step) {
+    result.positions.push_back(position(index));
+    result.labels.push_back(labels[index].c_str());
+  }
+  if ((labels.size() - 1) % step != 0) {
+    result.positions.push_back(position(labels.size() - 1));
+    result.labels.push_back(labels.back().c_str());
+  }
+  return result;
+}
+
+void draw_heatmap_frame(
+    const TableHeatmapFrame &heatmap,
+    const std::optional<TableCell::SortValue> &selected_value, float width,
+    float height) {
+  auto selected = selected_value ? heatmap.pages.end() : heatmap.pages.begin();
+  if (selected_value) {
+    selected = std::ranges::find(heatmap.pages, *selected_value,
+                                 &TableHeatmapPage::selector_value);
+  }
+  if (selected == heatmap.pages.end()) {
+    if (ImGui::BeginChild("##heatmap_missing_page", ImVec2(width, height),
+                          true)) {
+      ImGui::TextWrapped(
+          "Unavailable: the selected value has no matrix in this history "
+          "frame");
+    }
+    ImGui::EndChild();
+    return;
+  }
+
+  ImGui::BeginGroup();
+  const auto content_top = ImGui::GetCursorPosY();
+  if (!selected->caption.empty()) {
+    ImGui::TextUnformatted(selected->caption.c_str());
+  }
+  if (!selected->unavailable_reason.empty()) {
+    const auto unavailable_height =
+        std::max(120.0F, height - (ImGui::GetCursorPosY() - content_top));
+    if (ImGui::BeginChild("##heatmap_unavailable",
+                          ImVec2(width, unavailable_height), true)) {
+      ImGui::TextWrapped("Unavailable: %s",
+                         selected->unavailable_reason.c_str());
+    }
+    ImGui::EndChild();
+    ImGui::EndGroup();
+    return;
+  }
+
+  // PlotHeatmap already maps row zero to the maximum Y bound. Keep the normal
+  // Y axis and place row-label ticks in the same descending coordinate order;
+  // adding ImPlotAxisFlags_Invert here would flip cells away from their labels.
+  const auto row_ticks = heatmap_axis_ticks(selected->row_labels,
+                                            /*first_label_at_axis_max=*/true);
+  const auto col_ticks = heatmap_axis_ticks(selected->col_labels,
+                                            /*first_label_at_axis_max=*/false);
+  constexpr auto scale_width = 56.0F;
+  const auto plot_width =
+      std::max(120.0F, width - scale_width - ImGui::GetStyle().ItemSpacing.x);
+  const auto plot_height =
+      std::max(120.0F, height - (ImGui::GetCursorPosY() - content_top));
+  ImPlot::PushColormap(ImPlotColormap_Viridis);
+  if (ImPlot::BeginPlot("##heatmap", ImVec2(plot_width, plot_height),
+                        ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+    const auto axis_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
+    ImPlot::SetupAxes(selected->col_axis_label.c_str(),
+                      selected->row_axis_label.c_str(), axis_flags, axis_flags);
+    ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, static_cast<double>(selected->cols),
+                            ImGuiCond_Always);
+    ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(selected->rows),
+                            ImGuiCond_Always);
+    if (!col_ticks.positions.empty()) {
+      ImPlot::SetupAxisTicks(ImAxis_X1, col_ticks.positions.data(),
+                             static_cast<int>(col_ticks.positions.size()),
+                             col_ticks.labels.data());
+    }
+    if (!row_ticks.positions.empty()) {
+      ImPlot::SetupAxisTicks(ImAxis_Y1, row_ticks.positions.data(),
+                             static_cast<int>(row_ticks.positions.size()),
+                             row_ticks.labels.data());
+    }
+    ImPlot::PlotHeatmap("##cells", selected->data.data(),
+                        static_cast<int>(selected->rows),
+                        static_cast<int>(selected->cols), selected->vmin,
+                        selected->vmax, nullptr, ImPlotPoint(0.0, 0.0),
+                        ImPlotPoint(static_cast<double>(selected->cols),
+                                    static_cast<double>(selected->rows)));
+    ImPlot::EndPlot();
+  }
+  ImGui::SameLine();
+  ImPlot::ColormapScale("##scale", selected->vmin, selected->vmax,
+                        ImVec2(scale_width, plot_height));
+  ImPlot::PopColormap();
+  ImGui::EndGroup();
+}
+
+void draw_history_slider(TableSnapshot &snapshot, const TableFrame &frame,
+                         int frame_index, float height, float width) {
+  const auto frame_count = static_cast<int>(snapshot.frames.size());
+  const auto position = frame_index + 1;
+  auto slider_value = frame_count - position + 1;
+  ImGui::BeginDisabled(frame_count < 2);
+  if (ImGui::VSliderInt("##history", ImVec2(width, height), &slider_value, 1,
+                        std::max(frame_count, 1), "")) {
+    const auto new_position = frame_count - slider_value + 1;
+    snapshot.cursor = new_position >= frame_count ? -1 : new_position - 1;
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("history %lld (%d / %d)\n%lld - %lld",
+                      static_cast<long long>(frame.n), position, frame_count,
+                      static_cast<long long>(snapshot.frames.front().n),
+                      static_cast<long long>(snapshot.frames.back().n));
+  }
+}
+
 [[nodiscard]] bool draw_table_snapshot(
     TableSnapshot &snapshot, const RowSelectorValues &shared_selector_values,
     std::map<std::string, TableCell::SortValue> &selected_row_values,
     float height_budget, bool show_snapshot_title = true) {
-  if (snapshot.frames.empty() || snapshot.columns.empty()) {
+  if (snapshot.frames.empty()) {
+    return false;
+  }
+  // A selector-less heatmap intentionally needs no synthetic table column.
+  // Resolve the active frame before rejecting an empty tabular schema so that
+  // its sole page reaches the heatmap renderer.
+  const auto frame_count = static_cast<int>(snapshot.frames.size());
+  const auto frame_index =
+      (snapshot.cursor < 0 || snapshot.cursor >= frame_count) ? frame_count - 1
+                                                              : snapshot.cursor;
+  const auto &frame = snapshot.frames[static_cast<std::size_t>(frame_index)];
+  if (snapshot.columns.empty() && !frame.heatmap) {
     return false;
   }
   const auto content_top = ImGui::GetCursorPosY();
@@ -296,12 +526,6 @@ void draw_row_selector_slider(int &selected_index,
 
   // History cursor: -1 follows the latest frame; otherwise the pinned frame
   // index.
-  const auto frame_count = static_cast<int>(snapshot.frames.size());
-  const auto frame_index =
-      (snapshot.cursor < 0 || snapshot.cursor >= frame_count) ? frame_count - 1
-                                                              : snapshot.cursor;
-  const auto &frame = snapshot.frames[static_cast<std::size_t>(frame_index)];
-
   std::optional<std::size_t> selector_column;
   std::optional<TableCell::SortValue> selected_row_value;
   if (snapshot.row_selector) {
@@ -337,8 +561,24 @@ void draw_row_selector_slider(int &selected_index,
     }
   }
 
-  const auto column_count = static_cast<int>(snapshot.columns.size());
+  constexpr auto slider_width = 20.0F;
   const auto &style = ImGui::GetStyle();
+  if (frame.heatmap) {
+    const auto content_width =
+        std::max(120.0F, ImGui::GetContentRegionAvail().x - slider_width -
+                             style.ItemSpacing.x);
+    const auto content_height = std::max(
+        120.0F, height_budget - (ImGui::GetCursorPosY() - content_top));
+    draw_heatmap_frame(*frame.heatmap, selected_row_value, content_width,
+                       content_height);
+    ImGui::SameLine();
+    draw_history_slider(snapshot, frame, frame_index, content_height,
+                        slider_width);
+    ImGui::PopID();
+    return false;
+  }
+
+  const auto column_count = static_cast<int>(snapshot.columns.size());
 
   // Auto-size each column to the widest of its header + cells (so nothing clips
   // and no manual resize is needed), then size the table to that content -- a
@@ -369,7 +609,6 @@ void draw_row_selector_slider(int &selected_index,
     content_width += width;
   }
 
-  constexpr auto slider_width = 20.0F;
   const auto text_color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
   const auto table_width =
       std::max(120.0F, ImGui::GetContentRegionAvail().x - slider_width -
@@ -499,25 +738,11 @@ void draw_row_selector_slider(int &selected_index,
     ImGui::EndTable();
   }
 
-  // Always-visible vertical history scrubber, right of the table. It grows
+  // Always-visible vertical history scrubber, right of the content. It grows
   // down: frame 1 (oldest) at the top, the latest at the bottom; parking at the
   // bottom keeps following. Positions are 1-based.
   ImGui::SameLine();
-  const auto position = frame_index + 1;
-  auto slider_value = frame_count - position + 1; // invert so 1 is at the top
-  ImGui::BeginDisabled(frame_count < 2);
-  if (ImGui::VSliderInt("##history", ImVec2(slider_width, table_height),
-                        &slider_value, 1, std::max(frame_count, 1), "")) {
-    const auto new_position = frame_count - slider_value + 1;
-    snapshot.cursor = new_position >= frame_count ? -1 : new_position - 1;
-  }
-  ImGui::EndDisabled();
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("history %lld (%d / %d)\n%lld - %lld",
-                      static_cast<long long>(frame.n), position, frame_count,
-                      static_cast<long long>(snapshot.frames.front().n),
-                      static_cast<long long>(snapshot.frames.back().n));
-  }
+  draw_history_slider(snapshot, frame, frame_index, table_height, slider_width);
 
   ImGui::PopID();
   return false;
@@ -697,8 +922,13 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
   auto group = update.group.empty() ? std::string("default") : update.group;
 
   validate_row_selector(update.columns, update.frame, update.row_selector);
+  validate_heatmap_frame(update.frame, update.row_selector);
 
   if (update.update_mode == TableUpdateMode::AppendRows) {
+    if (update.frame.heatmap) {
+      throw std::invalid_argument(
+          "TableView AppendRows does not accept heatmap frames");
+    }
     static_cast<void>(column_indexes(update.columns, "AppendRows"));
   }
 
@@ -719,10 +949,15 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
   const auto previous_selector = snapshot->row_selector;
   const auto selector_schema_changed =
       !same_row_selector_identity(previous_selector, update.row_selector);
+  const auto content_schema_changed =
+      !snapshot->frames.empty() &&
+      snapshot->frames.back().heatmap.has_value() !=
+          update.frame.heatmap.has_value();
   if (update.update_mode == TableUpdateMode::AppendRows &&
-      !snapshot->frames.empty() && selector_schema_changed) {
+      !snapshot->frames.empty() &&
+      (selector_schema_changed || snapshot->frames.back().heatmap)) {
     throw std::invalid_argument(
-        "TableView AppendRows cannot change the row selector schema");
+        "TableView AppendRows cannot change selector/content schema");
   }
   auto next_selector = update.row_selector;
   if (!selector_schema_changed && previous_selector && next_selector &&
@@ -740,7 +975,8 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
   snapshot->title = update.title;
   switch (update.update_mode) {
   case TableUpdateMode::AppendFrame:
-    if ((snapshot->columns != update.columns || selector_schema_changed) &&
+    if ((snapshot->columns != update.columns || selector_schema_changed ||
+         content_schema_changed) &&
         !snapshot->frames.empty()) {
       // Headers and selector schema are snapshot-wide; do not reinterpret
       // retained history using unrelated presentation metadata.
@@ -751,7 +987,8 @@ void TableView::push(std::string element_name, const TableUpdate &update) {
     snapshot->frames.push_back(update.frame);
     break;
   case TableUpdateMode::ReplaceFrame:
-    if ((snapshot->columns != update.columns || selector_schema_changed) &&
+    if ((snapshot->columns != update.columns || selector_schema_changed ||
+         content_schema_changed) &&
         snapshot->frames.size() > 1) {
       // Column headers and selector schema are snapshot-wide. Starting a new
       // schema cannot leave older history interpreted under unrelated metadata.
