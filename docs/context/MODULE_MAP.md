@@ -24,12 +24,15 @@ leakflow_core
   -> leakflow_extras (HDF5 + NumPy)
   -> leakflow_plugins_extras
 
+leakflow_ml (Torch-only numeric layer; no core dependency)
+  -> leakflow_plugins_ml
+
 leakflow_log + leakflow_core + leakflow_base
   -> leakflow_plot
   -> leakflow_plugins_plot
 
 leakflow_plugins_core + leakflow_plugins_base + leakflow_plugins_extras
-  + leakflow_plugins_crypto
+  + leakflow_plugins_crypto + leakflow_plugins_ml
   -> leakflow_cli
   -> leakflow
 
@@ -39,6 +42,12 @@ leakflow_plugins_plot
 
 leakflow_plugins_crypto + leakflow_plot
   -> leakflow_plugins_crypto_plot   (ScorePlot: AttackStatsPayload -> ScoreView)
+  -> leakflow_cli
+  -> leakflow
+
+PLANNED after the clustering-evaluation payload contract is implemented:
+leakflow_plugins_ml + leakflow_plot
+  -> leakflow_plugins_ml_plot       (evaluation payload -> domain-free views)
   -> leakflow_cli
   -> leakflow
 
@@ -72,14 +81,17 @@ Buffer Persistence contract in `ARCHITECTURE_CONTRACTS.md`.
 | Render | `leakflow_render` | `include/leakflow/render` | `src/render` | `tests/render` | `docs/context/modules/core.md` |
 | Base | `leakflow_base` | `include/leakflow/base` | `src/base` | `tests/base` | `docs/context/modules/base.md` |
 | Crypto | `leakflow_crypto` | `include/leakflow/crypto` | `src/crypto` | `tests/crypto` | `docs/context/modules/crypto.md` |
+| ML | `leakflow_ml` | `include/leakflow/ml` | `src/ml` | `tests/ml` | `docs/context/modules/ml.md` |
 | Extras | `leakflow_extras` | `include/leakflow/extras` | `src/extras` | `tests/extras` | `docs/context/modules/extras.md` |
 | Core plugins | `leakflow_plugins_core` | `include/leakflow/plugins/core` | `src/plugins/core` | `tests/plugins/core` | `docs/context/modules/plugins-core.md` |
 | Base plugins | `leakflow_plugins_base` | `include/leakflow/plugins/base` | `src/plugins/base` | `tests/plugins/base` | `docs/context/modules/plugins-base.md` |
 | Extras plugins | `leakflow_plugins_extras` | `include/leakflow/plugins/extras` | `src/plugins/extras` | `tests/plugins/extras` | `docs/context/modules/plugins-extras.md` |
 | Crypto plugins | `leakflow_plugins_crypto` | `include/leakflow/plugins/crypto` | `src/plugins/crypto` | `tests/plugins/crypto` | `docs/context/modules/plugins-crypto.md` |
+| ML plugins | `leakflow_plugins_ml` | `include/leakflow/plugins/ml` | `src/plugins/ml` | `tests/plugins/ml` | `docs/context/modules/ml.md` |
 | Plot / graph UI | `leakflow_plot` | `include/leakflow/plot` | `src/plot` | focused non-visual tests only | `docs/context/modules/plot.md` |
 | Plot plugins | `leakflow_plugins_plot` | `include/leakflow/plugins/plot` | `src/plugins/plot` | `tests/plugins/plot` plus manual GUI checks | `docs/context/modules/plot.md` |
 | Crypto plot plugins | `leakflow_plugins_crypto_plot` | `include/leakflow/plugins/crypto_plot` | `src/plugins/crypto_plot` | `tests/plugins/crypto_plot` plus manual GUI checks | `docs/context/modules/plot.md` |
+| ML plot plugins (planned) | `leakflow_plugins_ml_plot` | `include/leakflow/plugins/ml_plot` | `src/plugins/ml_plot` | `tests/plugins/ml_plot` plus manual GUI checks | `docs/context/modules/ml.md` + `docs/context/modules/plot.md` |
 | Apps / CLI | `leakflow`, `leakflow-ls`, `leakflow_cli` | `src/apps/leakflow/leakflow_cli.hpp` | `src/apps/{common,leakflow,leakflow_ls,cuda_smoke}` | `tests/apps` | relevant plugin/module context |
 | Torch debug | `leakflow_torch_debug` | `include/leakflow/debug` | `src/debug` | none (dev-only) | this row + `.vscode/launch.json`, `torch_lldb.py` |
 | GUI | none yet | none yet | none yet | none yet | `docs/context/modules/gui.md` |
@@ -118,6 +130,7 @@ Keep target configuration target-based.
 - `tests/render`: terminal/summary rendering.
 - `tests/base`: Torch tensor payloads.
 - `tests/crypto`: Hamming weight/distance and AES leakage helpers.
+- `tests/ml`: Gaussian mixture, Sinkhorn, and clustering metric numerics.
 - `tests/extras`: HDF5 tensor-dataset reading and NumPy payload/loading.
 - `tests/apps`: CLI parser, expression-builder helper, CLI runner, and inspect
   tool behavior.
@@ -126,6 +139,8 @@ Keep target configuration target-based.
 - `tests/plugins/extras`: HDF5 and NumPy extras plugin elements.
 - `tests/plugins/crypto`: AES leakage, Pearson PoI, annotation conversion, and the
   Phase 26 AES PoI numeric correctness test.
+- `tests/plugins/ml`: feature selection, Gaussian mixture wrapping, unit
+  propagation/alignment, and current clustering stats.
 - Plot GUI/window behavior is manual-only; `tests/plugins/plot` covers
   non-visual snapshot, graph-runtime, and descriptor behavior.
 - `tests/fixtures/aes`: deterministic AES `.h5` dataset fixture plus focused

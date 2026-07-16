@@ -37,6 +37,10 @@ Tests:
 - `leakflow_plugins_crypto_plot`: crypto→plot bridge; `ScorePlot` fills a
   `ScoreView` and `ScoreTablePlot` fills a `TableView`, both from
   `AttackStatsPayload`. Depends on `leakflow_plugins_crypto` + `leakflow_plot`.
+- `leakflow_plugins_ml_plot` (**planned, not implemented**): ML→plot bridge for
+  `ClusteringEvaluationPayload`. It will depend on `leakflow_plugins_ml` +
+  `leakflow_plot`; clustering result translation does not belong in a generic
+  view or in `leakflow_plugins_plot`.
 
 ## Dependency Boundary
 
@@ -55,6 +59,11 @@ Tests:
 - `leakflow_core`,
 - `leakflow_base`,
 - `leakflow_plot`.
+
+Domain-aware plot elements depend on their domain payload through a bridge
+target. The planned `leakflow_plugins_ml_plot` follows the existing
+`leakflow_plugins_crypto_plot` pattern and must not make `leakflow_plot` depend
+on `leakflow_ml` or `leakflow_plugins_ml`.
 
 Plotting must not pull AES, Kyber, YAML, dynamic plugin loading, or GUI
 framework abstractions into core.
@@ -162,6 +171,36 @@ and hands the `ScoreView` to every `ScorePlot` and the `TableView` to every
 `ScoreTablePlot` — so all score elements/units stack together in one `group`
 window (`ScorePlot` always stacks; it never overlays). Design:
 `docs/design/plotting.md` (Plot View Architecture) and `docs/design/cpa_attack.md`.
+
+## Planned Clustering Metric Views (Not Implemented)
+
+Authoritative design: `docs/design/clustering_evaluation_metrics.md` (Phase B).
+This phase starts only after the full clustering-evaluation result/payload phase
+is implemented and its schema is stable.
+
+Planned bridge elements:
+
+- `ClusteringMetricsTablePlot` fills the existing domain-free `TableView` with
+  exact, semantic, fragmentation, per-dimension, and support sections. Undefined
+  values display `N/A` with their reason/support.
+- `ClusteringMetricsPlot` shows already-computed headline and per-dimension
+  values, separating higher-is-better from lower-is-better metrics. Its new
+  domain-free `MetricView` stores generic labels/values/bounds/direction, never
+  clustering fields.
+- `ClusteringMatrixPlot` fills the existing `HeatmapView` from a raw contingency,
+  exact-overlap alignment, or semantic-cost alignment already stored in the
+  payload. `none|row|col` normalization is presentation-only, and unmatched
+  rows/columns remain visible.
+
+The bridge never calls the evaluator or Hungarian solver. Missing optional
+detail yields a clear unavailable display; it does not trigger recomputation.
+Style properties are `ui-control`. Unit/detail/matrix selection is
+`sink-display`, using the cached payload, so changes while Idle update only the
+view.
+
+Validation is headless for copied view data, selection, normalization, undefined
+states, history, reset, and property effects. ImGui/ImPlot rendering remains a
+manual smoke check.
 
 ## Pipeline Graph Runtime
 

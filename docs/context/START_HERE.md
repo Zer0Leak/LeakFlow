@@ -40,6 +40,12 @@ Instead:
 - For extras HDF5/NumPy/conversion work, read `docs/context/modules/extras.md`, then
   inspect only `include/leakflow/extras`, `src/extras`, `tests/extras`, and the
   relevant extras plugin files if pipeline exposure is requested.
+- For ML/clustering/GMM/evaluation work, read `docs/context/modules/ml.md`, then
+  inspect only `include/leakflow/ml`, `src/ml`, `tests/ml`, and the matching
+  `include/leakflow/plugins/ml`, `src/plugins/ml`, and `tests/plugins/ml` files
+  when pipeline exposure is affected. For clustering metric plots, also read the
+  plot module context and inspect only the planned ML→plot bridge plus the exact
+  generic views it uses.
 - For core plugin work, read `docs/context/modules/plugins-core.md`, then inspect
   only `include/leakflow/plugins/core`, `src/plugins/core`,
   `tests/plugins/core`, and CLI files if command syntax is affected.
@@ -52,8 +58,8 @@ Instead:
   `tests/plugins/extras`, and CLI files if command syntax is affected.
 - For plot work, read `docs/context/modules/plot.md`, then inspect only
   `include/leakflow/plot`, `include/leakflow/plugins/plot`, `src/plot`,
-  `src/plugins/plot`, and CLI/base plugin files if plot runtime integration or
-  `TorchConvert` syntax is affected.
+  `src/plugins/plot`, the relevant domain→plot bridge, and CLI/base plugin files
+  if plot runtime integration or `TorchConvert` syntax is affected.
 - For GUI planning, read `docs/context/modules/gui.md` first. GUI work is not
   currently implemented and must not pull GUI dependencies into core.
 
@@ -72,6 +78,9 @@ not default startup context:
 - `docs/reference/CLI_SYNTAX.md`
 - `docs/design/profiling.md` — execution timing telemetry / profiling design
   (per-element + op-scope timing, `--print-profile`, `--profile-file` trace).
+- `docs/design/clustering_evaluation_metrics.md` — design of record for full
+  clustering evaluation and its separate metric-visualization follow-up; read
+  only for clustering metric/result/plot work.
 
 Read the relevant sections of those files only when a task needs detailed
 design history or CLI syntax details.

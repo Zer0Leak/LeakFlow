@@ -49,13 +49,19 @@ support:
 - `leakflow_crypto` exists and provides Hamming weight/distance helpers plus
   AES first-round S-box leakage helpers, including `y(0)`..`y(7)` S-box output
   bit channels.
+- `leakflow_ml` exists and provides generic Torch numeric APIs for Gaussian
+  mixtures, constrained Sinkhorn transport, and the current scalar-class
+  clustering metrics.
+- `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
+  and `ClusteringStats`, including typed-unit propagation/alignment.
 - `leakflow_plugins_crypto` exists and provides AES S-box leakage, AES
   guess-domain leakage hypotheses, generic Pearson CPA ranking, generic DPA
   difference-of-means ranking with an optional best-difference trace output,
   generic known-key attack stats, attack stats plot-annotation conversion,
   Pearson PoI finding, and
   correlation-PoI-to-plot-annotation conversion elements.
-- `leakflow_plugins_plot` exists and provides sink-only `TracePlot`.
+- `leakflow_plugins_plot` exists and provides sink-only `TracePlot` and
+  `HeatmapPlot`.
 - `TracePlot` accepts optional generic plot annotations and renders selected
   sample markers.
 - `PipelineObserver` and copied graph snapshots exist in `leakflow_core` for
@@ -198,9 +204,10 @@ Delivered: `FakeLiveSrc` (reads a Torch `.pt`, emits one `Buffer` per axis-0 row
 real `Queue`/`BufferQueue`, the `Sync` element and its policies, cooperative stop,
 and the `--graph` player controls (Start/Stop/Pause/Resume, Auto-apply). See
 `docs/design/dataflow_sync_model.md` §12 (implementation map + tests), §13 (player
-state machine), and §14 (CLI cookbook). The discussed next task is a Zarr
-backend/converter and fair HDF5/Zarr comparison over the shared schema; it still
-requires an explicit request before implementation.
+state machine), and §14 (CLI cookbook). The next planned ML sequence is full
+clustering evaluation followed by clustering-metric visualization; it is design
+only and still requires an explicit implementation request. Zarr parity remains
+a separate deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -212,6 +219,8 @@ remain deferred as low-priority future infrastructure.
 - `leakflow_render`: terminal styling and summary rendering.
 - `leakflow_base`: LibTorch-backed tensor payload layer.
 - `leakflow_crypto`: LibTorch-backed crypto/SCA leakage helper layer.
+- `leakflow_ml`: generic Torch clustering, mixture, transport, and evaluation
+  numeric layer; no core dependency.
 - `leakflow_extras`: format-neutral tensor-dataset reader with an HDF5 backend,
   plus NumPy payload/loading and NumPy-to-Torch conversion.
 - `leakflow_plot`: ImGui/ImPlot plotting runtime and sessions.
@@ -223,7 +232,10 @@ remain deferred as low-priority future infrastructure.
   `AesLeakageHypothesis`, `CpaAttack`, `DpaAttack`, `AttackStats`,
   `AttackStatsToPlotAnnotations`, `PearsonCorrelator`, `PoiSelect`, and
   `CorrelationPoiToPlotAnnotations`.
-- `leakflow_plugins_plot`: linked shared plugin with `TracePlot`.
+- `leakflow_plugins_ml`: linked shared plugin with `FeatureSelect`,
+  `GaussianMixture`, and `ClusteringStats`.
+- `leakflow_plugins_plot`: linked shared plugin with `TracePlot` and
+  `HeatmapPlot`.
 - `leakflow_cli`: static CLI helper library.
 - `leakflow`: main CLI executable.
 - `leakflow-ls`: linked descriptor inspection executable.
@@ -323,6 +335,24 @@ Crypto:
 - AES first-round S-box leakage helpers that return `m`, `y`, `HW(m)`, and
   `HW(y)` for scalar bytes or Torch tensors.
 
+ML:
+
+- `GaussianMixture`: batched full/diagonal-covariance EM with multiple
+  initializations and optional size-constrained Sinkhorn assignment.
+- `sinkhorn(...)`: generic log-domain entropic optimal transport.
+- Current `clustering_metrics` APIs: confusion matrix, purity, ARI, arithmetic
+  NMI, square Hungarian matching/reordering, and matched accuracy/per-class
+  precision/recall/F1.
+
+ML plugin elements:
+
+- `FeatureSelect`
+- `GaussianMixture`
+- `ClusteringStats`: accepts scalar truth IDs, aligns units, and emits a dense
+  reordered confusion tensor with ARI/NMI/purity/matched-score metadata. This is
+  the current/legacy matrix evaluator; it does not yet accept semantic vectors
+  or emit a structured evaluation result.
+
 Core plugin elements:
 
 - `FileSrc`
@@ -388,6 +418,13 @@ Logging:
 
 ## Not Implemented Yet
 
+- Full vector-semantic clustering evaluation: `[N,D]`/`[U,N,D]` truth, AMI,
+  homogeneity/completeness/V-measure, pair metrics, semantic merge
+  rate/severity/impurity, fragmentation, rectangular alignments, explicit
+  undefined/support semantics, and `ClusteringEvaluationPayload`.
+- Clustering evaluation table/metric/matrix plot bridge
+  (`leakflow_plugins_ml_plot`). Design for both planned phases:
+  `docs/design/clustering_evaluation_metrics.md`.
 - Zarr tensor-dataset reader/source/converter and the HDF5/Zarr benchmark.
 - Pipeline `Convert` element.
 - Conversion registry.

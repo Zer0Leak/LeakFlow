@@ -533,12 +533,55 @@ CPA/DPA/correlation/leakage crypto elements) have no interruptible inner loop;
 they rely on the executor's between-buffer safe points for pause/stop and do not
 need in-call checkpoints.
 
+## Clustering Evaluation Result Boundary (Planned)
+
+Design of record: `docs/design/clustering_evaluation_metrics.md`. This contract
+is planned, not yet implemented.
+
+The full evaluator is split across existing architectural layers:
+
+- `leakflow_ml` owns only the generic numeric options, algorithms, and
+  `ClusteringEvaluationResult`. It remains Torch/numeric-only and has no core,
+  buffer, plugin, plot, AES, or Kyber dependency.
+- `leakflow_plugins_ml` owns `ClusteringEvaluate` and the core-derived
+  `ClusteringEvaluationPayload`. The payload wraps the numeric result, carries
+  typed units, has versioned persistence, and exposes a bounded summary.
+- A follow-up `leakflow_plugins_ml_plot` bridge consumes that payload and fills
+  domain-free views in `leakflow_plot`. Neither generic views nor `PlotRuntime`
+  know clustering field names.
+
+Predicted labels and vector semantic truth are separate inputs. Truth is used
+only after clustering; exact truth groups are derived from full-vector equality,
+never from an AES-specific class decoder. Each unit is evaluated independently
+because predicted cluster IDs have no meaning across units.
+
+Evaluation values, per-dimension records, contingency entries, and alignment
+mappings are structured payload data. Large tables/matrices must not be flattened
+into metadata. Small headline metrics may be copied into summaries/metadata only
+when bounded and explicitly derived from the payload.
+
+Every metric carries defined/unavailable state, reason, denominator support,
+direction, family, and averaging. Exact partition metrics and semantic-cost
+metrics remain separate. Exact-overlap and semantic-cost alignment are separate
+result variants with explicit unmatched support.
+
+`ClusteringStats` remains the compatibility matrix adapter. Its scalar-truth
+input, tensor output, caps, and `ClusteringStats ! HeatmapPlot` behavior must not
+silently change when `ClusteringEvaluate` is added.
+
+Evaluator properties that affect numeric results are `payload-output` with
+downstream invalidation. Plot style is `ui-control`; selecting a different result
+already stored in a payload is `sink-display`. A plot edit must never trigger GMM
+fitting or metric/alignment recomputation.
+
 ## Future Plugin Boundaries
 
 Future algorithm or UI features must stay outside core:
 
 - Crypto/AES helpers: `leakflow_crypto`.
 - Crypto/AES elements: `leakflow_plugins_crypto`.
+- Generic ML/statistics numerics: `leakflow_ml` (no core dependency).
+- ML pipeline elements/payloads: `leakflow_plugins_ml`.
 - Generic SCA elements: `leakflow_plugins_sca`.
 - Kyber elements: `leakflow_plugins_kyber`.
 - Plotting runtime + views: `leakflow_plot` (domain-free).
@@ -546,6 +589,8 @@ Future algorithm or UI features must stay outside core:
 - Crypto→plot bridge elements: `leakflow_plugins_crypto_plot` (`ScorePlot`,
   which reads `AttackStatsPayload` and fills a `ScoreView`). A plot element that
   needs domain payloads goes in a bridge plugin, never in `leakflow_plot`.
+- ML→plot bridge elements: planned `leakflow_plugins_ml_plot`, which reads
+  `ClusteringEvaluationPayload` and fills domain-free table/metric/heatmap views.
 - GUI: a separate app or plugin layer.
 
 Do not pull future plugin dependencies into core.

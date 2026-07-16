@@ -1998,6 +1998,122 @@ Exit criteria:
   metadata presence).
 - No dependency on the local `traces/` tree.
 
+## Planned Phase: Full Clustering Evaluation Metrics
+
+Status: **planned, not implemented**. This is the recommended next ML phase and
+must be activated explicitly before source changes begin.
+
+Authoritative design:
+`docs/design/clustering_evaluation_metrics.md` (Phase A).
+
+Goal: replace the current scalar-class-only evaluation ceiling with a generic,
+structured evaluator for predicted cluster IDs and vector-valued semantic truth,
+without changing clustering itself or breaking existing `ClusteringStats`
+pipelines.
+
+Locked decisions:
+
+- Numeric evaluation is GMM-independent and lives in `leakflow_ml`.
+- Inputs are labels `[N]`/`[U,N]` and semantic truth
+  `[N,D]`/`[U,N,D]`; exact groups come from full-vector equality.
+- The required exact set is ARI, AMI, homogeneity, completeness, V-measure,
+  purity, pair precision/recall/F1, plus compatibility NMI.
+- Semantic results keep merge frequency, merge severity, impurity, and
+  fragmentation separate; both micro and macro supports are explicit.
+- The semantic quantity is a normalized power **cost**, not a mathematical
+  distance. Exact-only mode needs no semantic ranges; semantic mode supports
+  `power=1|2` (default 2), explicit ranges, and strict range validation so
+  normalized results stay in `[0,1]`.
+- Undefined denominators produce an unavailable metric with reason and support,
+  never a misleading zero.
+- Exact-overlap and semantic-cost Hungarian mappings are distinct, rectangular,
+  and expose unmatched support.
+- `ClusteringEvaluationResult` is a core-free numeric result in `leakflow_ml`;
+  `ClusteringEvaluationPayload` and the new `ClusteringEvaluate` element live in
+  `leakflow_plugins_ml`.
+- Structured/per-group data stays in the payload, not string metadata.
+- Current `ClusteringStats` input/output/caps remain unchanged as the legacy
+  confusion-matrix adapter.
+
+Expected work:
+
+- Add the evaluator options/result model and aggregated metric kernels.
+- Add stable AMI and rectangular alignment support with reference fixtures.
+- Add `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
+  alignment, and a versioned persistence codec.
+- Cross-validate conventional metrics against checked-in scikit-learn fixtures;
+  validate semantic metrics and alignments with hand-computed cases.
+- Cover degenerate partitions, arbitrary IDs, `D=1/2/4`, batches, unit alignment,
+  invalid configuration, undefined metrics, overflow, and a non-quadratic stress
+  case.
+
+Out of scope:
+
+- Plot views/elements (the follow-up phase below).
+- GMM fitting changes or using truth during clustering.
+- Removal or silent repurposing of `ClusteringStats`.
+- AES/Kyber-specific class encodings, inferred semantic ranges, arbitrary real
+  power exponents, GPU kernels, bootstrap confidence intervals, or composite
+  score use as a training objective.
+
+Validation commands:
+
+```bash
+CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="$HOME/.local/lib/libtorch"
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+Exit criteria:
+
+- All required exact and fragmentation results, plus semantic and requested
+  alignment results when enabled, are available through the structured
+  result/payload for batched and unbatched inputs.
+- Undefined/value/support/direction/averaging semantics are explicit and tested.
+- Numeric reference, pipeline, persistence, and compatibility tests pass.
+- Existing `ClusteringStats ! HeatmapPlot` pipelines remain valid.
+- No plotting dependency enters core, `leakflow_ml`, or `leakflow_plugins_ml`.
+
+## Planned Follow-up Phase: Clustering Metric Visualization
+
+Status: **planned, blocked on the metrics phase, not implemented**.
+
+Authoritative design:
+`docs/design/clustering_evaluation_metrics.md` (Phase B).
+
+Goal: make the complete structured evaluation result inspectable without placing
+clustering semantics in the generic plot runtime or recomputing metrics in plot
+elements.
+
+Locked decisions:
+
+- Add `leakflow_plugins_ml_plot`, depending on `leakflow_plugins_ml` and
+  `leakflow_plot`, following the existing crypto→plot bridge pattern.
+- Reuse domain-free `TableView` and `HeatmapView`; add a generic `MetricView` for
+  grouped scalar and per-dimension bars.
+- Plan `ClusteringMetricsTablePlot`, `ClusteringMetricsPlot`, and
+  `ClusteringMatrixPlot` as consumers of `ClusteringEvaluationPayload`.
+- Tables show value, direction, support, and `N/A` reason. Matrix views select
+  raw, exact-aligned, or semantic-aligned stored results and may apply only
+  display normalization (`none|row|col`).
+- Style changes are `ui-control`; selecting another stored result is
+  `sink-display`. Neither reruns clustering or evaluation, including while Idle.
+
+Expected validation:
+
+- Headless tests over copied table/metric/heatmap view data, selection,
+  normalization, undefined values, unmatched annotations, history, and reset.
+- A fixture payload proves bridge elements do not call metric computation.
+- GUI rendering remains manual-only; record an offline multi-unit smoke and an
+  Idle-state display-property change.
+
+Exit criteria:
+
+- Every Phase A result is available in a table, headline/per-dimension metrics
+  have a generic visual form, and raw/aligned matrices are selectable.
+- Plot changes do not trigger evaluation recomputation.
+- No clustering-specific branch enters `PlotRuntime` or a generic plot view.
+
 ## Provisional Future Phase Plan
 
 These phases are not detailed implementation specs yet. They should be refined one at a time before implementation.

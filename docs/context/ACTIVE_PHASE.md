@@ -4,11 +4,31 @@ This file is the compact phase/task brief for Codex.
 
 ## Current Default
 
-**No active phase.** The live-streaming phase and the AES CPA/report slice are
-implemented. Pick the next phase explicitly before starting work (candidates:
-the discussed Zarr parity/conversion benchmark, dedicated CPA
-score/rank/heatmap plots, overlay/correlation plot polish, or Kyber / ML-KEM
-hypotheses).
+**No implementation phase is active.** The live-streaming phase, AES CPA/report
+slice, HDF5 tensor-dataset slice, and profiling phase are implemented. The next
+ML sequence is now planned, but source work still requires an explicit request.
+
+## Planned Next ML Sequence (DESIGN ONLY)
+
+Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
+
+1. **Full Clustering Evaluation Metrics** — add a GMM-independent evaluator in
+   `leakflow_ml`, plus `ClusteringEvaluate` and a structured
+   `ClusteringEvaluationPayload` in `leakflow_plugins_ml`. Inputs are arbitrary
+   labels `[N]`/`[U,N]` and vector truth `[N,D]`/`[U,N,D]`. Deliver the full
+   exact, semantic merge/impurity, fragmentation, and optional alignment result
+   set with explicit undefined/support semantics. Keep `ClusteringStats`
+   unchanged as the legacy tensor/confusion adapter.
+2. **Clustering Metric Visualization** — after the result contract is green, add
+   `leakflow_plugins_ml_plot`. Its table/metric/matrix elements consume the
+   structured payload and fill domain-free plot views; they do not recompute
+   evaluation or alignment.
+
+The two phases must not be combined. The first phase has no plotting changes;
+the second phase depends on its frozen payload contract. Other previously
+discussed candidates (Zarr parity, CPA plot refinement, overlay/correlation plot
+polish, and Kyber / ML-KEM hypotheses) remain deferred rather than folded into
+this sequence.
 
 The post-phase **HDF5 tensor-dataset slice** is implemented:
 
@@ -219,7 +239,10 @@ Completion checklist:
     consumes the aligned outputs with no per-pad tuning.
 ```
 
-## Current Context Task
+## Historical Context (Completed)
+
+The material below records completed phase history. It is not the active task;
+the current design-only plan is the ML sequence at the top of this file.
 
 Phase 22 has added the ImGui/ImPlot plotting foundation:
 
