@@ -224,7 +224,12 @@ the existing domain-free `TableView`:
   predicted-column order otherwise, then row-normalizes copied counts. Rows are
   labeled from canonical truth vectors and effective dimension names; columns
   use actual predicted IDs. Pages may have different rectangular shapes per
-  typed unit. Global detail displays `requires ClusteringEvaluate(detail=full)`,
+  typed unit. Hovering a cell shows its full true-group label, actual predicted
+  cluster ID, observation count, row share, column share, and share of all
+  observations. The generic page carries an optional dense support matrix for
+  these local numeric hover metrics; it does not carry domain tutorial text.
+  Global detail displays
+  `requires ClusteringEvaluate(detail=full)`,
   and unit pages above a combined 1,000,000 dense cells per run display a limit
   reason instead of being allocated.
 - `replace` refreshes all tabs from the latest payload. `accumulate` retains

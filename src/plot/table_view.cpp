@@ -29,6 +29,66 @@ double table_heatmap_row_axis_position(std::size_t row_index,
   return static_cast<double>(row_count - row_index) - 0.5;
 }
 
+std::optional<TableHeatmapCellIndex>
+table_heatmap_cell_at(double x, double y, std::size_t row_count,
+                      std::size_t column_count) {
+  if (row_count == 0 || column_count == 0 || !std::isfinite(x) ||
+      !std::isfinite(y) || x < 0.0 || y < 0.0 ||
+      x >= static_cast<double>(column_count) ||
+      y >= static_cast<double>(row_count)) {
+    return std::nullopt;
+  }
+
+  const auto column = static_cast<std::size_t>(std::floor(x));
+  const auto y_cell = static_cast<std::size_t>(std::floor(y));
+  return TableHeatmapCellIndex{
+      .row = row_count - y_cell - 1,
+      .column = column,
+  };
+}
+
+std::optional<TableHeatmapCellMetrics>
+table_heatmap_cell_metrics(const TableHeatmapPage &page,
+                           const TableHeatmapCellIndex &cell) {
+  if (page.rows <= 0 || page.cols <= 0 || page.counts.empty() ||
+      page.count_total == 0) {
+    return std::nullopt;
+  }
+  const auto rows = static_cast<std::size_t>(page.rows);
+  const auto cols = static_cast<std::size_t>(page.cols);
+  if (rows > std::numeric_limits<std::size_t>::max() / cols ||
+      page.counts.size() != rows * cols || cell.row >= rows ||
+      cell.column >= cols) {
+    return std::nullopt;
+  }
+
+  const auto checked_add = [](std::uint64_t &sum, std::uint64_t value) {
+    if (value > std::numeric_limits<std::uint64_t>::max() - sum) {
+      return false;
+    }
+    sum += value;
+    return true;
+  };
+
+  TableHeatmapCellMetrics result{
+      .cell_support = page.counts[cell.row * cols + cell.column],
+      .total_support = page.count_total,
+  };
+  for (std::size_t column = 0; column < cols; ++column) {
+    if (!checked_add(result.row_support,
+                     page.counts[cell.row * cols + column])) {
+      return std::nullopt;
+    }
+  }
+  for (std::size_t row = 0; row < rows; ++row) {
+    if (!checked_add(result.column_support,
+                     page.counts[row * cols + cell.column])) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
 namespace {
 
 [[nodiscard]] bool sort_value_missing(const TableCell::SortValue &value) {
@@ -194,7 +254,8 @@ void validate_heatmap_frame(const TableFrame &frame,
     }
 
     if (!page.unavailable_reason.empty()) {
-      if (page.rows != 0 || page.cols != 0 || !page.data.empty()) {
+      if (page.rows != 0 || page.cols != 0 || !page.data.empty() ||
+          !page.counts.empty() || page.count_total != 0) {
         throw std::invalid_argument(
             "TableView unavailable heatmap pages cannot carry matrix data");
       }
@@ -210,6 +271,29 @@ void validate_heatmap_frame(const TableFrame &frame,
         page.data.size() != rows * cols) {
       throw std::invalid_argument(
           "TableView heatmap page data does not match its shape");
+    }
+    if (page.counts.empty()) {
+      if (page.count_total != 0) {
+        throw std::invalid_argument(
+            "TableView heatmap count total requires dense counts");
+      }
+    } else {
+      if (page.counts.size() != rows * cols || page.count_total == 0) {
+        throw std::invalid_argument(
+            "TableView heatmap counts do not match its shape");
+      }
+      std::uint64_t count_total = 0;
+      for (const auto count : page.counts) {
+        if (count > std::numeric_limits<std::uint64_t>::max() - count_total) {
+          throw std::invalid_argument(
+              "TableView heatmap count support overflows");
+        }
+        count_total += count;
+      }
+      if (count_total != page.count_total) {
+        throw std::invalid_argument(
+            "TableView heatmap count total is inconsistent");
+      }
     }
     if ((!page.row_labels.empty() && page.row_labels.size() != rows) ||
         (!page.col_labels.empty() && page.col_labels.size() != cols)) {
@@ -391,6 +475,69 @@ heatmap_axis_ticks(const std::vector<std::string> &labels,
   return result;
 }
 
+[[nodiscard]] std::string_view
+heatmap_axis_value(const std::vector<std::string> &labels, std::size_t index) {
+  return index < labels.size() ? std::string_view(labels[index])
+                               : std::string_view{};
+}
+
+void draw_heatmap_cell_tooltip(const TableHeatmapPage &page,
+                               const TableHeatmapCellIndex &cell) {
+  const auto row_label = heatmap_axis_value(page.row_labels, cell.row);
+  const auto column_label = heatmap_axis_value(page.col_labels, cell.column);
+  const auto value =
+      page.data[cell.row * static_cast<std::size_t>(page.cols) + cell.column];
+
+  ImGui::BeginTooltip();
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 42.0F);
+  if (row_label.empty()) {
+    ImGui::Text("%s [%zu]", page.row_axis_label.c_str(), cell.row);
+  } else {
+    ImGui::Text("%s [%zu]: %.*s", page.row_axis_label.c_str(), cell.row,
+                static_cast<int>(row_label.size()), row_label.data());
+  }
+  if (column_label.empty()) {
+    ImGui::Text("%s [%zu]", page.col_axis_label.c_str(), cell.column);
+  } else {
+    ImGui::Text("%s [%zu]: %.*s", page.col_axis_label.c_str(), cell.column,
+                static_cast<int>(column_label.size()), column_label.data());
+  }
+  ImGui::Separator();
+  if (const auto metrics = table_heatmap_cell_metrics(page, cell)) {
+    const auto percentage = [](std::uint64_t numerator,
+                               std::uint64_t denominator) {
+      return denominator == 0 ? 0.0
+                              : 100.0 * static_cast<double>(numerator) /
+                                    static_cast<double>(denominator);
+    };
+    const auto cell_support =
+        static_cast<unsigned long long>(metrics->cell_support);
+    const auto row_support =
+        static_cast<unsigned long long>(metrics->row_support);
+    const auto column_support =
+        static_cast<unsigned long long>(metrics->column_support);
+    const auto total_support =
+        static_cast<unsigned long long>(metrics->total_support);
+    ImGui::Text("%s: %llu", page.count_label.c_str(), cell_support);
+    ImGui::Text("within %s: %.2f%% (%llu / %llu)", page.row_axis_label.c_str(),
+                percentage(metrics->cell_support, metrics->row_support),
+                cell_support, row_support);
+    ImGui::Text("within %s: %.2f%% (%llu / %llu)", page.col_axis_label.c_str(),
+                percentage(metrics->cell_support, metrics->column_support),
+                cell_support, column_support);
+    ImGui::Text("of all %s: %.2f%% (%llu / %llu)", page.count_label.c_str(),
+                percentage(metrics->cell_support, metrics->total_support),
+                cell_support, total_support);
+  } else if (page.value_format == TableHeatmapValueFormat::Percentage) {
+    ImGui::Text("%s: %.2f%% (%.6g)", page.value_label.c_str(), value * 100.0,
+                value);
+  } else {
+    ImGui::Text("%s: %.6g", page.value_label.c_str(), value);
+  }
+  ImGui::PopTextWrapPos();
+  ImGui::EndTooltip();
+}
+
 void draw_heatmap_frame(
     const TableHeatmapFrame &heatmap,
     const std::optional<TableCell::SortValue> &selected_value, float width,
@@ -428,7 +575,6 @@ void draw_heatmap_frame(
     ImGui::EndGroup();
     return;
   }
-
   // PlotHeatmap already maps row zero to the maximum Y bound. Keep the normal
   // Y axis and place row-label ticks in the same descending coordinate order;
   // adding ImPlotAxisFlags_Invert here would flip cells away from their labels.
@@ -467,6 +613,14 @@ void draw_heatmap_frame(
                         selected->vmax, nullptr, ImPlotPoint(0.0, 0.0),
                         ImPlotPoint(static_cast<double>(selected->cols),
                                     static_cast<double>(selected->rows)));
+    if (ImPlot::IsPlotHovered()) {
+      const auto mouse = ImPlot::GetPlotMousePos(ImAxis_X1, ImAxis_Y1);
+      if (const auto cell = table_heatmap_cell_at(
+              mouse.x, mouse.y, static_cast<std::size_t>(selected->rows),
+              static_cast<std::size_t>(selected->cols))) {
+        draw_heatmap_cell_tooltip(*selected, *cell);
+      }
+    }
     ImPlot::EndPlot();
   }
   ImGui::SameLine();

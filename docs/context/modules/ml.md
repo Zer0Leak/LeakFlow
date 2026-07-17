@@ -4,6 +4,10 @@ Use this for the generic (domain-free) machine-learning / statistics numeric lay
 clustering, mixture models, optimal transport, and clustering evaluation. No SCA or
 AES knowledge lives here.
 
+User-facing metric interpretation, alignment guidance, and Heatmap reading are
+documented in
+[`docs/guides/CLUSTERING_EVALUATION.md`](../../guides/CLUSTERING_EVALUATION.md).
+
 ## Files
 
 - Numeric public headers: `include/leakflow/ml`

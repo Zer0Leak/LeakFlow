@@ -459,6 +459,10 @@ stored-contingency heatmap are shown in one tabbed comparison window. The same
 selected PoIs are also re-correlated on the attack traces and shown beside the profiling scores. One
 `Hdf5FileSrc` supplies aligned traces, plaintexts, and the fixed key.
 
+See [Interpreting Clustering Evaluation Metrics](CLUSTERING_EVALUATION.md) for
+the meaning, direction, and limitations of every displayed metric and heatmap
+value.
+
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
 leakflow --log-level warning run --graph \
@@ -473,7 +477,7 @@ leakflow --log-level warning run --graph \
    Tee@leak_tee; \
    PoiCorrelation@poicorr; \
    PoiTablePlot@tbl(title=\"Profiling vs attack PoIs\",reference_label=profiling,current_label=attack,precision=3); \
-   GaussianMixture@gmm(n_components=81,covariance_type=full,n_init=1,max_iter=100,seed=0); \
+   GaussianMixture@gmm(n_components=49,covariance_type=diagonal,n_init=1,max_iter=100,seed=0); \
    ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,combined_quality=true); \
    ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=accumulate); \
    @corr_src ! @poi ! @poi_tee; \
@@ -523,7 +527,11 @@ The metrics window has eight tabs:
   the stored exact-overlap column permutation when available (raw column order
   otherwise), labels rows with the canonical truth vectors and dimension names,
   and labels columns with the actual predicted IDs. It remains rectangular and
-  supports a different shape for every unit. Global detail shows
+  supports a different shape for every unit. Hover a cell to see the full true
+  group, actual predicted cluster ID, observation count, percentage within the
+  true-group row, percentage within the predicted-cluster column, and percentage
+  of all observations. The tooltip stays numeric and does not include tutorial
+  text. Global detail shows
   `requires ClusteringEvaluate(detail=full)`; when all unit pages in one run
   exceed 1,000,000 dense cells in total, they show a display-limit message
   instead of being allocated. This tab has

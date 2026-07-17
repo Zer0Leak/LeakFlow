@@ -68,6 +68,12 @@ struct TableRowSelector {
   std::vector<TableRowSelectorValue> values;
 };
 
+enum class TableHeatmapValueFormat : std::uint8_t {
+  Number,
+  // The stored value is a unit fraction and is displayed as a percentage.
+  Percentage,
+};
+
 // Optional matrix page rendered inside a tabbed table snapshot. The generic
 // view treats selector_value as an opaque typed page key; a domain bridge owns
 // the matrix meaning, labels, ordering, and any presentation-only
@@ -88,6 +94,16 @@ struct TableHeatmapPage {
   // A non-empty reason represents a deliberately unavailable page. Such a
   // page carries no matrix allocation but stays selectable and visible.
   std::string unavailable_reason;
+  // Optional bridge-supplied presentation text. TableView remains unaware of
+  // the matrix domain while still giving every cell a useful hover tooltip.
+  std::string value_label = "value";
+  TableHeatmapValueFormat value_format = TableHeatmapValueFormat::Number;
+  // Optional dense support matrix for numeric cell-hover metrics. When
+  // present, counts has the same row-major shape as data and count_total is
+  // their sum. The bridge chooses the domain-neutral support label.
+  std::vector<std::uint64_t> counts;
+  std::uint64_t count_total = 0;
+  std::string count_label = "count";
 };
 
 struct TableHeatmapFrame {
@@ -120,6 +136,37 @@ struct TableFrame {
 // declared row count.
 [[nodiscard]] double table_heatmap_row_axis_position(std::size_t row_index,
                                                      std::size_t row_count);
+
+struct TableHeatmapCellIndex {
+  std::size_t row = 0;
+  std::size_t column = 0;
+
+  [[nodiscard]] bool
+  operator==(const TableHeatmapCellIndex &) const noexcept = default;
+};
+
+struct TableHeatmapCellMetrics {
+  std::uint64_t cell_support = 0;
+  std::uint64_t row_support = 0;
+  std::uint64_t column_support = 0;
+  std::uint64_t total_support = 0;
+
+  [[nodiscard]] bool
+  operator==(const TableHeatmapCellMetrics &) const noexcept = default;
+};
+
+// Resolve ImPlot coordinates to the row-major cell under the mouse. Heatmap
+// row zero is displayed at the maximum Y bound, so the returned row index is
+// reversed relative to floor(y). Bounds are half-open: [0, cols) x [0, rows).
+[[nodiscard]] std::optional<TableHeatmapCellIndex>
+table_heatmap_cell_at(double x, double y, std::size_t row_count,
+                      std::size_t column_count);
+
+// Derive local support metrics for a cell when the optional dense count matrix
+// is available. Returns no value for an invalid page/cell or absent counts.
+[[nodiscard]] std::optional<TableHeatmapCellMetrics>
+table_heatmap_cell_metrics(const TableHeatmapPage &page,
+                           const TableHeatmapCellIndex &cell);
 
 // Return a stable display order without mutating the stored rows. A missing
 // cell/value and floating NaN sort last for both directions.

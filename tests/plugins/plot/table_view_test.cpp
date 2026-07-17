@@ -17,6 +17,7 @@ using leakflow::plot::TableFrame;
 using leakflow::plot::TableGroupLayout;
 using leakflow::plot::TableHeatmapFrame;
 using leakflow::plot::TableHeatmapPage;
+using leakflow::plot::TableHeatmapValueFormat;
 using leakflow::plot::TableRowSelector;
 using leakflow::plot::TableSortDirection;
 using leakflow::plot::TableSortSpec;
@@ -69,6 +70,22 @@ int main() {
                   plot::table_heatmap_row_axis_position(1, 3) == 1.5 &&
                   plot::table_heatmap_row_axis_position(2, 3) == 0.5,
               "heatmap row-label coordinates do not match row-major data")) {
+    return 1;
+  }
+  const auto top_left = plot::table_heatmap_cell_at(0.25, 2.75, 3, 4);
+  const auto middle = plot::table_heatmap_cell_at(1.25, 1.25, 3, 4);
+  const auto bottom_right = plot::table_heatmap_cell_at(3.75, 0.25, 3, 4);
+  if (!expect(top_left == plot::TableHeatmapCellIndex{.row = 0, .column = 0} &&
+                  middle ==
+                      plot::TableHeatmapCellIndex{.row = 1, .column = 1} &&
+                  bottom_right ==
+                      plot::TableHeatmapCellIndex{.row = 2, .column = 3} &&
+                  !plot::table_heatmap_cell_at(-0.01, 1.0, 3, 4) &&
+                  !plot::table_heatmap_cell_at(4.0, 1.0, 3, 4) &&
+                  !plot::table_heatmap_cell_at(1.0, 3.0, 3, 4) &&
+                  !plot::table_heatmap_cell_at(
+                      std::numeric_limits<double>::quiet_NaN(), 1.0, 3, 4),
+              "heatmap mouse coordinates did not resolve to displayed cells")) {
     return 1;
   }
 
@@ -492,6 +509,11 @@ int main() {
                     .rows = 2,
                     .cols = 3,
                     .data = {1.0, 0.0, 0.0, 0.0, 0.5, 0.5},
+                    .value_label = "row share",
+                    .value_format = TableHeatmapValueFormat::Percentage,
+                    .counts = {2, 0, 0, 0, 1, 1},
+                    .count_total = 4,
+                    .count_label = "observations",
                 },
                 TableHeatmapPage{
                     .selector_value = std::int64_t{8},
@@ -509,10 +531,32 @@ int main() {
                 snapshot.frames.front().heatmap.has_value() &&
                 snapshot.frames.front().heatmap->pages[0].rows == 2 &&
                 snapshot.frames.front().heatmap->pages[0].cols == 3 &&
+                snapshot.frames.front().heatmap->pages[0].value_label ==
+                    "row share" &&
+                snapshot.frames.front().heatmap->pages[0].value_format ==
+                    TableHeatmapValueFormat::Percentage &&
+                snapshot.frames.front().heatmap->pages[0].counts ==
+                    std::vector<std::uint64_t>{2, 0, 0, 0, 1, 1} &&
+                snapshot.frames.front().heatmap->pages[0].count_total == 4 &&
+                snapshot.frames.front().heatmap->pages[0].count_label ==
+                    "observations" &&
                 snapshot.frames.front().heatmap->pages[1].unavailable_reason ==
                     "not retained" &&
                 view.select_row_value("heatmap.unit", std::int64_t{8}),
             "typed ragged heatmap pages/history were not retained")) {
+      return 1;
+    }
+    const auto cell_metrics = plot::table_heatmap_cell_metrics(
+        snapshot.frames.front().heatmap->pages[0],
+        plot::TableHeatmapCellIndex{.row = 1, .column = 1});
+    if (!expect(cell_metrics ==
+                    plot::TableHeatmapCellMetrics{
+                        .cell_support = 1,
+                        .row_support = 2,
+                        .column_support = 1,
+                        .total_support = 4,
+                    },
+                "heatmap cell support metrics are wrong")) {
       return 1;
     }
 
@@ -588,6 +632,21 @@ int main() {
               }
             }(),
             "heatmap data/shape mismatch was accepted")) {
+      return 1;
+    }
+
+    auto malformed_counts = update;
+    malformed_counts.frame.heatmap->pages[0].count_total = 3;
+    if (!expect(
+            [&] {
+              try {
+                view.push("malformed-heatmap-counts", malformed_counts);
+                return false;
+              } catch (const std::invalid_argument &) {
+                return true;
+              }
+            }(),
+            "inconsistent heatmap count total was accepted")) {
       return 1;
     }
 

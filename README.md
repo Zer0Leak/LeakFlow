@@ -64,6 +64,8 @@ The active guidance files are:
 - `docs/reference/CODING_STYLE.md`: coding conventions.
 - `docs/reference/CLI_SYNTAX.md`: `leakflow run` pipeline syntax and examples.
 - `docs/guides/CLI_BUILD.md`: build, test, Docker, CUDA, and CLI commands.
+- `docs/guides/CLUSTERING_EVALUATION.md`: practical interpretation of
+  clustering metrics, alignments, and the evaluation heatmap.
 - `docs/guides/COOL_PIPELINES.md`: demonstration-ready LeakFlow pipelines.
 
 ## Source Layout

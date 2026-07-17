@@ -588,7 +588,10 @@ int main() {
                     plot::TableCell::SortValue(std::int64_t{7}) &&
                 pages[1].rows == 2 && pages[1].cols == 2 &&
                 pages[1].col_labels == std::vector<std::string>{"-5", "42"} &&
-                pages[1].caption.find("raw contingency") != std::string::npos,
+                pages[1].caption.find("raw contingency") != std::string::npos &&
+                pages[1].counts == std::vector<std::uint64_t>{3, 0, 0, 3} &&
+                pages[1].count_total == 6 &&
+                pages[1].count_label == "observations",
             "Heatmap pages lost ragged shapes or typed unit identities")) {
       return 1;
     }
@@ -937,6 +940,15 @@ int main() {
                                            "(hm=1, hy=0)"} &&
               heatmap_frame.heatmap->pages.front().col_labels ==
                   std::vector<std::string>{"20", "10", "30"} &&
+              heatmap_frame.heatmap->pages.front().value_label ==
+                  "share of true group" &&
+              heatmap_frame.heatmap->pages.front().value_format ==
+                  plot::TableHeatmapValueFormat::Percentage &&
+              heatmap_frame.heatmap->pages.front().counts ==
+                  std::vector<std::uint64_t>{2, 0, 0, 0, 2, 0, 0, 0, 2} &&
+              heatmap_frame.heatmap->pages.front().count_total == 6 &&
+              heatmap_frame.heatmap->pages.front().count_label ==
+                  "observations" &&
               heatmap_frame.heatmap->pages.front().caption.find(
                   "exact-overlap aligned") != std::string::npos,
           "Heatmap tab did not row-normalize and exact-align stored counts")) {

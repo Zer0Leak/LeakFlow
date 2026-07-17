@@ -908,6 +908,7 @@ heatmap_page(const ml::ClusteringEvaluationUnitResult &unit,
   page.rows = rows;
   page.cols = cols;
   page.data.assign(row_count * col_count, 0.0);
+  page.counts.assign(row_count * col_count, 0);
   const auto *truth_data = truth_indices.data_ptr<std::int64_t>();
   const auto *predicted_data = predicted_indices.data_ptr<std::int64_t>();
   const auto *count_data = counts.data_ptr<std::int64_t>();
@@ -946,6 +947,7 @@ heatmap_page(const ml::ClusteringEvaluationUnitResult &unit,
         static_cast<std::size_t>(truth_group) * col_count +
         displayed_column[static_cast<std::size_t>(predicted_cluster)];
     page.data[destination] = static_cast<double>(count);
+    page.counts[destination] = count;
   }
   if (total_support != static_cast<std::uint64_t>(unit.observation_count) ||
       std::ranges::any_of(truth_support,
@@ -975,6 +977,10 @@ heatmap_page(const ml::ClusteringEvaluationUnitResult &unit,
                  (exact_aligned ? "exact-overlap aligned contingency"
                                 : "raw contingency") +
                  " - row-normalized";
+  page.value_label = "share of true group";
+  page.value_format = plot::TableHeatmapValueFormat::Percentage;
+  page.count_total = total_support;
+  page.count_label = "observations";
   page.vmin = 0.0;
   page.vmax = 1.0;
   return page;

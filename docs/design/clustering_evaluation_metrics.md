@@ -8,6 +8,10 @@ same-window Heatmap tab is also implemented. Payload persistence, generic
 `MetricView`, and a standalone/selectable matrix plot are unblocked but remain
 deferred.
 
+For experiment-facing interpretation of every implemented metric, alignment,
+and Heatmap value, see
+[`docs/guides/CLUSTERING_EVALUATION.md`](../guides/CLUSTERING_EVALUATION.md).
+
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
 and Hamming-weight semantics, but no API or implementation may depend on GMM,

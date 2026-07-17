@@ -24,6 +24,9 @@ session needs project context without reading the full source tree.
 - `docs/guides/AES.md`: AES fixture and leakage-model pipeline examples.
 - `docs/guides/LOGGING.md`: logging and summary examples.
 - `docs/guides/PLOTTING.md`: interactive trace plotting examples.
+- `docs/guides/CLUSTERING_EVALUATION.md`: practical interpretation of every
+  clustering-evaluation metric, alignment, and heatmap value.
+- `docs/guides/COOL_PIPELINES.md`: demonstration-ready pipeline examples.
 
 ## Reference
 
