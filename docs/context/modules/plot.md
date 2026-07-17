@@ -201,21 +201,23 @@ the existing domain-free `TableView`:
 - **Overview** has one row per run and typed unit. It leads with observation,
   and feature shape columns named `Observations (N)` and `Features (S)`, then
   truth-group and predicted-cluster counts; headline exact/semantic/
-  fragmentation metrics; semantic partition separation; the opt-in corrected
+  fragmentation metrics; semantic partition separation; the power-mode-default
   semantic partition quality; and the core producer and explicit
   experiment parameters needed to compare runs without scanning detail rows.
   (S) comes from captured `labels.cluster.n_features`; it is `N/A` when the
-  producer did not report a feature count. The deprecated legacy
-  `combined_quality` is intentionally not a headline.
-- **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
-  partition the structured metric records by family. Across those tabs every
-  stored `MetricValue` appears exactly once, including per-dimension,
-  per-cluster, and per-group detail. Undefined values display `N/A` with their
-  reason and support. `↑` means higher is better and `↓` means lower is better;
-  these metric-direction markers are distinct from the selected header's sort
-  arrow. Combined shows corrected semantic partition quality and its copied
-  separation/pair-recall components when enabled; the unchanged deprecated
-  combined score and its copied components are grouped as legacy detail.
+  producer did not report a feature count.
+- **Exact** and **Combined** are Overview-style comparison sheets with one row
+  per run and typed unit. Both repeat Overview's shape/count context and
+  selected parameters. Exact then shows all ten exact metrics; Combined shows
+  only preferred quality, separation, and pair recall. In accumulate mode both
+  append rows to one frame instead of requiring the history scrubber. Defined
+  values sort numerically, while hover metadata retains raw ID, support,
+  averaging, direction, status, and undefined reason. Support is the metric's
+  denominator/evidence count and can differ in meaning across metrics, so it is
+  important but stays off the compact visible columns.
+  **Semantic**, **Fragmentation**, and **Alignment** retain long-form metric
+  rows. `↑` means higher is better and `↓` means lower is better; these
+  metric-direction markers are distinct from the selected header's sort arrow.
 - **Parameters** presents effective evaluator options, bounded labels-side
   `payload.cluster.*` producer context, and explicitly stamped
   `payload.parameter.*` experiment metadata once per run rather than repeating
@@ -237,8 +239,9 @@ the existing domain-free `TableView`:
   and unit pages above a combined 1,000,000 dense cells per run display a limit
   reason instead of being allocated.
 - `replace` refreshes all tabs from the latest payload. `accumulate` retains
-  comparison rows in Overview/Parameters and independent run history in every
-  family and Heatmap tab; heatmap counts are never summed across runs.
+  comparison rows in Overview, Exact, Combined, and Parameters, with
+  independent run history in Semantic, Fragmentation, Alignment, and Heatmap;
+  heatmap counts are never summed across runs.
   `auto` selects accumulate for a live-driven pipeline and replace otherwise;
   `active_update_mode` exposes that resolved choice read-only.
 - Unit-bearing tabs share a horizontal selector when more than one typed unit
@@ -258,11 +261,11 @@ sorting are view-local UI controls. These operations use copied table/payload
 data. The bridge never calls the evaluator or Hungarian solver, and generic
 tabs, sorting, and heatmap pages belong in `TableView`, not a clustering branch
 in `PlotRuntime`. Headless A4 coverage checks deterministic table translation,
-every-value-once placement, overview and parameter cardinality, undefined
-states, accumulate/replace history, typed-unit selection, clear, sorting, reset,
-and property effects. Post-A4 extension coverage checks N/S promotion, ragged
-matrix pages, and bounded densification. Schema-v5 coverage checks the corrected
-Overview/Combined placement while retaining the legacy detail. ImGui/ImPlot
+compact Exact/Combined placement and hover support, overview and parameter
+cardinality, undefined states, accumulate/replace history, typed-unit selection,
+clear, sorting, reset, and property effects. Post-A4 extension coverage checks
+N/S promotion, ragged matrix pages, and bounded densification. Schema-v6
+coverage checks the corrected Overview/Combined placement. ImGui/ImPlot
 rendering remains a manual smoke check.
 
 ## Deferred Clustering Metric Views (Unblocked)

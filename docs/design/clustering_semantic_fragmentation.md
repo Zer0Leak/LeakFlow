@@ -351,13 +351,13 @@ The intended diagnostic set is therefore:
 
 No one row replaces the others.
 
-## 9. Relationship to Combined Quality
+## 9. Relationship to Semantic Partition Quality
 
-The implemented `combined_quality` remains unchanged:
+The implemented `semantic_partition_quality` remains unchanged:
 
 ```text
-semantic cohesion  = 1 - semantic_impurity_micro
-group preservation = 1 - fragmentation_micro
+semantic separation = semantic_partition_separation
+group preservation  = pair_recall
 ```
 
 This proposal does not add transport severity to that composite. Structural
@@ -367,7 +367,7 @@ composite would require separate motivation, repeated-seed evidence, and an
 explicitly approved future phase.
 
 The transport metric should first be evaluated as a diagnostic, not as a
-training objective or a reason to revise historical combined-quality values.
+training objective or a reason to revise semantic partition quality.
 
 ## 10. Computational Direction
 
@@ -464,8 +464,8 @@ remains an idea record only.
 ## 14. Explicit Non-Goals of This Note
 
 - No implementation or prototype in shared source.
-- No modification of the implemented 28-metric inventory.
-- No change to `combined_quality`.
+- No modification of the implemented schema-v6 29-metric inventory.
+- No change to `semantic_partition_quality`.
 - No use of truth during clustering or GMM fitting.
 - No paper-specific threshold or parameter choice.
 - No promise that the existing Sinkhorn configuration is appropriate without

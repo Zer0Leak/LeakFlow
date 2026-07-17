@@ -461,10 +461,10 @@ selected PoIs are also re-correlated on the attack traces and shown beside the p
 
 See [Interpreting Clustering Evaluation Metrics](CLUSTERING_EVALUATION.md) for
 the meaning, direction, and limitations of every displayed metric and heatmap
-value. This graph opts into `semantic_partition_quality`, the preferred
-separation/pair-recall composite for comparing cluster counts. The older
-`combined_quality` is deprecated because it can assign a misleadingly high
-value to a one-cluster collapse.
+value. With `semantic=power`, `semantic_partition_quality` is calculated by
+default as the preferred separation/pair-recall composite for comparing
+cluster counts. Set `semantic_partition_quality=false` only when that composite
+is intentionally unwanted.
 
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
@@ -481,7 +481,7 @@ leakflow --log-level warning run --graph \
    PoiCorrelation@poicorr; \
    PoiTablePlot@tbl(title=\"Profiling vs attack PoIs\",reference_label=profiling,current_label=attack,precision=3); \
    GaussianMixture@gmm(n_components=49,covariance_type=diagonal,n_init=1,max_iter=100,seed=0); \
-   ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,semantic_partition_quality=true); \
+   ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both); \
    ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=accumulate); \
    @corr_src ! @poi ! @poi_tee; \
    @poi_tee.src_0 ! @tbl.reference; \
@@ -514,13 +514,19 @@ The metrics window has eight tabs:
 
 - **Overview** is the place to start. It shows one row per run and unit, with
   explicit `Observations (N)` and `Features (S)` columns, group/cluster counts,
-  headline metrics including semantic partition separation and the optional
+  headline metrics including semantic partition separation and the effective
   semantic partition quality, and the core GMM and experiment parameters
   needed to compare configurations. GMM supplies the feature value from its
   fitted axis; a producer without `payload.cluster.n_features` displays `N/A`.
-- **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
-  contain the complete stored metric detail without duplicating a metric across
-  tabs. `↑` after a metric means higher is better; `↓` means lower is better.
+- **Exact** is another Overview-style comparison sheet: one row per run and
+  unit with the same shape/count context and selected parameters, followed by
+  all ten exact metrics. **Combined** has the same comparison context followed
+  only by semantic partition quality, semantic partition separation, and pair
+  recall. Both append runs directly in `accumulate` mode, so comparing runs
+  needs no history scrubber. Support is kept in each metric cell's hover rather
+  than consuming a visible column. **Semantic**, **Fragmentation**, and
+  **Alignment** retain long-form detail. `↑` after a metric means higher is
+  better; `↓` means lower is better.
   These direction markers are part of the metric label; the arrow drawn on a
   column header shows the current table sort direction.
 - **Parameters** shows effective evaluator settings, captured GMM context, and
@@ -545,16 +551,18 @@ The metrics window has eight tabs:
 
 `detail=full` and `alignment=both` are intentionally kept in this example: the
 family tabs make the resulting per-dimension, per-cluster, per-group, and both
-alignment records manageable. `update_mode=accumulate` keeps each
-re-evaluation for comparison, which is useful when changing `GaussianMixture`
+alignment records manageable. `update_mode=accumulate` appends Overview,
+Exact, and Combined comparison rows directly while retaining history frames
+for the detailed families and Heatmap. This is useful when changing `GaussianMixture`
 parameters such as `covariance_type` or `n_components` while Idle. Use
 `update_mode=replace` to keep only the newest evaluation, or the default
 `update_mode=auto` to accumulate for live-driven input and replace otherwise.
 `active_update_mode` reports that resolved choice. Heatmap accumulation appends
 one independent matrix frame per evaluation run; it never sums contingency
 counts, while replace keeps only the latest frame. When the evaluation contains
-multiple units, a horizontal **Unit** slider on Overview, the metric-family tabs,
-and Heatmap selects one typed unit; the selection follows you across tabs, while
+multiple units, a horizontal **Unit** slider on Overview, Exact, Combined, the
+detail-family tabs, and Heatmap selects one typed unit; the selection follows
+you across tabs, while
 Parameters remains run-wide. To exercise it with this example,
 change both `CorrelationPoiToIndexes(units=[0])` and
 `AesLeakage(units=[0])` to the same multi-unit set, such as `[0,1]`. Click a

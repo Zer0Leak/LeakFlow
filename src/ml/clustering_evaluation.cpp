@@ -19,7 +19,7 @@ namespace leakflow::ml {
 namespace {
 
 constexpr std::size_t kExactMetricCount = 10;
-constexpr std::array<ClusteringMetricDescriptor, 30> kMetricDescriptors{{
+constexpr std::array<ClusteringMetricDescriptor, 29> kMetricDescriptors{{
     {ClusteringMetricId::AdjustedRandIndex, "adjusted_rand_index",
      MetricFamily::Exact, MetricDirection::HigherIsBetter,
      MetricAveraging::None},
@@ -94,9 +94,6 @@ constexpr std::array<ClusteringMetricDescriptor, 30> kMetricDescriptors{{
     {ClusteringMetricId::SemanticAlignmentDimensionError,
      "semantic_alignment_dimension_error", MetricFamily::Alignment,
      MetricDirection::LowerIsBetter, MetricAveraging::PerDimension},
-    {ClusteringMetricId::CombinedQuality, "combined_quality",
-     MetricFamily::Combined, MetricDirection::HigherIsBetter,
-     MetricAveraging::Micro},
     {ClusteringMetricId::SemanticPartitionSeparation,
      "semantic_partition_separation", MetricFamily::Semantic,
      MetricDirection::HigherIsBetter, MetricAveraging::Micro},
@@ -1372,39 +1369,6 @@ compute_semantic_metrics(const torch::TensorAccessor<Scalar, 2> &truth,
   return result;
 }
 
-[[nodiscard]] CombinedClusteringQuality
-compute_combined_quality(const SemanticClusteringMetrics &semantic,
-                         const FragmentationClusteringMetrics &fragmentation,
-                         std::uint64_t observations) {
-  CombinedClusteringQuality result;
-  result.semantic_micro_impurity = semantic.micro_impurity;
-  result.fragmentation_micro = fragmentation.micro;
-  if (!semantic.micro_impurity.defined() || !fragmentation.micro.defined()) {
-    result.quality =
-        undefined_metric(ClusteringMetricId::CombinedQuality, observations,
-                         MetricUndefinedReason::DependentMetricUndefined);
-    return result;
-  }
-
-  const auto impurity = validated_bounded_sum(
-      static_cast<long double>(*semantic.micro_impurity.value), 1,
-      "combined semantic impurity");
-  const auto fragmented = validated_bounded_sum(
-      static_cast<long double>(*fragmentation.micro.value), 1,
-      "combined fragmentation");
-  const auto cohesion = 1.0L - impurity;
-  const auto pair_preservation = 1.0L - fragmented;
-  const auto denominator = cohesion + pair_preservation;
-  const auto quality =
-      denominator == 0.0L ? 0.0L
-                          : (2.0L * cohesion * pair_preservation) / denominator;
-  result.quality = defined_metric(ClusteringMetricId::CombinedQuality,
-                                  static_cast<double>(validated_bounded_sum(
-                                      quality, 1, "combined quality")),
-                                  observations);
-  return result;
-}
-
 [[nodiscard]] SemanticPartitionClusteringQuality
 compute_semantic_partition_quality(const SemanticClusteringMetrics &semantic,
                                    const ExactClusteringMetrics &exact,
@@ -1756,10 +1720,6 @@ template <typename Scalar>
       contingency, truth_marginal, pairs, options.detail);
 
   const auto observations_u64 = static_cast<std::uint64_t>(observations);
-  if (options.combined_quality) {
-    result.combined_quality = compute_combined_quality(
-        result.semantic, result.fragmentation, observations_u64);
-  }
   if (options.semantic_partition_quality) {
     result.semantic_partition_quality = compute_semantic_partition_quality(
         result.semantic, result.exact, observations_u64);
@@ -1897,17 +1857,6 @@ effective_evaluation_options(const ClusteringEvaluationOptions &options,
     throw std::invalid_argument("clustering evaluation semantic alignment "
                                 "requires power semantic evaluation");
   }
-  if (options.combined_quality &&
-      options.semantic != SemanticEvaluationMode::Power) {
-    throw std::invalid_argument("clustering evaluation combined quality "
-                                "requires power semantic evaluation");
-  }
-  if (options.semantic_partition_quality &&
-      options.semantic != SemanticEvaluationMode::Power) {
-    throw std::invalid_argument(
-        "clustering evaluation semantic partition quality requires power "
-        "semantic evaluation");
-  }
   if (options.power != 1 && options.power != 2) {
     throw std::invalid_argument(
         "clustering evaluation semantic power must be 1 or 2");
@@ -1945,6 +1894,9 @@ effective_evaluation_options(const ClusteringEvaluationOptions &options,
   }
 
   ClusteringEvaluationOptions effective = options;
+  effective.semantic_partition_quality =
+      options.semantic == SemanticEvaluationMode::Power &&
+      options.semantic_partition_quality;
   effective.dimension_names = effective_dimension_names(options, dimensions);
   if (options.semantic == SemanticEvaluationMode::Power) {
     if (options.semantic_ranges.empty()) {

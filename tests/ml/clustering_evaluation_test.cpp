@@ -119,7 +119,7 @@ int main() {
   {
     const auto exact_descriptors = exact_clustering_metric_descriptors();
     const auto descriptors = clustering_metric_descriptors();
-    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 30,
+    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 29,
                 "descriptors: wrong exact metric count")) {
       return 1;
     }
@@ -144,8 +144,6 @@ int main() {
         clustering_metric_descriptor(ClusteringMetricId::FragmentationMacro);
     const auto &alignment = clustering_metric_descriptor(
         ClusteringMetricId::ExactAlignmentJaccardPerGroup);
-    const auto &combined =
-        clustering_metric_descriptor(ClusteringMetricId::CombinedQuality);
     const auto &partition_separation = clustering_metric_descriptor(
         ClusteringMetricId::SemanticPartitionSeparation);
     const auto &partition_quality = clustering_metric_descriptor(
@@ -159,9 +157,6 @@ int main() {
                     alignment.family == MetricFamily::Alignment &&
                     alignment.direction == MetricDirection::HigherIsBetter &&
                     alignment.averaging == MetricAveraging::PerGroup &&
-                    combined.family == MetricFamily::Combined &&
-                    combined.direction == MetricDirection::HigherIsBetter &&
-                    combined.averaging == MetricAveraging::Micro &&
                     partition_separation.family == MetricFamily::Semantic &&
                     partition_separation.direction ==
                         MetricDirection::HigherIsBetter &&
@@ -258,7 +253,7 @@ int main() {
     const auto result = evaluate_clustering(predicted, truth, options);
     const auto &unit = only_unit(result);
 
-    if (!expect(result.schema_version == 5 && !result.batched &&
+    if (!expect(result.schema_version == 6 && !result.batched &&
                     result.observation_count == 6 &&
                     result.semantic_dimension_count == 2 &&
                     result.effective_options.detail == options.detail &&
@@ -266,9 +261,7 @@ int main() {
                         options.dimension_names &&
                     result.effective_options.alignment ==
                         AlignmentEvaluationMode::None &&
-                    !result.effective_options.combined_quality &&
                     !result.effective_options.semantic_partition_quality &&
-                    !unit.combined_quality.has_value() &&
                     !unit.semantic_partition_quality.has_value() &&
                     !unit.alignment_identities.has_value() &&
                     !unit.exact_alignment.has_value() &&
@@ -798,116 +791,6 @@ int main() {
     }
   }
 
-  // A4 optional combined quality uses the harmonic mean of semantic cohesion
-  // C=1-I_micro and pair preservation G=1-F_micro. Source records keep their
-  // original pair supports beside the observation-supported derived score.
-  {
-    const auto truth = torch::tensor(
-        {{0, 0}, {0, 0}, {0, 0}, {1, 0}, {1, 0}, {0, 2}}, torch::kLong);
-    const auto predicted =
-        torch::tensor({10, 10, 20, 10, 20, 10}, torch::kLong);
-    ClusteringEvaluationOptions options;
-    options.semantic = SemanticEvaluationMode::Power;
-    options.semantic_ranges = {2.0, 4.0};
-    options.semantic_weights = {1.0, 1.0};
-    options.power = 1;
-    options.combined_quality = true;
-    const auto result = evaluate_clustering(predicted, truth, options);
-    const auto &unit = only_unit(result);
-    if (!expect(result.effective_options.combined_quality &&
-                    unit.combined_quality.has_value(),
-                "A4 combined: requested record missing")) {
-      return 1;
-    }
-    const auto &combined = *unit.combined_quality;
-    if (!metric_close(combined.quality, 3.0 / 8.0, "A4 combined p1: quality") ||
-        !metric_close(combined.semantic_micro_impurity, 1.0 / 4.0,
-                      "A4 combined p1: semantic source") ||
-        !metric_close(combined.fragmentation_micro, 3.0 / 4.0,
-                      "A4 combined p1: fragmentation source") ||
-        !expect(combined.quality.metric ==
-                        ClusteringMetricId::CombinedQuality &&
-                    combined.quality.support_count == 6 &&
-                    combined.semantic_micro_impurity.metric ==
-                        ClusteringMetricId::SemanticImpurityMicro &&
-                    combined.semantic_micro_impurity.support_count == 7 &&
-                    combined.fragmentation_micro.metric ==
-                        ClusteringMetricId::FragmentationMicro &&
-                    combined.fragmentation_micro.support_count == 4,
-                "A4 combined p1: metric IDs/supports wrong")) {
-      return 1;
-    }
-
-    options.power = 2;
-    const auto squared_unit =
-        only_unit(evaluate_clustering(predicted, truth, options));
-    const auto &squared = *squared_unit.combined_quality;
-    if (!metric_close(squared.quality, 7.0 / 18.0, "A4 combined p2: quality") ||
-        !metric_close(squared.semantic_micro_impurity, 1.0 / 8.0,
-                      "A4 combined p2: semantic source") ||
-        !metric_close(squared.fragmentation_micro, 3.0 / 4.0,
-                      "A4 combined p2: fragmentation source")) {
-      return 1;
-    }
-
-    ClusteringEvaluationOptions scalar_options;
-    scalar_options.semantic = SemanticEvaluationMode::Power;
-    scalar_options.semantic_ranges = {1.0};
-    scalar_options.power = 1;
-    scalar_options.combined_quality = true;
-    const auto zero_unit = only_unit(
-        evaluate_clustering(torch::tensor({0, 1, 0, 1}, torch::kLong),
-                            scalar_truth({0, 0, 1, 1}), scalar_options));
-    const auto &zero = *zero_unit.combined_quality;
-    if (!metric_close(zero.semantic_micro_impurity, 1.0,
-                      "A4 combined zero: semantic source") ||
-        !metric_close(zero.fragmentation_micro, 1.0,
-                      "A4 combined zero: fragmentation source") ||
-        !metric_close(zero.quality, 0.0, "A4 combined zero: quality")) {
-      return 1;
-    }
-
-    const auto perfect_unit = only_unit(
-        evaluate_clustering(torch::tensor({9, 9, -2, -2}, torch::kLong),
-                            scalar_truth({0, 0, 1, 1}), scalar_options));
-    const auto &perfect = *perfect_unit.combined_quality;
-    if (!metric_close(perfect.quality, 1.0, "A4 combined perfect: quality")) {
-      return 1;
-    }
-
-    const auto semantic_undefined_unit =
-        only_unit(evaluate_clustering(torch::tensor({0, 1, 2}, torch::kLong),
-                                      scalar_truth({0, 0, 1}), scalar_options));
-    const auto &semantic_undefined = *semantic_undefined_unit.combined_quality;
-    if (!metric_undefined(semantic_undefined.semantic_micro_impurity,
-                          MetricUndefinedReason::NoPredictedWithinClusterPairs,
-                          0, "A4 combined: semantic source undefined") ||
-        !metric_close(semantic_undefined.fragmentation_micro, 1.0,
-                      "A4 combined: defined fragmentation source") ||
-        !metric_undefined(semantic_undefined.quality,
-                          MetricUndefinedReason::DependentMetricUndefined, 3,
-                          "A4 combined: semantic dependency")) {
-      return 1;
-    }
-
-    scalar_options.semantic_ranges = {2.0};
-    const auto fragmentation_undefined_unit =
-        only_unit(evaluate_clustering(torch::zeros({3}, torch::kLong),
-                                      scalar_truth({0, 1, 2}), scalar_options));
-    const auto &fragmentation_undefined =
-        *fragmentation_undefined_unit.combined_quality;
-    if (!expect(fragmentation_undefined.semantic_micro_impurity.defined(),
-                "A4 combined: semantic source unexpectedly undefined") ||
-        !metric_undefined(fragmentation_undefined.fragmentation_micro,
-                          MetricUndefinedReason::NoTrueWithinGroupPairs, 0,
-                          "A4 combined: fragmentation source undefined") ||
-        !metric_undefined(fragmentation_undefined.quality,
-                          MetricUndefinedReason::DependentMetricUndefined, 3,
-                          "A4 combined: fragmentation dependency")) {
-      return 1;
-    }
-  }
-
   // Semantic partition quality balances the fraction of total semantic cost
   // separated by predicted boundaries with exact same-truth pair recall. It
   // must reject both the one-cluster collapse and singleton over-splitting.
@@ -919,7 +802,6 @@ int main() {
     options.semantic = SemanticEvaluationMode::Power;
     options.semantic_ranges = {2.0};
     options.power = 1;
-    options.semantic_partition_quality = true;
 
     const auto linear =
         only_unit(evaluate_clustering(predicted, truth, options));
@@ -943,6 +825,15 @@ int main() {
       return 1;
     }
 
+    auto opted_out_options = options;
+    opted_out_options.semantic_partition_quality = false;
+    const auto opted_out =
+        only_unit(evaluate_clustering(predicted, truth, opted_out_options));
+    if (!expect(!opted_out.semantic_partition_quality.has_value(),
+                "partition quality explicit opt-out was ignored")) {
+      return 1;
+    }
+
     options.power = 2;
     const auto squared =
         only_unit(evaluate_clustering(predicted, truth, options));
@@ -957,7 +848,6 @@ int main() {
     endpoint_options.semantic = SemanticEvaluationMode::Power;
     endpoint_options.semantic_ranges = {1.0};
     endpoint_options.power = 1;
-    endpoint_options.semantic_partition_quality = true;
     const auto endpoint_truth = scalar_truth({0, 0, 1, 1});
 
     const auto perfect = only_unit(
@@ -992,7 +882,8 @@ int main() {
                       "partition quality singletons: quality") ||
         !metric_undefined(singletons.semantic.micro_impurity,
                           MetricUndefinedReason::NoPredictedWithinClusterPairs,
-                          0, "partition quality singletons: legacy impurity")) {
+                          0,
+                          "partition quality singletons: semantic impurity")) {
       return 1;
     }
 
@@ -1992,25 +1883,15 @@ int main() {
       }
     }
 
-    ClusteringEvaluationOptions combined_without_power;
-    combined_without_power.combined_quality = true;
-    if (!expect(throws_invalid_argument([&] {
-                  static_cast<void>(evaluate_clustering(
-                      valid_predicted, valid_truth, combined_without_power));
-                }),
-                "validation: combined quality without power accepted")) {
-      return 1;
-    }
-
     ClusteringEvaluationOptions partition_quality_without_power;
-    partition_quality_without_power.semantic_partition_quality = true;
+    const auto inactive_quality = evaluate_clustering(
+        valid_predicted, valid_truth, partition_quality_without_power);
     if (!expect(
-            throws_invalid_argument([&] {
-              static_cast<void>(
-                  evaluate_clustering(valid_predicted, valid_truth,
-                                      partition_quality_without_power));
-            }),
-            "validation: semantic partition quality without power accepted")) {
+            !inactive_quality.effective_options.semantic_partition_quality &&
+                !only_unit(inactive_quality)
+                     .semantic_partition_quality.has_value(),
+            "validation: default semantic-off partition quality was not "
+            "normalized inactive")) {
       return 1;
     }
 

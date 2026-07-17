@@ -5,9 +5,10 @@ fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline result
 contract plus bounded table inspection) are complete. A user-requested bounded
 post-A4 comparison-view extension adding explicit N/S columns and an eighth
 same-window Heatmap tab is also implemented. A post-A4 quality correction adds
-`semantic_partition_separation` and the optional
-`semantic_partition_quality`, while retaining the former `combined_quality`
-unchanged as a deprecated legacy record. Payload persistence, generic
+`semantic_partition_separation` and default-active-in-power-mode
+`semantic_partition_quality` in result schema v6. A later compact-sheet
+refinement makes Exact and Combined Overview-style run comparisons. Payload
+persistence, generic
 `MetricView`, and a standalone/selectable matrix plot are unblocked but remain
 deferred.
 
@@ -44,9 +45,8 @@ Implemented Phase A slices:
   assignments with explicit unmatched marginal support, strict predicted-major
   dense tie-breaking, exact per-group scores, semantic per-dimension errors,
   and Full-detail contingency-mass error records.
-- **A4 — pipeline and table-inspection contract (implemented):** the default-off
-  optional combined-quality record/property, payload, evaluator element,
-  typed-unit alignment, bounded summary and parameter capture, registration,
+- **A4 — pipeline and table-inspection contract (implemented):** payload,
+  evaluator element, typed-unit alignment, bounded summary and parameter capture, registration,
   and pipeline tests. It also adds `ClusteringMetricsTablePlot` in a new
   `leakflow_plugins_ml_plot` bridge, reusing generic `TableView` tab groups for
   Overview, Exact, Semantic, Fragmentation, Combined, Alignment, and Parameters
@@ -63,9 +63,15 @@ Implemented Phase A slices:
   user-requested):** adds a globally normalized semantic-separation component
   and its harmonic combination with pair recall. The new score is zero for a
   one-cluster collapse and for complete singleton over-splitting, and one for a
-  perfect semantic truth partition. Metric IDs are append-only and the result
-  schema advances to version 5; the A4 `combined_quality` formula remains
-  readable but is deprecated for cross-cluster-count comparison.
+  perfect semantic truth partition. Result schema v6 has 29 descriptors;
+  semantic partition separation is metric ID 27 and semantic partition quality
+  is metric ID 28.
+- **Post-A4 compact comparison-sheet refinement (implemented,
+  user-requested):** Exact and Combined now repeat Overview's run/unit,
+  shape/count, and selected-parameter context. Exact adds all ten exact metrics
+  as columns; Combined adds only preferred partition quality, separation, and
+  pair recall. Both append rows directly in accumulate mode without a history
+  scrubber. Per-metric support remains available on hover.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
@@ -449,7 +455,7 @@ and is unavailable with `no_semantic_variation` when
 weights: variation exclusively in zero-weight dimensions is intentionally not
 semantic variation for this metric. Semantic-off mode retains the record with
 `semantic_disabled`. It remains defined as one when no observations share a
-predicted cluster but \(D_{\mathrm{all}}>0\); unlike the legacy micro impurity,
+predicted cluster but \(D_{\mathrm{all}}>0\); unlike within-cluster micro impurity,
 it does not require a predicted-within-cluster denominator.
 
 Separation alone rewards over-splitting, while pair recall alone rewards
@@ -469,9 +475,10 @@ Q_{\mathrm{partition}}=
 {S_{\mathrm{partition}}+R_{\mathrm{pair}}}.
 \]
 
-`semantic_partition_quality` is disabled by default and requires
-`semantic=power`. Its stored result copies both source records with their own
-supports and undefined reasons. The derived quality uses observation count as
+`semantic_partition_quality` defaults to enabled. It is active when
+`semantic=power`, normalized to effective `false` when semantics are off, and
+can be explicitly disabled in power mode. Its stored result copies both source
+records with their own supports and undefined reasons. The derived quality uses observation count as
 support, is unavailable with `dependent_metric_undefined` when either source is
 unavailable, and is defined as zero when both defined components are zero.
 The separation source has support \(\binom N2\); the pair-recall source has
@@ -490,35 +497,6 @@ The endpoint contract is:
 The table assumes nonzero configured semantic variation and at least one true
 within-group pair. Otherwise the explicit undefined rules above take
 precedence. Predicted label values and label ordering do not affect any row.
-
-### Deprecated legacy `combined_quality`
-
-The A4 formula remains unchanged for result compatibility:
-
-\[
-C_{\mathrm{semantic}}=1-I_{\mathrm{micro}},\qquad
-G_{\mathrm{preservation}}=1-F_{\mathrm{micro}}
-=R_{\mathrm{pair}},
-\]
-
-\[
-Q_{\mathrm{legacy}}=
-\frac{2C_{\mathrm{semantic}}G_{\mathrm{preservation}}}
-{C_{\mathrm{semantic}}+G_{\mathrm{preservation}}}.
-\]
-
-`combined_quality` is disabled by default and retains its former undefined and
-source-copy semantics: semantic micro impurity keeps predicted-within-pair
-support, fragmentation keeps true-within-pair support, the derived record uses
-observation support, and an unavailable source produces
-`dependent_metric_undefined`. It is deprecated for comparing different values of
-`n_components`: a one-cluster partition has perfect pair preservation, while
-normalized squared Hamming-weight costs can keep semantic cohesion close to
-one even after every truth group is merged. Existing metric ID 27 and stored
-values are not silently reinterpreted. New experiment comparisons should use
-`semantic_partition_quality` together with ARI, AMI, pair F1, and the two
-component metrics; legacy values may be displayed for historical reproduction
-but must be labeled as legacy.
 
 ## 7. Alignment Results
 
@@ -666,10 +644,9 @@ configuration error.
 
 The result contains:
 
-- schema version and effective options. The post-A4 quality correction uses
-  schema version 5; existing metric IDs remain stable and the two new IDs are
-  appended as `SemanticPartitionSeparation = 28` and
-  `SemanticPartitionQuality = 29`;
+- schema version and effective options. Schema version 6 has 29 descriptors,
+  with `SemanticPartitionSeparation = 27` and
+  `SemanticPartitionQuality = 28`;
 - semantic dimension names, ranges, weights, and power;
 - one result record per aligned unit; the enclosing pipeline `Buffer` carries
   the corresponding typed unit identities;
@@ -679,8 +656,7 @@ The result contains:
 - per-dimension metrics;
 - optional per-cluster and per-group details;
 - optional contingency and alignment records;
-- the optional preferred semantic-partition quality and the separately
-  optional deprecated legacy combined quality, each with copied component
+- the preferred semantic-partition quality when active, with copied component
   records so its inputs remain inspectable.
 
 When either alignment is requested, canonical predicted IDs and truth vectors
@@ -716,15 +692,14 @@ structured evaluation result into metadata.
 The payload summary prints a bounded headline view: counts, ARI, AMI,
 V-measure, purity, pair precision/recall/F1, semantic impurity, semantic
 partition separation, and fragmentation. It adds
-`semantic_partition_quality` when requested. If the old score is requested, it
-keeps the established `combined_quality` summary key for compatibility; its
-property description and the table view identify it as deprecated/legacy.
+`semantic_partition_quality` whenever active.
 Undefined values render as `N/A` with a short reason. Full detail belongs in
 the payload or table view, not unbounded terminal metadata.
 
 `ClusteringEvaluationPayload` persistence is explicitly outside A4. A later
 slice may add a versioned codec and `BufferFileSink`/`BufferFileSrc` round-trip
-compatibility without changing A4's in-memory schema semantics.
+support for its then-current schema. This phase defines no persistence or
+result-schema migration contract.
 
 ## 9. Numeric and Pipeline APIs
 
@@ -750,17 +725,16 @@ Properties:
 - `dimension_names` (optional);
 - `detail` = `global|full`;
 - `alignment` = `none|exact|semantic|both`;
-- `semantic_partition_quality` (default `false`), the preferred optional
-  harmonic score for comparisons across predicted-cluster counts;
-- `combined_quality` (default `false`), retained only as the deprecated A4
-  legacy score and not comparable across predicted-cluster counts.
+- `semantic_partition_quality` (default `true`), the preferred harmonic score
+  for comparisons across predicted-cluster counts. It is active only with
+  `semantic=power`, normalizes to effective `false` with `semantic=off`, and an
+  explicit `false` opts out.
 
 `semantic_partition_separation` is not gated by a separate property: its
 record is produced whenever the semantic result is produced and is defined in
 `semantic=power` mode when the configured weighted semantics have nonzero
-global variation. Both optional composite properties require
-`semantic=power`; requesting either in semantic-off mode is a configuration
-error.
+global variation. Preferred partition quality follows the normalized effective
+option described above.
 
 Metric-affecting properties are `payload-output` with downstream invalidation.
 Display selection is not an evaluator property.
@@ -781,13 +755,16 @@ inspection contract is:
   fragmentation, and preferred partition quality), and the core producer and
   explicit experiment parameters needed to compare configurations. The feature
   value reads `labels.cluster.n_features` and displays `N/A` when the producer
-  did not report it; the optional quality displays `N/A` when not requested;
-- place every stored `MetricValue` exactly once across the five family tabs,
-  preserving value/defined state, averaging, support, scope/item detail, and
-  undefined reason; append `↑` or `↓` to the metric label for its direction.
-  Partition separation belongs to Semantic; the preferred score and copied
-  inputs belong to Combined, where requested old-score records are visibly
-  marked as legacy;
+  did not report it; inactive quality displays `N/A`;
+- make Exact an Overview-style sheet with one row per run and typed unit: reuse
+  the same shape/count context and selected producer/experiment parameters,
+  then add all ten exact metrics as sortable columns;
+- make Combined an Overview-style sheet with the same context/parameters and
+  only preferred partition quality, partition separation, and pair recall as
+  sortable columns. Value/defined state, averaging, support, direction, and
+  undefined reason remain available in the compact
+  metric cells and their hover data. Semantic, Fragmentation, and Alignment
+  retain long-form detail rows;
 - show effective `evaluation.*` options, bounded labels-side
   `payload.cluster.*` parameters stored by the payload, and scalar
   `payload.parameter.*` metadata explicitly stamped on the evaluation input in
@@ -798,9 +775,10 @@ inspection contract is:
 - `update_mode=auto|accumulate|replace` (default `auto`) plus read-only
   `active_update_mode=accumulate|replace`; explicit modes override liveness,
   while auto resolves to accumulate when live-driven and replace otherwise;
-- replace refreshes all tabs; accumulate retains comparison rows in Overview
-  and Parameters and one scrub-able run-history frame in each metric-family and
-  Heatmap tab. Contingencies from different runs are never summed;
+- replace refreshes all tabs; accumulate retains comparison rows in Overview,
+  Exact, Combined, and Parameters. Semantic, Fragmentation, Alignment, and
+  Heatmap retain one scrub-able run-history frame per run. Contingencies from
+  different runs are never summed;
 - fill Heatmap only from each unit's stored Full-detail sparse contingency. Use
   the stored exact-overlap column permutation when present and canonical raw
   predicted-column order otherwise; never run an assignment in the bridge;
@@ -873,19 +851,27 @@ The bridge defines these tabs:
   counts; headline ARI, AMI, pair F1, semantic partition separation, semantic
   impurity, fragmentation, and semantic partition quality; and the core
   clustering-producer and explicit experiment parameters required to compare
-  configurations. Missing producer feature width or an unrequested partition
-  quality is shown as `N/A`. The deprecated legacy combined quality is not an
-  Overview headline.
-- **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment:**
-  long-form metric tables with run, unit, scope, item, metric, value, support,
-  averaging/defined state, and undefined reason as applicable. Across these
-  family tabs every stored `MetricValue` is represented exactly once, including
-  per-dimension, per-cluster, and per-group detail. Metric labels carry `↑` for
+  configurations. Missing producer feature width or an inactive partition
+  quality is shown as `N/A`.
+- **Exact:** one Overview-style row per run and typed unit. It repeats the same
+  shape/count context and selected producer/experiment parameters, followed by
+  all ten exact metrics: ARI, AMI, homogeneity, completeness, V-measure, purity,
+  pair precision/recall/F1, and compatibility NMI. `accumulate` appends rows
+  into one frame rather than requiring the history scrubber.
+- **Semantic**, **Fragmentation**, and **Alignment:** long-form metric tables
+  with run, unit, scope, item, metric, value, support, averaging/defined state,
+  and undefined reason as applicable. Metric labels carry `↑` for
   higher-is-better or `↓` for lower-is-better; the direction marker is not the
   active column-sort arrow. The Semantic tab includes partition separation.
-  The Combined tab shows the preferred quality with its copied separation and
-  pair-recall components; if requested, the old quality and its copied inputs
-  remain visibly separated under `Legacy global`.
+- **Combined:** one Overview-style row per run and typed unit with the same
+  context/selected parameters, followed only by preferred partition quality,
+  separation, and pair recall. `accumulate` appends rows into
+  one frame rather than requiring the history scrubber. Exact and Combined
+  metric cells retain numeric sorting plus raw ID, support, averaging,
+  direction, status, and undefined reason in hover metadata. Support stays off
+  the compact visible columns because it is a per-metric denominator/evidence
+  count whose meaning differs by metric. Inactive preferred records remain as
+  explicit `N/A (not requested)` cells.
 - **Parameters:** effective evaluator options, bounded labels-side
   `payload.cluster.*` producer parameters, and explicit evaluation-buffer
   `payload.parameter.*` experiment metadata once per run. Source identity is
@@ -900,8 +886,9 @@ The bridge defines these tabs:
   unavailable pages.
 
 `replace` and `accumulate` have the deterministic all-tab semantics defined in
-Section 9; `auto` follows liveness and exposes its resolved choice through
-`active_update_mode`. All unit-bearing tabs, including Heatmap, share the
+Section 9; Overview, Exact, and Combined are direct comparison sheets with no
+run-history scrubber. `auto` follows liveness and exposes its resolved choice
+through `active_update_mode`. All unit-bearing tabs, including Heatmap, share the
 selected typed unit while Parameters remains unfiltered. **Clear** drops the
 selected tab and **Clear all** drops the retained content from every tab in that
 comparison group. Each table tab keeps its own stable `asc`/`desc` sort state;
@@ -1044,9 +1031,8 @@ Use hand-computed fixtures for:
 - merge rate and conditional severity;
 - micro/macro/per-group fragmentation;
 - exact and semantic-cost alignments;
-- semantic partition separation and the preferred optional partition quality;
-- the deprecated optional A4 combined score, without changing its historical
-  values.
+- semantic partition separation and the preferred power-mode-default partition
+  quality, including explicit opt-out.
 
 Required scenario coverage:
 
@@ -1070,8 +1056,6 @@ fragmentation records, both rectangular alignment directions, exact and
 semantic mappings that intentionally differ, a tie that requires an
 equality-graph matching flip, both powers, `D=1/2/4`, zero weights, numeric dtype
 edges, batching, observation permutation, and large-`N`/small-assignment stress.
-The optional legacy combined score is covered with A4's property/payload
-contract.
 
 The post-A4 correction adds hand-computed \(p=1\) and \(p=2\) separation and
 quality fixtures, including a two-cluster mixed partition whose expected values
@@ -1080,16 +1064,17 @@ are \(S=3/4,\ Q=12/17\) for \(p=1\) and
 partition to produce one, one-cluster collapse to produce zero, and singleton
 over-splitting to produce zero. Separate tests cover
 `no_semantic_variation`, dependent undefined propagation, copied component
-supports, append-only descriptors/schema version 5, and rejection of
-`semantic_partition_quality=true` in semantic-off mode.
+supports, the schema-v6 29-descriptor inventory and final IDs, default-on
+power-mode quality, semantic-off normalization to inactive, and explicit
+opt-out.
 
 ### Pipeline Tests
 
 - descriptor/property validation;
 - vector-truth shape validation;
 - unit alignment;
-- preferred optional semantic-partition-quality behavior and deprecated
-  optional combined-quality behavior;
+- preferred default-active-in-power-mode semantic-partition-quality behavior
+  and semantic-off normalization/explicit opt-out;
 - structured payload contents, effective evaluator options, output-`Buffer`
   typed units, and bounded summary;
 - deterministic bounded capture of scalar `payload.cluster.*` labels metadata,
@@ -1104,12 +1089,15 @@ supports, append-only descriptors/schema version 5, and rejection of
 - one Overview row per run and unit with `Observations (N)`, producer-supplied or
   unavailable `Features (S)`, headline metrics including partition separation
   and the preferred quality, counts, and core producer/experiment parameters;
-- exact, semantic, fragmentation, combined, alignment, per-dimension/detail,
-  direction, support, and undefined-reason records, with every stored
-  `MetricValue` placed exactly once across the family tabs;
-- separation in the Semantic tab; preferred quality plus copied separation and
-  pair recall in Combined; and any requested old score visibly isolated as
-  `Legacy global`;
+- Exact Overview-style context plus all ten exact metric columns,
+  one-row-per-run/unit accumulation, typed sorting, hover-only support/status,
+  and no history scrubber;
+- Combined Overview-style context plus only preferred quality, copied
+  separation, and pair recall; one-row-per-run/unit accumulation, explicit
+  not-requested values, typed sorting, hover-only support/status, no history
+  scrubber;
+- semantic, fragmentation, alignment, per-dimension/detail, direction, support,
+  and undefined-reason records;
 - effective options, captured `payload.cluster.*` values, and explicit
   `payload.parameter.*` input metadata once per run in Parameters, preserving
   collision-proof source identity and the captured GMM feature width;
@@ -1117,7 +1105,8 @@ supports, append-only descriptors/schema version 5, and rejection of
   normalization, truth-vector/predicted-ID labels, ragged typed-unit pages,
   malformed sparse-payload rejection, Global-detail unavailability, and the
   combined 1,000,000-cell per-run bound;
-- `auto|accumulate|replace`, stopped-state resolution, accumulation history,
+- `auto|accumulate|replace`, stopped-state resolution, direct Overview/Exact/
+  Combined accumulation plus detail-family history,
   synchronized non-contiguous typed-unit selection, explicit clear,
   history/reset, and stable per-tab column `asc|desc` sorting for numeric,
   textual, unavailable, and tied values;
@@ -1126,8 +1115,9 @@ supports, append-only descriptors/schema version 5, and rejection of
   call evaluation or assignment code.
 
 ImGui/ImPlot rendering remains manual-only. Manual validation covers one offline
-multi-unit table/Heatmap, the shared Unit and run-history sliders,
-accumulate/clear/sort controls, and an Idle-state display-property change.
+multi-unit table/Heatmap, the shared Unit selector, detail-family/Heatmap
+run-history sliders, accumulate/clear/sort controls, and an Idle-state
+display-property change.
 
 ### Deferred Tests
 
@@ -1149,19 +1139,22 @@ post-A4 extension.
 - The output `Buffer` preserves typed units; the new payload preserves effective
   options, bounded generic producer parameters, structured results, and a
   bounded summary.
-- `ClusteringMetricsTablePlot` makes the stored metrics and captured parameters
+- `ClusteringMetricsTablePlot` makes current metrics and captured parameters
   inspectable through generic `TableView` tabs: one Overview row per run/unit,
-  every stored metric exactly once in the family tabs, and Parameters once per
-  run, including deterministic auto/accumulate/replace, synchronized typed-unit
-  selection, clear, and per-tab column sorting behavior.
+  one compact Exact row with all ten exact metrics per run/unit, one compact
+  Combined row with only the three preferred metrics per run/unit, and
+  Parameters once per run. The bridge includes deterministic
+  auto/accumulate/replace, synchronized typed-unit selection, clear, and
+  per-tab column sorting behavior.
 - The user-requested post-A4 extension promotes N/S in Overview and adds an
   eighth same-window Heatmap tab with bounded row-normalized stored-contingency
   frames and the same unit/run controls.
 - The post-A4 quality correction exposes globally normalized semantic partition
-  separation and the opt-in separation/pair-recall harmonic quality with the
-  documented collapse, perfect-partition, over-splitting, support, and
-  undefined contracts. Schema version 5 appends metric IDs without changing
-  the deprecated A4 `combined_quality` record.
+  separation and the default-active-in-power-mode separation/pair-recall
+  harmonic quality with the documented collapse, perfect-partition,
+  over-splitting, support, and
+  undefined contracts. Schema version 6 has 29 descriptors, with semantic
+  partition separation at ID 27 and semantic partition quality at ID 28.
 - Table/Heatmap operations over copied data do not rerun evaluation or alignment.
 - Existing `ClusteringStats` pipelines and tests remain unchanged and green.
 - No plotting dependency enters ML or core targets; the bridge dependency is

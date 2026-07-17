@@ -11,10 +11,10 @@ follow-up is active by default: persistence, `MetricView`, and the standalone
 selectable matrix plot are unblocked but remain deferred. A user-requested,
 bounded post-A4 extension adding explicit N/S comparison columns and a same-
 window stored-contingency Heatmap tab is also implemented. A subsequent
-post-A4 quality correction is implemented in schema v5: semantic partition
-separation and an opt-in semantic partition quality replace the legacy combined
-score as the preferred cross-cluster-count comparison, while the old score
-remains available but deprecated.
+post-A4 quality correction is implemented in schema v6: semantic partition
+separation and a power-mode-default semantic partition quality provide the
+cross-cluster-count comparison. Schema v6 has 29 descriptors, with those
+metrics at IDs 27 and 28 respectively.
 
 ## Active ML Sequence
 
@@ -34,9 +34,8 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    predicted-major dense tie-breaking, unmatched marginal supports, exact
    per-group scores, semantic per-dimension errors, and Full-detail
    contingency-mass error records.
-4. **A4 — pipeline and table-inspection contract (done)** — the default-off
-   optional combined-quality record/property (now retained as deprecated
-   legacy data), `ClusteringEvaluate`, structured
+4. **A4 — pipeline and table-inspection contract (done)** —
+   `ClusteringEvaluate`, structured
    `ClusteringEvaluationPayload`, typed-unit alignment, bounded summaries, and
    effective `evaluation.*` options are implemented. The evaluator captures only
    bounded generic producer parameters from the labels buffer's
@@ -45,9 +44,10 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    `ClusteringMetricsTablePlot` are implemented. The bridge fills domain-free
    `TableView` tab groups: Overview, Exact, Semantic, Fragmentation, Combined,
    Alignment, and Parameters. Overview is one row per run and unit with count
-   context, headline metrics, and core producer/experiment parameters. Family tabs expose
-   every stored `MetricValue` exactly once; Parameters presents effective,
-   captured, and explicitly stamped `payload.parameter.*` values once per run.
+   context, headline metrics, and core producer/experiment parameters. Exact
+   and Combined are compact comparison sheets; Semantic, Fragmentation, and
+   Alignment keep long-form detail. Parameters presents effective, captured,
+   and explicitly stamped `payload.parameter.*` values once per run.
    Metric labels show `↑` or `↓` direction. Its `update_mode` is
    `UiControl`/`ElementUi` with `auto|accumulate|replace` and a read-only
    `active_update_mode`; `auto` follows liveness. Group/title and view-local
@@ -66,16 +66,20 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
    unit selection, permits ragged per-unit shapes, appends independent run frames
    in accumulate mode, and explains Global-detail unavailability. It adds no
    persistence, new plot element, selectable matrix mode, or recomputation.
-6. **Post-A4 clustering-quality correction (done, user-requested)** — schema v5
-   appends `semantic_partition_separation = 1 - D_within / D_all` and the
-   default-off `semantic_partition_quality`, the harmonic mean of that
+6. **Post-A4 clustering-quality correction (done, user-requested)** — schema v6
+   defines `semantic_partition_separation = 1 - D_within / D_all` and
+   `semantic_partition_quality`, the harmonic mean of that
    separation and pair recall. Perfect partitions score `1`; one-cluster
    collapse and all-singleton fragmentation score `0`. No semantic variation is
-   explicit unavailability. The original `combined_quality` remains unchanged
-   for compatibility, is marked deprecated/not comparable across predicted
-   cluster counts, and appears only as legacy detail; Overview promotes the
-   corrected separation/quality.
-7. **Deferred follow-up** — add versioned payload persistence, then the generic
+   explicit unavailability. It defaults active with power semantics, normalizes
+   inactive with semantics off, and supports explicit false opt-out. Overview
+   promotes the separation and quality; their metric IDs are 27 and 28.
+7. **Post-A4 compact-sheet refinement (done, user-requested)** — Exact and
+   Combined repeat Overview's run/unit, shape/count, and selected-parameter
+   context. Exact adds all ten exact metrics; Combined adds only preferred
+   quality, separation, and pair recall. Both append directly in accumulate
+   mode without a history scrubber, and keep support in metric hover.
+8. **Deferred follow-up** — add versioned payload persistence, then the generic
    `MetricView`/`ClusteringMetricsPlot` and standalone `ClusteringMatrixPlot`
    with selectable raw/exact/semantic views and normalization.
    Those views consume stored payload results and never recompute evaluation or
@@ -83,7 +87,7 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
 
 A4 remains a bounded table-inspection slice: it added the ML→plot bridge and
 generic, domain-free tabbed table behavior. The bounded post-A4 view extension
-added only N/S and the same-window fixed Heatmap. The separate schema-v5 quality
+added only N/S and the same-window fixed Heatmap. The separate schema-v6 quality
 correction changes only generic evaluation records and their existing table
 presentation. None of these slices adds persistence, `MetricView`, a standalone
 `ClusteringMatrixPlot`, or selectable matrix/alignment/normalization modes.

@@ -38,9 +38,8 @@ enum class ClusteringMetricId : std::uint8_t {
   ExactAlignmentJaccardPerGroup = 24,
   SemanticAlignmentCost = 25,
   SemanticAlignmentDimensionError = 26,
-  CombinedQuality = 27,
-  SemanticPartitionSeparation = 28,
-  SemanticPartitionQuality = 29,
+  SemanticPartitionSeparation = 27,
+  SemanticPartitionQuality = 28,
 };
 
 enum class MetricFamily : std::uint8_t {
@@ -74,7 +73,8 @@ struct ClusteringMetricDescriptor {
 };
 
 // Descriptors are stable, process-lifetime data. IDs and descriptor order are
-// append-only so a later persistence codec can use the numeric IDs safely.
+// stable within a result schema version; incompatible renumbering requires a
+// schema-version increment.
 [[nodiscard]] const ClusteringMetricDescriptor &
 clustering_metric_descriptor(ClusteringMetricId id);
 [[nodiscard]] std::span<const ClusteringMetricDescriptor>
@@ -180,14 +180,6 @@ struct FragmentationClusteringMetrics {
   // nullopt for Global detail; engaged for Full detail. Singleton truth groups
   // are retained with an explicit undefined fragmentation record.
   std::optional<std::vector<TruthGroupFragmentationDetail>> group_details;
-};
-
-struct CombinedClusteringQuality {
-  MetricValue quality;
-  // Source records are copied verbatim so their distinct pair supports and
-  // undefined reasons remain explicit beside the derived score.
-  MetricValue semantic_micro_impurity;
-  MetricValue fragmentation_micro;
 };
 
 struct SemanticPartitionClusteringQuality {
@@ -324,9 +316,6 @@ struct ClusteringEvaluationUnitResult {
   ExactClusteringMetrics exact;
   SemanticClusteringMetrics semantic;
   FragmentationClusteringMetrics fragmentation;
-  // Legacy score; absent unless
-  // ClusteringEvaluationOptions::combined_quality is enabled.
-  std::optional<CombinedClusteringQuality> combined_quality;
   // Preferred cross-K semantic score; absent unless
   // ClusteringEvaluationOptions::semantic_partition_quality is enabled.
   std::optional<SemanticPartitionClusteringQuality> semantic_partition_quality;
@@ -365,14 +354,13 @@ struct ClusteringEvaluationOptions {
   std::vector<double> semantic_weights;
   std::int64_t power = 2;
   AlignmentEvaluationMode alignment = AlignmentEvaluationMode::None;
-  // Deprecated legacy composite retained for result compatibility. It is not
-  // suitable for comparing different predicted-cluster counts.
-  bool combined_quality = false;
-  bool semantic_partition_quality = false;
+  // Preferred cross-cluster-count composite. This defaults on when power
+  // semantics are active and is normalized off when semantics are disabled.
+  bool semantic_partition_quality = true;
 };
 
 struct ClusteringEvaluationResult {
-  std::uint32_t schema_version = 5;
+  std::uint32_t schema_version = 6;
   ClusteringEvaluationOptions effective_options;
   bool batched = false;
   std::int64_t observation_count = 0;

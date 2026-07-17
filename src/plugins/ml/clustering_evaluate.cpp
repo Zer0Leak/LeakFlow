@@ -110,10 +110,8 @@ options_from(const Element &element) {
   } else {
     options.alignment = leakflow::ml::AlignmentEvaluationMode::None;
   }
-  options.combined_quality =
-      bool_property_or(element, "combined_quality", false);
   options.semantic_partition_quality =
-      bool_property_or(element, "semantic_partition_quality", false);
+      bool_property_or(element, "semantic_partition_quality", true);
   return options;
 }
 
@@ -282,8 +280,6 @@ result_parameters(const leakflow::ml::ClusteringEvaluationResult &result,
                         std::to_string(options.power));
   add_bounded_parameter(parameters, "evaluation.alignment",
                         alignment_name(options.alignment));
-  add_bounded_parameter(parameters, "evaluation.combined_quality",
-                        options.combined_quality ? "true" : "false");
   add_bounded_parameter(parameters, "evaluation.semantic_partition_quality",
                         options.semantic_partition_quality ? "true" : "false");
   std::size_t remaining_label_cluster_parameters = 32;
@@ -350,14 +346,9 @@ ElementDescriptor ClusteringEvaluate::descriptor() {
                   "optional stored cluster-to-truth alignment", "",
                   StringEnumConstraint{{"none", "exact", "semantic", "both"}},
                   "", evaluation_output),
-              PropertySpec("combined_quality", false,
-                           "emit the deprecated harmonic semantic-cohesion/"
-                           "group-preservation quality (not comparable across "
-                           "cluster counts)",
-                           "", std::monostate{}, "", evaluation_output),
-              PropertySpec("semantic_partition_quality", false,
+              PropertySpec("semantic_partition_quality", true,
                            "emit semantic separation/pair-recall harmonic "
-                           "quality for cross-cluster-count comparison",
+                           "quality when power semantics are active",
                            "", std::monostate{}, "", evaluation_output),
           },
       .keywords = {"clustering", "evaluation", "semantic", "alignment",
@@ -370,7 +361,7 @@ ElementDescriptor ClusteringEvaluate::descriptor() {
                   {"unit/evaluation"}),
               make_element_metadata_descriptor(
                   "payload.clustering_evaluation.schema_version",
-                  std::int64_t{}, "numeric result schema version", {"5"}),
+                  std::int64_t{}, "numeric result schema version", {"6"}),
               make_element_metadata_descriptor(
                   "payload.clustering_evaluation.semantic", std::string(),
                   "effective semantic evaluation mode", {"off", "power"}),

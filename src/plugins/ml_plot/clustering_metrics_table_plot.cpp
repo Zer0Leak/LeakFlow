@@ -226,8 +226,6 @@ parameter_records(const ml_plugin::ClusteringEvaluationPayload &payload,
       {"Evaluator", "power", std::to_string(options.power)},
       {"Evaluator", "alignment",
        std::string(alignment_name(options.alignment))},
-      {"Evaluator", "combined_quality",
-       options.combined_quality ? "true" : "false"},
       {"Evaluator", "semantic_partition_quality",
        options.semantic_partition_quality ? "true" : "false"},
   };
@@ -235,16 +233,11 @@ parameter_records(const ml_plugin::ClusteringEvaluationPayload &payload,
   // Effective options above are authoritative. The payload also carries these
   // exact keys for summaries, so skip only those known duplicates. Unknown
   // evaluation.* keys remain visible as forward-compatible payload context.
-  constexpr std::array<std::string_view, 9> effective_parameter_names{
-      "evaluation.detail",
-      "evaluation.semantic",
-      "evaluation.dimension_names",
-      "evaluation.semantic_ranges",
-      "evaluation.semantic_weights",
-      "evaluation.power",
-      "evaluation.alignment",
-      "evaluation.combined_quality",
-      "evaluation.semantic_partition_quality",
+  constexpr std::array<std::string_view, 8> effective_parameter_names{
+      "evaluation.detail",           "evaluation.semantic",
+      "evaluation.dimension_names",  "evaluation.semantic_ranges",
+      "evaluation.semantic_weights", "evaluation.power",
+      "evaluation.alignment",        "evaluation.semantic_partition_quality",
   };
   for (const auto &[name, value] : payload.parameters()) {
     if (!std::ranges::contains(effective_parameter_names, name)) {
@@ -426,20 +419,6 @@ metric_rows(const ml::ClusteringEvaluationResult &result) {
                     value.semantic_partition_quality->pair_recall);
     }
 
-    if (value.combined_quality) {
-      append_metric(rows, unit, TableSection::Combined, "Legacy global", "",
-                    value.combined_quality->quality);
-      // These are copied component records stored inside the combined result.
-      // Keep them beside the quality score even though their descriptors retain
-      // their original semantic/fragmentation family in hover metadata.
-      append_metric(rows, unit, TableSection::Combined, "Component",
-                    "Semantic micro impurity",
-                    value.combined_quality->semantic_micro_impurity);
-      append_metric(rows, unit, TableSection::Combined, "Component",
-                    "Fragmentation micro",
-                    value.combined_quality->fragmentation_micro);
-    }
-
     if (value.exact_alignment) {
       append_metric(rows, unit, TableSection::Alignment, "Global", "",
                     value.exact_alignment->matched_accuracy);
@@ -559,6 +538,38 @@ void append_metric_hover(plot::TableCell &cell, const ml::MetricValue &metric,
 headline_metric_value_cell(const ml::MetricValue &metric) {
   auto cell = metric_value_cell(metric);
   append_metric_hover(cell, metric, false);
+  if (metric.defined()) {
+    cell.hover.emplace_back("support", std::to_string(metric.support_count));
+  }
+  return cell;
+}
+
+[[nodiscard]] plot::TableCell
+comparison_metric_value_cell(const ml::MetricValue &metric) {
+  auto cell = metric_value_cell(metric);
+  const auto &descriptor = ml::clustering_metric_descriptor(metric.metric);
+  cell.hover.emplace_back("raw id", std::string(descriptor.name));
+  if (metric.defined()) {
+    cell.hover.emplace_back("support", std::to_string(metric.support_count));
+  }
+  cell.hover.emplace_back(
+      "family", std::string(ml::metric_family_name(descriptor.family)));
+  cell.hover.emplace_back("averaging", std::string(ml::metric_averaging_name(
+                                           descriptor.averaging)));
+  cell.hover.emplace_back("direction", std::string(ml::metric_direction_name(
+                                           descriptor.direction)));
+  cell.hover.emplace_back(
+      "status", metric.defined() ? std::string("Defined")
+                                 : humanize(ml::metric_undefined_reason_name(
+                                       metric.undefined_reason)));
+  return cell;
+}
+
+[[nodiscard]] plot::TableCell metric_not_requested_cell() {
+  auto cell = text_cell("N/A");
+  cell.sort_value.reset();
+  cell.hover.emplace_back("reason", "not requested");
+  cell.hover.emplace_back("status", "Not requested");
   return cell;
 }
 
@@ -631,6 +642,32 @@ base_update(const Element &element, TableSection section, std::int64_t run) {
   return update;
 }
 
+void append_comparison_context_columns(
+    std::vector<std::string> &columns,
+    const std::vector<OverviewParameter> &parameters) {
+  columns = {"Run",          "Unit",         "Observations (N)",
+             "Features (S)", "Truth groups", "Predicted clusters"};
+  for (const auto &parameter : parameters) {
+    columns.push_back(parameter.header);
+  }
+}
+
+void append_comparison_context_cells(
+    std::vector<plot::TableCell> &cells, std::int64_t run, std::int64_t unit_id,
+    const ml::ClusteringEvaluationUnitResult &unit,
+    const std::optional<std::string> &feature_count,
+    const std::vector<OverviewParameter> &parameters) {
+  cells.push_back(int_cell(run));
+  cells.push_back(int_cell(unit_id));
+  cells.push_back(int_cell(unit.observation_count));
+  cells.push_back(optional_integer_cell(feature_count));
+  cells.push_back(int_cell(unit.truth_group_count));
+  cells.push_back(int_cell(unit.predicted_cluster_count));
+  for (const auto &parameter : parameters) {
+    cells.push_back(text_cell(parameter.value));
+  }
+}
+
 void push_overview(Element &element, plot::TableView &view,
                    const ml::ClusteringEvaluationResult &result,
                    const std::vector<std::int64_t> &unit_ids,
@@ -641,14 +678,10 @@ void push_overview(Element &element, plot::TableView &view,
   update.update_mode = accumulate ? plot::TableUpdateMode::AppendRows
                                   : plot::TableUpdateMode::ReplaceFrame;
   update.max_history = 1;
-  update.columns = {"Run",          "Unit",         "Observations (N)",
-                    "Features (S)", "Truth groups", "Predicted clusters"};
   const auto feature_count =
       parameter_value(parameters, "Clustering", "labels.cluster.n_features");
   const auto selected_parameters = overview_parameters(parameters);
-  for (const auto &parameter : selected_parameters) {
-    update.columns.push_back(parameter.header);
-  }
+  append_comparison_context_columns(update.columns, selected_parameters);
   update.columns.insert(update.columns.end(),
                         {"ARI \u2191", "AMI \u2191", "Pair F1 \u2191",
                          "Semantic partition separation \u2191",
@@ -661,15 +694,8 @@ void push_overview(Element &element, plot::TableView &view,
     const auto &unit = result.units[dense_unit];
     std::vector<plot::TableCell> cells;
     cells.reserve(update.columns.size());
-    cells.push_back(int_cell(run));
-    cells.push_back(int_cell(unit_ids.at(dense_unit)));
-    cells.push_back(int_cell(unit.observation_count));
-    cells.push_back(optional_integer_cell(feature_count));
-    cells.push_back(int_cell(unit.truth_group_count));
-    cells.push_back(int_cell(unit.predicted_cluster_count));
-    for (const auto &parameter : selected_parameters) {
-      cells.push_back(text_cell(parameter.value));
-    }
+    append_comparison_context_cells(cells, run, unit_ids.at(dense_unit), unit,
+                                    feature_count, selected_parameters);
     cells.push_back(headline_metric_value_cell(unit.exact.adjusted_rand_index));
     cells.push_back(
         headline_metric_value_cell(unit.exact.adjusted_mutual_information));
@@ -690,6 +716,52 @@ void push_overview(Element &element, plot::TableView &view,
     update.frame.rows.push_back(std::move(cells));
   }
   view.push(snapshot_name(element.name(), TableSection::Overview), update);
+}
+
+void push_exact(Element &element, plot::TableView &view,
+                const ml::ClusteringEvaluationResult &result,
+                const std::vector<std::int64_t> &unit_ids,
+                const std::vector<ParameterRecord> &parameters,
+                std::int64_t run, bool accumulate) {
+  auto update = base_update(element, TableSection::Exact, run);
+  update.row_selector = unit_row_selector(element, unit_ids);
+  update.update_mode = accumulate ? plot::TableUpdateMode::AppendRows
+                                  : plot::TableUpdateMode::ReplaceFrame;
+  update.max_history = 1;
+  const auto feature_count =
+      parameter_value(parameters, "Clustering", "labels.cluster.n_features");
+  const auto selected_parameters = overview_parameters(parameters);
+  append_comparison_context_columns(update.columns, selected_parameters);
+  update.columns.insert(update.columns.end(),
+                        {"ARI \u2191", "AMI \u2191", "Homogeneity \u2191",
+                         "Completeness \u2191", "V-measure \u2191",
+                         "Purity \u2191", "Pair precision \u2191",
+                         "Pair recall \u2191", "Pair F1 \u2191", "NMI \u2191"});
+
+  update.frame.rows.reserve(result.units.size());
+  for (std::size_t dense_unit = 0; dense_unit < result.units.size();
+       ++dense_unit) {
+    const auto &unit = result.units[dense_unit];
+    const auto &exact = unit.exact;
+    std::vector<plot::TableCell> cells;
+    cells.reserve(update.columns.size());
+    append_comparison_context_cells(cells, run, unit_ids.at(dense_unit), unit,
+                                    feature_count, selected_parameters);
+    cells.push_back(comparison_metric_value_cell(exact.adjusted_rand_index));
+    cells.push_back(
+        comparison_metric_value_cell(exact.adjusted_mutual_information));
+    cells.push_back(comparison_metric_value_cell(exact.homogeneity));
+    cells.push_back(comparison_metric_value_cell(exact.completeness));
+    cells.push_back(comparison_metric_value_cell(exact.v_measure));
+    cells.push_back(comparison_metric_value_cell(exact.purity));
+    cells.push_back(comparison_metric_value_cell(exact.pair_precision));
+    cells.push_back(comparison_metric_value_cell(exact.pair_recall));
+    cells.push_back(comparison_metric_value_cell(exact.pair_f1));
+    cells.push_back(
+        comparison_metric_value_cell(exact.normalized_mutual_information));
+    update.frame.rows.push_back(std::move(cells));
+  }
+  view.push(snapshot_name(element.name(), TableSection::Exact), update);
 }
 
 void push_metric_section(Element &element, plot::TableView &view,
@@ -722,6 +794,49 @@ void push_metric_section(Element &element, plot::TableView &view,
     update.frame.rows.push_back(std::move(cells));
   }
   view.push(snapshot_name(element.name(), section), update);
+}
+
+void push_combined(Element &element, plot::TableView &view,
+                   const ml::ClusteringEvaluationResult &result,
+                   const std::vector<std::int64_t> &unit_ids,
+                   const std::vector<ParameterRecord> &parameters,
+                   std::int64_t run, bool accumulate) {
+  auto update = base_update(element, TableSection::Combined, run);
+  update.row_selector = unit_row_selector(element, unit_ids);
+  update.update_mode = accumulate ? plot::TableUpdateMode::AppendRows
+                                  : plot::TableUpdateMode::ReplaceFrame;
+  update.max_history = 1;
+  const auto feature_count =
+      parameter_value(parameters, "Clustering", "labels.cluster.n_features");
+  const auto selected_parameters = overview_parameters(parameters);
+  append_comparison_context_columns(update.columns, selected_parameters);
+  update.columns.insert(update.columns.end(),
+                        {"Semantic partition quality \u2191",
+                         "Semantic partition separation \u2191",
+                         "Pair recall \u2191"});
+  update.frame.rows.reserve(result.units.size());
+  for (std::size_t dense_unit = 0; dense_unit < result.units.size();
+       ++dense_unit) {
+    const auto &unit = result.units[dense_unit];
+    std::vector<plot::TableCell> cells;
+    cells.reserve(update.columns.size());
+    append_comparison_context_cells(cells, run, unit_ids.at(dense_unit), unit,
+                                    feature_count, selected_parameters);
+    if (unit.semantic_partition_quality) {
+      cells.push_back(comparison_metric_value_cell(
+          unit.semantic_partition_quality->quality));
+      cells.push_back(comparison_metric_value_cell(
+          unit.semantic_partition_quality->semantic_partition_separation));
+      cells.push_back(comparison_metric_value_cell(
+          unit.semantic_partition_quality->pair_recall));
+    } else {
+      cells.push_back(metric_not_requested_cell());
+      cells.push_back(metric_not_requested_cell());
+      cells.push_back(metric_not_requested_cell());
+    }
+    update.frame.rows.push_back(std::move(cells));
+  }
+  view.push(snapshot_name(element.name(), TableSection::Combined), update);
 }
 
 [[nodiscard]] std::string compact_number(const torch::Tensor &value) {
@@ -1069,24 +1184,20 @@ std::optional<Buffer> capture_table(Element &element, plot::TableView &view,
   const auto unit_ids = unit_identities(input, result.units.size());
   const auto run = ++sequence;
 
-  // Explicit section order keeps Overview first even after a tab is cleared and
-  // recreated. Family tabs keep every stored MetricValue in exactly one
-  // structural section.
+  // Explicit section order keeps Overview first even after a tab is cleared
+  // and recreated. Every visible metric belongs to one structural sheet.
   push_overview(element, view, result, unit_ids, parameters, run, accumulate);
-  push_metric_section(element, view, metrics, unit_ids, TableSection::Exact,
-                      run, accumulate);
+  push_exact(element, view, result, unit_ids, parameters, run, accumulate);
   push_metric_section(element, view, metrics, unit_ids, TableSection::Semantic,
                       run, accumulate);
   push_metric_section(element, view, metrics, unit_ids,
                       TableSection::Fragmentation, run, accumulate);
 
   if (has_section(metrics, TableSection::Combined)) {
-    push_metric_section(element, view, metrics, unit_ids,
-                        TableSection::Combined, run, accumulate);
+    push_combined(element, view, result, unit_ids, parameters, run, accumulate);
   } else if (accumulate && view.contains(snapshot_name(
                                element.name(), TableSection::Combined))) {
-    push_metric_section(element, view, metrics, unit_ids,
-                        TableSection::Combined, run, true);
+    push_combined(element, view, result, unit_ids, parameters, run, true);
   } else if (!accumulate) {
     static_cast<void>(
         view.erase(snapshot_name(element.name(), TableSection::Combined)));

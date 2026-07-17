@@ -160,12 +160,6 @@ void ClusteringEvaluationPayload::describe(SummarySection &section,
         add_metric_child(field, "semantic_partition_quality",
                          unit.semantic_partition_quality->quality);
       }
-      if (unit.combined_quality) {
-        // Keep the established summary key for compatibility. The evaluator
-        // property and plot label document that this score is legacy.
-        add_metric_child(field, "combined_quality",
-                         unit.combined_quality->quality);
-      }
       if (unit.exact_alignment) {
         add_metric_child(field, "exact_alignment_matched_accuracy",
                          unit.exact_alignment->matched_accuracy);

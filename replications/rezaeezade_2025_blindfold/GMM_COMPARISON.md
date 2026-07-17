@@ -84,9 +84,7 @@ the better balanced semantic partition score, while 81 components separate a
 slightly larger fraction of semantic variation and score better on the listed
 information-theoretic metrics.
 
-Do not compare the deprecated `combined_quality` across these two values of
-`K`. `semantic_partition_quality` is the cross-`K` score intended for this
-comparison.
+`semantic_partition_quality` is the cross-`K` score used for this comparison.
 
 ## Timing note
 

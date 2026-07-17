@@ -5,11 +5,13 @@
 #include "leakflow/core/buffer.hpp"
 #include "leakflow/core/summary_document.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <torch/torch.h>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -67,8 +69,17 @@ int main() {
                 "descriptor pads/caps are wrong")) {
       return 1;
     }
-    if (!expect(descriptor.property_specs.size() == 9,
+    if (!expect(descriptor.property_specs.size() == 8,
                 "descriptor should expose all evaluator properties")) {
+      return 1;
+    }
+    const auto partition_quality = std::ranges::find_if(
+        descriptor.property_specs, [](const auto &property) {
+          return property.name == "semantic_partition_quality";
+        });
+    if (!expect(partition_quality != descriptor.property_specs.end() &&
+                    std::get<bool>(partition_quality->default_value),
+                "semantic partition quality must default on")) {
       return 1;
     }
     for (const auto &property : descriptor.property_specs) {
@@ -110,7 +121,7 @@ int main() {
     const auto payload =
         output->payload_as<plugin::ClusteringEvaluationPayload>();
     if (!expect(payload && payload->layout() == "unit/evaluation" &&
-                    payload->result().schema_version == 5 &&
+                    payload->result().schema_version == 6 &&
                     output->metadata_or("payload.layout", "") ==
                         "unit/evaluation",
                 "structured payload identity/schema is wrong")) {
@@ -119,7 +130,6 @@ int main() {
     const auto &unit = payload->result().units.front();
     if (!expect(
             unit.exact.adjusted_rand_index.value == 1.0 &&
-                !unit.combined_quality.has_value() &&
                 !unit.semantic_partition_quality.has_value() &&
                 payload->parameters().at("labels.cluster.method") ==
                     "gaussian-mixture" &&
@@ -161,8 +171,15 @@ int main() {
                     512 &&
                 payload->parameters()
                         .at("evaluation.semantic_weights")
-                        .size() <= 512,
-            "effective evaluator parameters exceeded their payload bounds")) {
+                        .size() <= 512 &&
+                payload->result()
+                    .effective_options.semantic_partition_quality &&
+                payload->result()
+                    .units.front()
+                    .semantic_partition_quality.has_value() &&
+                payload->parameters().at(
+                    "evaluation.semantic_partition_quality") == "true",
+            "power-mode defaults or evaluator parameter bounds are wrong")) {
       return 1;
     }
   }
@@ -206,8 +223,6 @@ int main() {
     element.set_property("semantic_weights", leakflow::DoubleList{3.0, 1.0});
     element.set_property("power", std::int64_t{1});
     element.set_property("alignment", std::string("both"));
-    element.set_property("combined_quality", true);
-    element.set_property("semantic_partition_quality", true);
     const auto output = element.process_inputs(inputs(labels, truth));
     const auto payload =
         output->payload_as<plugin::ClusteringEvaluationPayload>();
@@ -231,8 +246,6 @@ int main() {
                         torch::kFloat64 &&
                     unit.exact_alignment.has_value() &&
                     unit.semantic_alignment.has_value() &&
-                    unit.combined_quality.has_value() &&
-                    unit.combined_quality->quality.defined() &&
                     unit.semantic_partition_quality.has_value() &&
                     unit.semantic_partition_quality->quality.defined(),
                 "full semantic property/result mapping is wrong")) {
@@ -240,31 +253,24 @@ int main() {
     }
   }
 
-  // Combined quality is explicit and cannot be requested with semantics off.
-  {
-    plugin::ClusteringEvaluate element;
-    element.set_property("combined_quality", true);
-    const auto labels = tensor_buffer(torch::tensor({0, 0}, torch::kLong));
-    const auto truth = tensor_buffer(torch::tensor({{0}, {0}}, torch::kLong));
-    if (!expect(throws_invalid_argument([&] {
-                  (void)element.process_inputs(inputs(labels, truth));
-                }),
-                "combined quality with semantic=off must be rejected")) {
-      return 1;
-    }
-  }
-
-  // Semantic partition quality is explicit and cannot be requested with
-  // semantics off.
+  // Semantic partition quality defaults on, but semantic-off evaluation
+  // normalizes it inactive instead of emitting a meaningless composite.
   {
     plugin::ClusteringEvaluate element;
     element.set_property("semantic_partition_quality", true);
     const auto labels = tensor_buffer(torch::tensor({0, 0}, torch::kLong));
     const auto truth = tensor_buffer(torch::tensor({{0}, {0}}, torch::kLong));
+    const auto output = element.process_inputs(inputs(labels, truth));
+    const auto payload =
+        output->payload_as<plugin::ClusteringEvaluationPayload>();
     if (!expect(
-            throws_invalid_argument(
-                [&] { (void)element.process_inputs(inputs(labels, truth)); }),
-            "semantic partition quality with semantic=off must be rejected")) {
+            !payload->result().effective_options.semantic_partition_quality &&
+                !payload->result()
+                     .units.front()
+                     .semantic_partition_quality.has_value() &&
+                payload->parameters().at(
+                    "evaluation.semantic_partition_quality") == "false",
+            "semantic-off partition quality was not normalized inactive")) {
       return 1;
     }
   }

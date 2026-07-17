@@ -8,6 +8,8 @@
 #include "leakflow/ml/clustering_evaluation.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -27,6 +29,25 @@ namespace ml = leakflow::ml;
 namespace ml_plugin = leakflow::plugins::ml;
 namespace ml_plot = leakflow::plugins::ml_plot;
 namespace plot = leakflow::plot;
+
+inline constexpr std::array<std::string_view, 3> combined_metric_columns{
+    "Semantic partition quality \u2191",
+    "Semantic partition separation \u2191",
+    "Pair recall \u2191",
+};
+
+inline constexpr std::array<std::string_view, 10> exact_metric_columns{
+    "ARI \u2191",
+    "AMI \u2191",
+    "Homogeneity \u2191",
+    "Completeness \u2191",
+    "V-measure \u2191",
+    "Purity \u2191",
+    "Pair precision \u2191",
+    "Pair recall \u2191",
+    "Pair F1 \u2191",
+    "NMI \u2191",
+};
 
 class LiveEvaluationSource final : public leakflow::Element {
 public:
@@ -97,7 +118,6 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   result.effective_options.semantic_weights = {3.0, 1.0};
   result.effective_options.power = 2;
   result.effective_options.alignment = ml::AlignmentEvaluationMode::Both;
-  result.effective_options.combined_quality = true;
   result.effective_options.semantic_partition_quality = true;
   result.observation_count = 6;
   result.semantic_dimension_count = 2;
@@ -176,15 +196,6 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
           },
       };
 
-  ml::CombinedClusteringQuality combined;
-  combined.quality =
-      defined_metric(ml::ClusteringMetricId::CombinedQuality, 0.70, 6);
-  combined.semantic_micro_impurity =
-      defined_metric(ml::ClusteringMetricId::SemanticImpurityMicro, 0.21, 15);
-  combined.fragmentation_micro =
-      defined_metric(ml::ClusteringMetricId::FragmentationMicro, 0.33, 14);
-  unit.combined_quality = std::move(combined);
-
   ml::SemanticPartitionClusteringQuality semantic_partition;
   semantic_partition.quality =
       defined_metric(ml::ClusteringMetricId::SemanticPartitionQuality, 0.81, 6);
@@ -254,10 +265,8 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   auto result = evaluation_result();
   result.effective_options.semantic = ml::SemanticEvaluationMode::Off;
   result.effective_options.alignment = ml::AlignmentEvaluationMode::None;
-  result.effective_options.combined_quality = false;
   result.effective_options.semantic_partition_quality = false;
   auto &unit = result.units.front();
-  unit.combined_quality.reset();
   unit.semantic_partition_quality.reset();
   unit.exact_alignment.reset();
   unit.semantic_alignment.reset();
@@ -370,11 +379,26 @@ row_with(const plot::TableSnapshot &snapshot, std::string_view column,
 }
 
 [[nodiscard]] std::size_t
-total_metric_rows(const std::vector<plot::TableSnapshot> &snapshots) {
+total_metric_records(const std::vector<plot::TableSnapshot> &snapshots) {
   std::size_t count = 0;
-  for (const auto label :
-       {"Exact", "Semantic", "Fragmentation", "Combined", "Alignment"}) {
+  for (const auto label : {"Semantic", "Fragmentation", "Alignment"}) {
     count += snapshot_for(snapshots, label).frames.back().rows.size();
+  }
+  const auto &exact = snapshot_for(snapshots, "Exact");
+  for (const auto &row : exact.frames.back().rows) {
+    for (const auto column : exact_metric_columns) {
+      if (hover_value(row[column_index(exact, column)], "raw id")) {
+        ++count;
+      }
+    }
+  }
+  const auto &combined = snapshot_for(snapshots, "Combined");
+  for (const auto &row : combined.frames.back().rows) {
+    for (const auto column : combined_metric_columns) {
+      if (hover_value(row[column_index(combined, column)], "raw id")) {
+        ++count;
+      }
+    }
   }
   return count;
 }
@@ -466,7 +490,10 @@ int main() {
             snapshot_for(stopped_snapshots, "Overview")
                         .frames.back()
                         .rows.size() == 2 &&
-                snapshot_for(stopped_snapshots, "Exact").frames.size() == 2,
+                snapshot_for(stopped_snapshots, "Exact").frames.size() == 1 &&
+                snapshot_for(stopped_snapshots, "Exact")
+                        .frames.back()
+                        .rows.size() == 2,
             "stopped-state accumulate was not used by subsequent buffers")) {
       return 1;
     }
@@ -508,7 +535,6 @@ int main() {
   {
     auto multi_result = evaluation_result();
     multi_result.units.push_back(multi_result.units.front());
-    multi_result.units.back().combined_quality.reset();
     multi_result.units.back().semantic_partition_quality.reset();
     multi_result.units.back().exact_alignment.reset();
     multi_result.units.back().semantic_alignment.reset();
@@ -569,8 +595,7 @@ int main() {
       for (const auto &row : snapshot.frames.back().rows) {
         displayed_units.insert(row[family_unit_column].text);
       }
-      const auto optional_subset =
-          snapshot.tab_label == "Combined" || snapshot.tab_label == "Alignment";
+      const auto optional_subset = snapshot.tab_label == "Alignment";
       const auto expected_units = optional_subset
                                       ? std::set<std::string>({"2"})
                                       : std::set<std::string>({"2", "7"});
@@ -594,6 +619,27 @@ int main() {
         return 1;
       }
     }
+    const auto &multi_combined = snapshot_for(multi_snapshots, "Combined");
+    const auto multi_combined_unit = column_index(multi_combined, "Unit");
+    const auto unit_seven = std::ranges::find_if(
+        multi_combined.frames.back().rows,
+        [&](const auto &row) { return row[multi_combined_unit].text == "7"; });
+    const auto missing_combined_values =
+        unit_seven != multi_combined.frames.back().rows.end() &&
+        std::ranges::all_of(combined_metric_columns, [&](const auto column) {
+          const auto &cell =
+              (*unit_seven)[column_index(multi_combined, column)];
+          return cell.text == "N/A" &&
+                 hover_value(cell, "reason") ==
+                     std::optional<std::string>("not requested") &&
+                 hover_value(cell, "status") ==
+                     std::optional<std::string>("Not requested");
+        });
+    if (!expect(missing_combined_values,
+                "Combined comparison row did not explain absent optional "
+                "records")) {
+      return 1;
+    }
     const auto &multi_heatmap = snapshot_for(multi_snapshots, "Heatmap");
     const auto &pages = multi_heatmap.frames.back().heatmap->pages;
     if (!expect(
@@ -610,6 +656,41 @@ int main() {
                 pages[1].count_total == 6 &&
                 pages[1].count_label == "observations",
             "Heatmap pages lost ragged shapes or typed unit identities")) {
+      return 1;
+    }
+  }
+
+  // Wide Combined cells retain undefined reasons, support, and status in hover
+  // even though the old long-form Status/Support columns are gone.
+  {
+    auto undefined_result = evaluation_result();
+    undefined_result.units.front().semantic_partition_quality->quality =
+        undefined_metric(ml::ClusteringMetricId::SemanticPartitionQuality,
+                         ml::MetricUndefinedReason::DependentMetricUndefined,
+                         6);
+    auto undefined_view = std::make_shared<plot::TableView>();
+    ml_plot::ClusteringMetricsTablePlot undefined_table(undefined_view,
+                                                        "undefined");
+    (void)undefined_table.process(
+        evaluation_buffer(std::move(undefined_result)));
+    const auto undefined_snapshots = undefined_view->snapshots_copy();
+    const auto &undefined_combined =
+        snapshot_for(undefined_snapshots, "Combined");
+    const auto &undefined_cell =
+        undefined_combined.frames.back().rows.front()[column_index(
+            undefined_combined, "Semantic partition quality \u2191")];
+    if (!expect(
+            undefined_cell.text == "N/A" &&
+                !undefined_cell.sort_value.has_value() &&
+                hover_value(undefined_cell, "raw id") ==
+                    std::optional<std::string>("semantic_partition_quality") &&
+                hover_value(undefined_cell, "reason") ==
+                    std::optional<std::string>("dependent_metric_undefined") &&
+                hover_value(undefined_cell, "support") ==
+                    std::optional<std::string>("6") &&
+                hover_value(undefined_cell, "status") ==
+                    std::optional<std::string>("Dependent Metric Undefined"),
+            "Combined undefined metric hover lost stored state")) {
       return 1;
     }
   }
@@ -930,8 +1011,11 @@ int main() {
           "overview headline values/direction arrows are wrong") ||
       !expect(
           std::holds_alternative<double>(
-              *overview_row[column_index(overview, "ARI \u2191")].sort_value),
-          "overview metrics must carry typed numeric sort values") ||
+              *overview_row[column_index(overview, "ARI \u2191")].sort_value) &&
+              hover_value(overview_row[column_index(overview, "ARI \u2191")],
+                          "support") == std::optional<std::string>("15"),
+          "overview metrics must carry numeric sort values and hover "
+          "support") ||
       !expect(std::set<std::string>(overview.columns.begin(),
                                     overview.columns.end())
                       .size() == overview.columns.size(),
@@ -990,7 +1074,7 @@ int main() {
   }
   if (!expect(!std::ranges::contains(parameters.columns, std::string("Unit")),
               "run-wide Parameters must not repeat per unit") ||
-      !expect(parameter_rows.size() == 17 &&
+      !expect(parameter_rows.size() == 16 &&
                   parameter_identities.size() == parameter_rows.size(),
               "parameters were repeated, lost, or conflated") ||
       !expect(
@@ -1027,27 +1111,27 @@ int main() {
     return 1;
   }
 
-  // Every stored MetricValue appears exactly once across the family tabs. The
-  // copied combined components remain in Combined, retaining their original
-  // descriptor family only in hover metadata.
+  // Every MetricValue appears in the family tabs. Exact and
+  // Combined use one compact comparison row per run/unit, with descriptor and
+  // support metadata in each metric cell's hover.
   if (!expect(
-          snapshot_for(snapshots, "Exact").frames.back().rows.size() == 10 &&
+          snapshot_for(snapshots, "Exact").frames.back().rows.size() == 1 &&
               snapshot_for(snapshots, "Semantic").frames.back().rows.size() ==
                   10 &&
               snapshot_for(snapshots, "Fragmentation")
                       .frames.back()
                       .rows.size() == 3 &&
               snapshot_for(snapshots, "Combined").frames.back().rows.size() ==
-                  6 &&
+                  1 &&
               snapshot_for(snapshots, "Alignment").frames.back().rows.size() ==
                   8 &&
-              total_metric_rows(snapshots) == 37,
-          "stored metrics were dropped or duplicated across family tabs")) {
+              total_metric_records(snapshots) == 34,
+          "visible metrics were dropped or duplicated across "
+          "family tabs")) {
     return 1;
   }
   std::map<std::string, std::size_t> raw_metric_counts;
-  for (const auto label :
-       {"Exact", "Semantic", "Fragmentation", "Combined", "Alignment"}) {
+  for (const auto label : {"Semantic", "Fragmentation", "Alignment"}) {
     const auto &family = snapshot_for(snapshots, label);
     const auto metric_column = column_index(family, "Metric");
     for (const auto &row : family.frames.back().rows) {
@@ -1063,38 +1147,105 @@ int main() {
       ++raw_metric_counts[*raw_id];
     }
   }
+  const auto &exact = snapshot_for(snapshots, "Exact");
+  const auto &exact_row = exact.frames.back().rows.front();
+  for (const auto column : exact_metric_columns) {
+    const auto &cell = exact_row[column_index(exact, column)];
+    const auto raw_id = hover_value(cell, "raw id");
+    if (!expect(raw_id.has_value() &&
+                    hover_value(cell, "family") ==
+                        std::optional<std::string>("exact") &&
+                    hover_value(cell, "averaging").has_value() &&
+                    hover_value(cell, "direction").has_value() &&
+                    hover_value(cell, "support").has_value() &&
+                    hover_value(cell, "status") ==
+                        std::optional<std::string>("Defined") &&
+                    cell.sort_value.has_value() &&
+                    std::holds_alternative<double>(*cell.sort_value),
+                "Exact metric cell lost descriptor/support metadata")) {
+      return 1;
+    }
+    ++raw_metric_counts[*raw_id];
+  }
+  const auto &combined = snapshot_for(snapshots, "Combined");
+  const auto &combined_row = combined.frames.back().rows.front();
+  const auto overview_context_end = column_index(overview, "ARI \u2191");
+  const auto exact_context_end = column_index(exact, "ARI \u2191");
+  const auto combined_context_end =
+      column_index(combined, "Semantic partition quality \u2191");
+  if (!expect(
+          overview_context_end == exact_context_end &&
+              overview_context_end == combined_context_end &&
+              std::equal(overview.columns.begin(),
+                         overview.columns.begin() +
+                             static_cast<std::ptrdiff_t>(overview_context_end),
+                         exact.columns.begin()) &&
+              std::equal(overview.columns.begin(),
+                         overview.columns.begin() +
+                             static_cast<std::ptrdiff_t>(overview_context_end),
+                         combined.columns.begin()) &&
+              combined_row[column_index(combined, "Run")].text == "1" &&
+              combined_row[column_index(combined, "Unit")].text == "5" &&
+              combined_row[column_index(combined,
+                                        "Semantic partition quality \u2191")]
+                      .text == "0.810000" &&
+              combined_row[column_index(combined,
+                                        "Semantic partition separation \u2191")]
+                      .text == "0.750000" &&
+              combined_row[column_index(combined, "Pair recall \u2191")].text ==
+                  "0.880000" &&
+              std::ranges::none_of(combined.columns,
+                                   [](const auto &column) {
+                                     return column.find("Legacy") !=
+                                            std::string::npos;
+                                   }),
+          "Exact/Combined context or preferred Combined values are wrong")) {
+    return 1;
+  }
+  std::set<std::string> combined_ids;
+  for (const auto column : combined_metric_columns) {
+    const auto &cell = combined_row[column_index(combined, column)];
+    const auto raw_id = hover_value(cell, "raw id");
+    if (!expect(raw_id.has_value() && hover_value(cell, "family").has_value() &&
+                    hover_value(cell, "averaging").has_value() &&
+                    hover_value(cell, "direction").has_value() &&
+                    hover_value(cell, "support").has_value() &&
+                    hover_value(cell, "status") ==
+                        std::optional<std::string>("Defined") &&
+                    cell.sort_value.has_value() &&
+                    std::holds_alternative<double>(*cell.sort_value),
+                "Combined metric cell lost descriptor/support metadata")) {
+      return 1;
+    }
+    combined_ids.insert(*raw_id);
+    ++raw_metric_counts[*raw_id];
+  }
+  if (!expect(combined_ids ==
+                  std::set<std::string>{"pair_recall",
+                                        "semantic_partition_quality",
+                                        "semantic_partition_separation"},
+              "Combined tab does not contain only the preferred composite")) {
+    return 1;
+  }
   for (const auto &descriptor_value : ml::clustering_metric_descriptors()) {
     if (!expect(raw_metric_counts.contains(std::string(descriptor_value.name)),
-                "stored metric id is missing: " +
+                "visible metric id is missing: " +
                     std::string(descriptor_value.name))) {
       return 1;
     }
   }
-  const auto &combined = snapshot_for(snapshots, "Combined");
-  const auto combined_metric = column_index(combined, "Metric");
-  std::set<std::string> combined_ids;
-  for (const auto &row : combined.frames.back().rows) {
-    combined_ids.insert(*hover_value(row[combined_metric], "raw id"));
-  }
-  if (!expect(combined_ids ==
-                  std::set<std::string>{
-                      "combined_quality", "fragmentation_micro", "pair_recall",
-                      "semantic_impurity_micro", "semantic_partition_quality",
-                      "semantic_partition_separation"},
-              "Combined tab does not own all stored combined records")) {
-    return 1;
-  }
 
-  const auto &exact = snapshot_for(snapshots, "Exact");
-  const auto adjusted_rand =
-      row_with(exact, "Metric", "Adjusted Rand Index \u2191");
   const auto &semantic = snapshot_for(snapshots, "Semantic");
   const auto severity =
       row_with(semantic, "Metric", "Conditional Merge Error Severity \u2193");
   const auto semantic_value = column_index(semantic, "Value");
   const auto semantic_status = column_index(semantic, "Status");
-  if (!expect(adjusted_rand != nullptr,
-              "metric names were not humanized with direction arrows") ||
+  if (!expect(
+          exact_row[column_index(exact, "ARI \u2191")].text == "0.910000" &&
+              exact_row[column_index(exact, "NMI \u2191")].text == "0.900000" &&
+              !std::ranges::contains(exact.columns, std::string("Support")) &&
+              !std::ranges::contains(exact.columns, std::string("Status")),
+          "Exact compact values or hidden support/status layout is wrong") ||
       !expect(severity != nullptr &&
                   (*severity)[semantic_value].text == "N/A" &&
                   !(*severity)[semantic_value].sort_value.has_value() &&
@@ -1117,19 +1268,20 @@ int main() {
                                                plot::TableGroupLayout::Tabs;
                                   }),
               "group/title did not update every owned tab") ||
-      !expect(total_metric_rows(snapshots) == 37,
-              "presentation change altered stored metric rows")) {
+      !expect(total_metric_records(snapshots) == 34,
+              "presentation change altered stored metric records")) {
     return 1;
   }
 
-  // Accumulate adds comparison rows for Overview/Parameters, but gives each
-  // metric family an unbounded run-history frame for the vertical scrubber.
-  const auto rows_before_mode_change = total_metric_rows(snapshots);
+  // Accumulate adds directly comparable rows for Overview, Exact, Combined,
+  // and Parameters. Detail-heavy metric families retain one frame per run for
+  // the history scrubber.
+  const auto records_before_mode_change = total_metric_records(snapshots);
   table.set_property("update_mode", std::string("accumulate"));
   if (!expect(table.property_as<std::string>("active_update_mode") ==
                       std::optional<std::string>("accumulate") &&
-                  total_metric_rows(view->snapshots_copy()) ==
-                      rows_before_mode_change,
+                  total_metric_records(view->snapshots_copy()) ==
+                      records_before_mode_change,
               "update_mode change replayed data or failed to resolve")) {
     return 1;
   }
@@ -1139,14 +1291,28 @@ int main() {
                       2 &&
                   snapshot_for(snapshots, "Overview").frames.size() == 1,
               "accumulate did not retain Overview comparison rows") ||
+      !expect(snapshot_for(snapshots, "Exact").frames.back().rows.size() == 2 &&
+                  snapshot_for(snapshots, "Exact").frames.size() == 1,
+              "accumulate did not retain Exact comparison rows") ||
       !expect(snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                      35 &&
+                      33 &&
                   snapshot_for(snapshots, "Parameters").frames.size() == 1,
               "accumulate repeated or lost long-form parameter rows")) {
     return 1;
   }
-  for (const auto label :
-       {"Exact", "Semantic", "Fragmentation", "Combined", "Alignment"}) {
+  const auto &accumulated_combined = snapshot_for(snapshots, "Combined");
+  if (!expect(accumulated_combined.frames.size() == 1 &&
+                  accumulated_combined.frames.back().rows.size() == 2 &&
+                  accumulated_combined.frames.back()
+                          .rows[0][column_index(accumulated_combined, "Run")]
+                          .text == "1" &&
+                  accumulated_combined.frames.back()
+                          .rows[1][column_index(accumulated_combined, "Run")]
+                          .text == "2",
+              "Combined did not accumulate compact comparison rows")) {
+    return 1;
+  }
+  for (const auto label : {"Semantic", "Fragmentation", "Alignment"}) {
     const auto &snapshot = snapshot_for(snapshots, label);
     if (!expect(snapshot.frames.size() == 2 && snapshot.frames.front().n == 1 &&
                     snapshot.frames.back().n == 2,
@@ -1163,14 +1329,32 @@ int main() {
     return 1;
   }
 
-  // An accumulated run without optional modes retains prior optional history
-  // and adds an empty current frame. Semantic-disabled records remain
+  // An accumulated run without optional modes retains prior Combined rows and
+  // appends an explicit N/A comparison row. Detail-heavy optional Alignment
+  // still adds an empty history frame. Semantic-disabled records remain
   // inspectable.
   (void)table.process(evaluation_buffer(result_without_optional_modes()));
   snapshots = view->snapshots_copy();
+  const auto &combined_without_modes = snapshot_for(snapshots, "Combined");
+  const auto &combined_without_modes_row =
+      combined_without_modes.frames.back().rows.back();
+  const auto no_optional_combined_values =
+      std::ranges::all_of(combined_metric_columns, [&](const auto column) {
+        const auto &cell = combined_without_modes_row[column_index(
+            combined_without_modes, column)];
+        return cell.text == "N/A" &&
+               hover_value(cell, "reason") ==
+                   std::optional<std::string>("not requested") &&
+               hover_value(cell, "status") ==
+                   std::optional<std::string>("Not requested");
+      });
   if (!expect(
-          snapshot_for(snapshots, "Combined").frames.size() == 3 &&
-              snapshot_for(snapshots, "Combined").frames.back().rows.empty() &&
+          combined_without_modes.frames.size() == 1 &&
+              combined_without_modes.frames.back().rows.size() == 3 &&
+              combined_without_modes_row[column_index(combined_without_modes,
+                                                      "Run")]
+                      .text == "3" &&
+              no_optional_combined_values &&
               snapshot_for(snapshots, "Alignment").frames.size() == 3 &&
               snapshot_for(snapshots, "Alignment").frames.back().rows.empty(),
           "accumulate-mode optional history was erased or misrepresented")) {
@@ -1226,7 +1410,7 @@ int main() {
               snapshot_for(snapshots, "Exact").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                  17,
+                  16,
           "replace did not retain only the latest run")) {
     return 1;
   }
@@ -1238,7 +1422,7 @@ int main() {
           latest_overview_row[combined_headline].text == "N/A" &&
               hover_value(latest_overview_row[combined_headline], "reason") ==
                   std::optional<std::string>("not requested"),
-          "Overview did not explain absent combined quality")) {
+          "Overview did not explain absent semantic partition quality")) {
     return 1;
   }
 
