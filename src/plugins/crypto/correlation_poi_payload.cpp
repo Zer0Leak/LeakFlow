@@ -69,9 +69,9 @@ CorrelationPoiPayload::CorrelationPoiPayload(std::vector<CorrelationPoiResult> r
             throw std::invalid_argument("CorrelationPoiPayload units must use a consistent result field axis");
         }
     }
-    std::set<std::int64_t> unit_indexes;
+    std::set<std::int64_t> units;
     for (const auto& result : results_) {
-        if (!unit_indexes.insert(result.unit_index).second) {
+        if (!units.insert(result.unit_index).second) {
             throw std::invalid_argument("CorrelationPoiPayload unit indexes must be unique");
         }
     }

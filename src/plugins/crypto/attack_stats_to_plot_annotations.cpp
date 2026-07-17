@@ -51,11 +51,11 @@ namespace {
 }
 
 [[nodiscard]] std::string unit_label(
-    const std::vector<std::int64_t>& unit_indexes,
+    const std::vector<std::int64_t>& units,
     std::int64_t unit)
 {
-    if (unit >= 0 && static_cast<std::size_t>(unit) < unit_indexes.size()) {
-        return std::to_string(unit_indexes[static_cast<std::size_t>(unit)]);
+    if (unit >= 0 && static_cast<std::size_t>(unit) < units.size()) {
+        return std::to_string(units[static_cast<std::size_t>(unit)]);
     }
     return std::to_string(unit);
 }
@@ -132,7 +132,7 @@ void copy_attack_metadata(const Buffer& input, Buffer& output)
         const auto relative_margin = relative_margin_tensor[unit].item<double>();
         const auto best_channel = best_channel_tensor[unit].item<std::int64_t>();
         const auto best_sample = best_sample_tensor[unit].item<std::int64_t>();
-        const auto attack_unit = unit_label(payload.unit_indexes(), unit);
+        const auto attack_unit = unit_label(payload.units(), unit);
         const auto channel = channel_label(payload.channel_names(), best_channel);
         const auto score_text = format_value(top1_score, value_format, precision);
         const auto relative_margin_text = format_value(relative_margin, value_format, precision);

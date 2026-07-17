@@ -39,7 +39,7 @@ compact context version for day-to-day development.
 The pipeline is `Buffer`-centric:
 
 ```text
-Buffer = Caps + metadata + zero-or-one Payload + vector-clock provenance + units
+Buffer = Caps + metadata + zero-or-one Payload + vector-clock provenance + units + channels
 ```
 
 Every routed buffer carries a **vector clock** (`Buffer::provenance()`, Phase 27):
@@ -57,6 +57,21 @@ immutable value on the envelope — not metadata, which the Analyze profile woul
 display. A per-unit fusion (e.g. `ClusteringStats`) aligns its inputs on units before
 comparing: disjoint units are an error, a partial overlap warns and scores the shared
 units. See `docs/design/metadata_klass_taxonomy.md`.
+
+A buffer likewise carries **channels** (`Buffer::channels()`, a `Channels`): which
+leakage model each column of a secondary axis is (`HW(m)`, `HW(y)`, `y(0)`…). It is the
+channel-axis sibling of `units` — the same typed, immutable, per-branch-copied envelope
+value, but with string labels because channels are named, not indexed (grammar
+`none` / `[HW(y)]` / `[HW(m),HW(y)]`). A per-channel fusion (e.g. `PoiCorrelation`)
+aligns its inputs on channel identity, not column position: disjoint channels are an
+error, a partial overlap warns and scores the shared channels. Both axes use the one
+shared `align_labels<Label>` primitive (`LabelAlignment` for units, `ChannelAlignment`
+for channels). Both axes are the **authoritative** identity and **persist** through
+`BufferFileSink`/`BufferFileSrc` (the `leakflow.buffer` schema v2 root attributes
+`units`/`channels`). A producer sets the typed axis; a consumer reads it. The remaining
+`attack.unit.indexes` / `payload.leakage.channels` metadata is a derived, human/tool-
+facing projection and a compatibility fallback (schema-1 files, or buffers stamped
+before the axis was set) — not the source of truth.
 
 A payload may internally be a bundle or batch.
 
@@ -80,13 +95,16 @@ shared, a mutating element must create and set a replacement payload.
 
 ## Buffer Persistence
 
-A whole `Buffer` (caps + metadata + payload) round-trips through
+A whole `Buffer` (caps + metadata + typed axes + payload) round-trips through
 `BufferFileSink`/`BufferFileSrc` (in `leakflow_plugins_extras`) to a single HDF5
-file — the `leakflow.buffer` schema, following the trace tensor-dataset
-conventions: the envelope as attributes (root `caps.type`/`payload.type`, `/caps`
-and `/metadata` attribute groups) and the payload body as native datasets under
-`/payload`. Provenance (the vector clock) is **not** persisted; a reloaded buffer is
-a fresh source production the executor re-stamps.
+file — the `leakflow.buffer` schema (v2), following the trace tensor-dataset
+conventions: the envelope as attributes (root `caps.type`/`payload.type` plus the
+optional typed-axis attributes `units`/`channels`, `/caps` and `/metadata` attribute
+groups) and the payload body as native datasets under `/payload`. The typed semantic
+axes (`Buffer::units()`/`Buffer::channels()`) persist as their `format()` strings and
+are the authoritative identity on reload; a v1 file (no such attributes) still loads,
+with both axes resolving to none. Provenance (the vector clock) is **not** persisted; a
+reloaded buffer is a fresh source production the executor re-stamps.
 
 Serialization is layered so no layer learns a foreign domain:
 

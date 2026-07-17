@@ -12,13 +12,13 @@ namespace leakflow::plugins::crypto {
 
 CorrelationPayload::CorrelationPayload(
     torch::Tensor grouped_correlation,
-    std::vector<std::int64_t> unit_indexes,
+    std::vector<std::int64_t> units,
     std::int64_t channel_count,
     std::int64_t feature_count,
     std::string score_name,
     std::int64_t observation_count)
     : grouped_correlation_(std::move(grouped_correlation))
-    , unit_indexes_(std::move(unit_indexes))
+    , units_(std::move(units))
     , channel_count_(channel_count)
     , feature_count_(feature_count)
     , score_name_(std::move(score_name))
@@ -30,19 +30,19 @@ CorrelationPayload::CorrelationPayload(
     if (grouped_correlation_.dim() != 3) {
         throw std::invalid_argument("CorrelationPayload correlation tensor must have shape [unit,channel,feature]");
     }
-    if (unit_indexes_.empty()) {
+    if (units_.empty()) {
         throw std::invalid_argument("CorrelationPayload requires at least one unit");
     }
-    if (std::ranges::any_of(unit_indexes_, [](const auto value) { return value < 0; })) {
+    if (std::ranges::any_of(units_, [](const auto value) { return value < 0; })) {
         throw std::invalid_argument("CorrelationPayload unit indexes must be non-negative");
     }
-    if (std::set<std::int64_t>(unit_indexes_.begin(), unit_indexes_.end()).size() != unit_indexes_.size()) {
+    if (std::set<std::int64_t>(units_.begin(), units_.end()).size() != units_.size()) {
         throw std::invalid_argument("CorrelationPayload unit indexes must be unique");
     }
     if (channel_count_ <= 0 || feature_count_ <= 0) {
         throw std::invalid_argument("CorrelationPayload channel and feature counts must be positive");
     }
-    if (grouped_correlation_.size(0) != static_cast<std::int64_t>(unit_indexes_.size())
+    if (grouped_correlation_.size(0) != static_cast<std::int64_t>(units_.size())
         || grouped_correlation_.size(1) != channel_count_
         || grouped_correlation_.size(2) != feature_count_) {
         throw std::invalid_argument(
@@ -76,8 +76,8 @@ void CorrelationPayload::describe(SummarySection& section, std::int64_t summary_
     section.add_field("score", score_name_, SummaryValueRole::Text);
     section.add_field("observations", summary_integer(observation_count_), SummaryValueRole::Number);
     if (summary_level >= 2) {
-        section.add_field("unit_indexes",
-            summary_list_from_int_array(unit_indexes_.data(), unit_indexes_.size()), SummaryValueRole::Number);
+        section.add_field("units",
+            summary_list_from_int_array(units_.data(), units_.size()), SummaryValueRole::Number);
     }
 }
 
@@ -86,14 +86,14 @@ const torch::Tensor& CorrelationPayload::grouped_correlation() const
     return grouped_correlation_;
 }
 
-const std::vector<std::int64_t>& CorrelationPayload::unit_indexes() const
+const std::vector<std::int64_t>& CorrelationPayload::units() const
 {
-    return unit_indexes_;
+    return units_;
 }
 
 std::int64_t CorrelationPayload::unit_count() const
 {
-    return static_cast<std::int64_t>(unit_indexes_.size());
+    return static_cast<std::int64_t>(units_.size());
 }
 
 std::int64_t CorrelationPayload::channel_count() const

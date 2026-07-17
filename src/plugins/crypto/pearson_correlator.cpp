@@ -29,7 +29,7 @@ enum class CorrelationMode {
 
 struct CorrelationTargetLayout {
     torch::Tensor grouped_correlation;
-    std::vector<std::int64_t> unit_indexes;
+    std::vector<std::int64_t> units;
     std::int64_t channel_count = 1;
     std::int64_t flattened_target_count = 0;
     std::int64_t feature_count = 0;
@@ -205,7 +205,7 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     return split_comma_list(targets_buffer.metadata("payload.leakage.channels"));
 }
 
-[[nodiscard]] std::vector<std::int64_t> unit_indexes_from_metadata(const Buffer& targets_buffer)
+[[nodiscard]] std::vector<std::int64_t> units_from_metadata(const Buffer& targets_buffer)
 {
     if (!targets_buffer.has_metadata("attack.unit.indexes")) {
         return {};
@@ -213,7 +213,7 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     return parse_int_metadata_list(targets_buffer.metadata("attack.unit.indexes"));
 }
 
-[[nodiscard]] std::vector<std::int64_t> checked_unit_indexes(std::vector<std::int64_t> values)
+[[nodiscard]] std::vector<std::int64_t> checked_units(std::vector<std::int64_t> values)
 {
     for (const auto value : values) {
         if (value < 0) {
@@ -223,7 +223,7 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     return values;
 }
 
-[[nodiscard]] std::vector<std::int64_t> default_unit_indexes(std::int64_t count)
+[[nodiscard]] std::vector<std::int64_t> default_units(std::int64_t count)
 {
     std::vector<std::int64_t> indexes;
     indexes.reserve(static_cast<std::size_t>(count));
@@ -233,14 +233,14 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     return indexes;
 }
 
-[[nodiscard]] std::string unit_indexes_metadata(const std::vector<std::int64_t>& unit_indexes)
+[[nodiscard]] std::string units_metadata(const std::vector<std::int64_t>& units)
 {
     auto value = std::string("[");
-    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+    for (std::size_t index = 0; index < units.size(); ++index) {
         if (index != 0) {
             value += ",";
         }
-        value += std::to_string(unit_indexes[index]);
+        value += std::to_string(units[index]);
     }
     value += "]";
     return value;
@@ -254,28 +254,28 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     auto flattened_correlation = correlation.reshape({-1, feature_count});
     const auto flattened_target_count = flattened_correlation.size(0);
 
-    auto unit_indexes = checked_unit_indexes(unit_indexes_from_metadata(targets_buffer));
+    auto units = checked_units(units_from_metadata(targets_buffer));
     const auto channels = target_channels_from_metadata(targets_buffer);
     auto channel_count = std::int64_t{1};
 
-    if (!unit_indexes.empty()) {
+    if (!units.empty()) {
         channel_count = channels.empty() ? std::int64_t{1} : static_cast<std::int64_t>(channels.size());
         const auto represented_target_count =
-            static_cast<std::int64_t>(unit_indexes.size()) * channel_count;
+            static_cast<std::int64_t>(units.size()) * channel_count;
         if (represented_target_count != flattened_target_count) {
             throw std::invalid_argument(
                 "PearsonCorrelator unit indexes and channels must match flattened target count");
         }
     } else {
-        unit_indexes = default_unit_indexes(flattened_target_count);
+        units = default_units(flattened_target_count);
     }
 
     return CorrelationTargetLayout{
         .grouped_correlation =
             flattened_correlation
-                .reshape({static_cast<std::int64_t>(unit_indexes.size()), channel_count, feature_count})
+                .reshape({static_cast<std::int64_t>(units.size()), channel_count, feature_count})
                 .contiguous(),
-        .unit_indexes = std::move(unit_indexes),
+        .units = std::move(units),
         .channel_count = channel_count,
         .flattened_target_count = flattened_target_count,
         .feature_count = feature_count,
@@ -474,12 +474,21 @@ std::optional<Buffer> PearsonCorrelator::process_inputs(ElementInputs inputs)
         "payload.correlation.mode",
         correlation_mode == CorrelationMode::Recompute ? "recompute" : "incremental");
     output.set_metadata("payload.correlation.observation_count", std::to_string(observation_count));
-    output.set_metadata("payload.correlation.unit_count", std::to_string(layout.unit_indexes.size()));
-    output.set_metadata("attack.unit.count", std::to_string(layout.unit_indexes.size()));
-    output.set_metadata("attack.unit.indexes", unit_indexes_metadata(layout.unit_indexes));
+    output.set_metadata("payload.correlation.unit_count", std::to_string(layout.units.size()));
+    output.set_metadata("attack.unit.count", std::to_string(layout.units.size()));
+    output.set_metadata("attack.unit.indexes", units_metadata(layout.units));
+    // Carry the semantic axes as first-class typed values so a downstream per-unit /
+    // per-channel fusion aligns by identity. Channels come from the target buffer's
+    // typed channel axis, falling back to its payload.leakage.channels metadata.
+    output.set_units(Units::of(layout.units));
+    if (!targets_buffer.channels().empty()) {
+        output.set_channels(targets_buffer.channels());
+    } else if (targets_buffer.has_metadata("payload.leakage.channels")) {
+        output.set_channels(Channels::parse(targets_buffer.metadata("payload.leakage.channels")));
+    }
     output.set_payload(std::make_shared<CorrelationPayload>(
         layout.grouped_correlation,
-        layout.unit_indexes,
+        layout.units,
         layout.channel_count,
         layout.feature_count,
         score_name,
@@ -487,7 +496,7 @@ std::optional<Buffer> PearsonCorrelator::process_inputs(ElementInputs inputs)
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "computed Pearson correlation");
     record.fields.emplace("payload.correlation.method", pearson_correlation_method_id);
-    record.fields.emplace("units", std::to_string(layout.unit_indexes.size()));
+    record.fields.emplace("units", std::to_string(layout.units.size()));
     record.fields.emplace("channel_count", std::to_string(layout.channel_count));
     record.fields.emplace("features_count", std::to_string(layout.feature_count));
     record.fields.emplace("correlation_mode", output.metadata("payload.correlation.mode"));

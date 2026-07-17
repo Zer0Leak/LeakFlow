@@ -272,6 +272,10 @@ Core:
   property.
 - `Caps`
 - `Buffer`
+- `Units` (leading-axis identity) and `Channels` (channel-axis identity): typed,
+  immutable, per-branch-copied envelope values on `Buffer::units()` /
+  `Buffer::channels()`; `align_labels<Label>` (`LabelAlignment` / `ChannelAlignment`)
+  is the shared by-value axis-alignment primitive a per-unit / per-channel fusion uses.
 - `Payload` with a required non-empty logical `layout()`; attaching one through
   `Buffer::set_payload(...)` replaces the reserved `payload.layout` metadata,
   while clearing it removes that metadata.
@@ -489,8 +493,16 @@ Crypto plugin elements:
 `CorrelationPayload` uses the generic dense layout
 `unit/channel/feature`. `CorrelationPoiPayload` is organized by unit, with each
 unit carrying `channel/poi/[sample_index,score]` (or score-only) results. Generic
-correlation/PoI APIs and archive fields use `unit_indexes`; AES-specific byte
-selection remains confined to the AES leakage elements.
+correlation/PoI/attack payload accessors and archive fields use `units` (renamed from
+`unit_indexes`); AES-specific byte selection remains confined to the AES leakage
+elements. The unit axis (`Buffer::units()`) and channel axis (`Buffer::channels()`) are
+both first-class typed envelope values and are the authoritative identity: they persist
+through `BufferFileSink`/`BufferFileSrc` (`leakflow.buffer` schema v2 root attributes
+`units`/`channels`), while the `attack.unit.indexes` / `payload.leakage.channels`
+metadata is now a derived projection and compatibility fallback. `PoiCorrelation` aligns
+its inputs on both axes by identity (channel-name alignment lets a PoI profiled on
+`[HW(m),HW(y)]` re-score against a target with only `[HW(y)]`), and `PoiSelect` has a
+`units` subset property.
 
 Logging:
 

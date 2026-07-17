@@ -130,10 +130,10 @@ namespace crypto = leakflow::plugins::crypto;
     return std::nullopt; // unknown metric: skip its panel
 }
 
-[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& unit_indexes, std::int64_t unit)
+[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& units, std::int64_t unit)
 {
-    if (unit >= 0 && static_cast<std::size_t>(unit) < unit_indexes.size()) {
-        return std::to_string(unit_indexes[static_cast<std::size_t>(unit)]);
+    if (unit >= 0 && static_cast<std::size_t>(unit) < units.size()) {
+        return std::to_string(units[static_cast<std::size_t>(unit)]);
     }
     return std::to_string(unit);
 }
@@ -177,7 +177,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
     const auto true_rank = has_truth ? payload->true_rank()->to(torch::kCPU).to(torch::kInt64).contiguous()
                                      : torch::Tensor{};
     const auto top1_guess = payload->top1_guess().to(torch::kCPU).to(torch::kInt64).contiguous();
-    const auto& unit_indexes = payload->unit_indexes();
+    const auto& units = payload->units();
 
     std::vector<leakflow::plot::ScorePointUpdate> updates;
     for (std::int64_t unit = 0; unit < unit_count; ++unit) {
@@ -185,7 +185,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
         const auto marker = !has_truth ? leakflow::plot::TracePlotAnnotationMarker::Circle
                                        : (succeeded ? leakflow::plot::TracePlotAnnotationMarker::Square
                                                     : leakflow::plot::TracePlotAnnotationMarker::Cross);
-        const auto label = "unit " + unit_label(unit_indexes, unit);
+        const auto label = "unit " + unit_label(units, unit);
         const auto color = unit_color(unit);
 
         // Per-unit metric values, computed once.
@@ -198,7 +198,7 @@ std::optional<Buffer> capture_score(Element& element, leakflow::plot::ScoreView&
         // Shared hover fields include EVERY metric, so hovering a point in one panel
         // also shows the other metrics (score shows relative_margin and vice versa).
         std::vector<std::pair<std::string, std::string>> fields;
-        fields.emplace_back("unit", unit_label(unit_indexes, unit));
+        fields.emplace_back("unit", unit_label(units, unit));
         fields.emplace_back("N", format_double(x));
         fields.emplace_back("guess", std::to_string(top1_guess[unit].item<std::int64_t>()));
         if (has_truth) {

@@ -6,6 +6,7 @@
 #include "leakflow/core/metadata_forwarding.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -42,41 +43,104 @@ namespace {
     return payload->tensor();
 }
 
-// The semantic unit index for each row of the target `[U, N, C]` tensor.
-[[nodiscard]] std::vector<std::int64_t> target_unit_indexes(const Buffer& buffer)
+// The semantic unit index for each row of the target `[U, N, C]` tensor, from the
+// legacy attack.unit.indexes metadata (fallback when the typed units axis is absent).
+[[nodiscard]] std::vector<std::int64_t> target_units_metadata(const Buffer& buffer)
 {
     if (!buffer.has_metadata("attack.unit.indexes")) {
         return {};
     }
-    auto text = buffer.metadata("attack.unit.indexes");
-    const auto begin = text.find_first_not_of(" \t[");
-    const auto end = text.find_last_not_of(" \t]");
-    if (begin == std::string::npos) {
-        return {};
-    }
-    text = text.substr(begin, end - begin + 1);
-    std::vector<std::int64_t> units;
-    std::size_t pos = 0;
-    for (std::size_t index = 0; index <= text.size(); ++index) {
-        if (index == text.size() || text[index] == ',') {
-            const auto token = text.substr(pos, index - pos);
-            if (token.find_first_not_of(" \t") != std::string::npos) {
-                units.push_back(std::stoll(token));
-            }
-            pos = index + 1;
-        }
-    }
-    return units;
+    return Units::parse(buffer.metadata("attack.unit.indexes")).to_vector();
 }
 
-[[nodiscard]] std::string unit_indexes_metadata(const std::vector<CorrelationPoiResult>& results)
+// Unit identity for a buffer: the typed units() axis, falling back to metadata.
+[[nodiscard]] std::vector<std::int64_t> unit_identity(const Buffer& buffer)
+{
+    if (!buffer.units().empty()) {
+        return buffer.units().to_vector();
+    }
+    return target_units_metadata(buffer);
+}
+
+// Channel identity for a buffer: the typed channels() axis, falling back to the
+// payload.leakage.channels metadata (e.g. on a reloaded buffer).
+[[nodiscard]] std::vector<std::string> channel_identity(const Buffer& buffer)
+{
+    if (!buffer.channels().empty()) {
+        return buffer.channels().to_vector();
+    }
+    if (buffer.has_metadata("payload.leakage.channels")) {
+        return Channels::parse(buffer.metadata("payload.leakage.channels")).to_vector();
+    }
+    return {};
+}
+
+// How the PoI (reference) channel columns map onto the target (attack) channel
+// columns. When both sides carry channel identity we align by name -- so a PoI
+// profiled on [HW(m),HW(y)] still re-scores correctly against a target computed for
+// only [HW(y)], using the shared channels in reference order. Without identity we
+// fall back to positional pairing bounded by the smaller count, which at least never
+// runs off the target tensor.
+struct ChannelMap {
+    std::vector<std::int64_t> poi_cols;
+    std::vector<std::int64_t> target_cols;
+    std::vector<std::string> labels; // shared channel names, or empty when unknown
+};
+
+[[nodiscard]] ChannelMap map_channels(
+    const Element& element,
+    const std::vector<std::string>& poi_channels,
+    const std::vector<std::string>& target_channels,
+    std::int64_t poi_count,
+    std::int64_t target_count)
+{
+    const bool by_name = static_cast<std::int64_t>(poi_channels.size()) == poi_count
+        && static_cast<std::int64_t>(target_channels.size()) == target_count
+        && poi_count > 0 && target_count > 0;
+
+    ChannelMap map;
+    if (by_name) {
+        const auto alignment = align_labels(poi_channels, target_channels);
+        if (alignment.shared.empty()) {
+            throw std::invalid_argument(
+                "PoiCorrelation: PoI channels " + Channels::of(poi_channels).format()
+                + " and target channels " + Channels::of(target_channels).format() + " are disjoint");
+        }
+        map.poi_cols = alignment.a_indices;
+        map.target_cols = alignment.b_indices;
+        map.labels = alignment.shared;
+        if (static_cast<std::int64_t>(alignment.shared.size()) < poi_count) {
+            auto record = element.make_log_record(
+                log::LogLevel::Warning, "element", "PoI channels only partially present in target channels");
+            record.fields.emplace("poi.channels", Channels::of(poi_channels).format());
+            record.fields.emplace("target.channels", Channels::of(target_channels).format());
+            record.fields.emplace("scored.channels", Channels::of(alignment.shared).format());
+            leakflow::log::write(std::move(record));
+        }
+        return map;
+    }
+
+    const auto shared = std::min(poi_count, target_count);
+    for (std::int64_t column = 0; column < shared; ++column) {
+        map.poi_cols.push_back(column);
+        map.target_cols.push_back(column);
+    }
+    if (static_cast<std::int64_t>(poi_channels.size()) >= shared) {
+        map.labels.assign(poi_channels.begin(), poi_channels.begin() + shared);
+    }
+    return map;
+}
+
+// Explicit comma-list form ("[0,1,2]") to match the established attack.unit.indexes
+// wire format (some consumers do not accept the a:b range shorthand).
+[[nodiscard]] std::string units_metadata(const std::vector<std::int64_t>& units)
 {
     auto value = std::string("[");
-    for (std::size_t index = 0; index < results.size(); ++index) {
+    for (std::size_t index = 0; index < units.size(); ++index) {
         if (index != 0) {
             value += ",";
         }
-        value += std::to_string(results[index].unit_index);
+        value += std::to_string(units[index]);
     }
     value += "]";
     return value;
@@ -151,17 +215,31 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
         throw std::invalid_argument("PoiCorrelation targets must be a [U, N, C] tensor");
     }
 
+    if (poi->results().empty()) {
+        throw std::invalid_argument("PoiCorrelation: PoI payload has no units");
+    }
+
     leakflow::base::PearsonCorrelationOptions options;
     options.compute_dtype = leakflow::base::PearsonComputeDtype::Float64;
 
-    // Map each PoI unit to its target row. With attack.unit.indexes metadata we match by unit id;
-    // without it, we fall back to positional
-    // alignment. Either way we stay in range of the leakage tensor.
-    const auto units = target_unit_indexes(targets_buffer);
+    // Align the UNIT axis by identity: map each PoI unit id to its target row (the
+    // typed units() axis, or attack.unit.indexes metadata). Units missing from the
+    // target are dropped from the output.
+    const auto target_unit_ids = unit_identity(targets_buffer);
     std::map<std::int64_t, std::int64_t> unit_to_row;
-    for (std::size_t row = 0; row < units.size(); ++row) {
-        unit_to_row.emplace(units[row], static_cast<std::int64_t>(row));
+    for (std::size_t row = 0; row < target_unit_ids.size(); ++row) {
+        unit_to_row.emplace(target_unit_ids[row], static_cast<std::int64_t>(row));
     }
+
+    // Align the CHANNEL axis by identity once (the axis is uniform across units): a
+    // PoI profiled on [HW(m),HW(y)] re-scores against a target with only [HW(y)] by
+    // scoring just the shared channels, indexing each side by its own column.
+    const auto channel_map = map_channels(
+        *this,
+        channel_identity(poi_buffer),
+        channel_identity(targets_buffer),
+        poi->results().front().result.size(0),
+        leakage.size(2));
 
     // Re-score each matching PoI (same positions) against the new leakage on the new traces.
     std::vector<CorrelationPoiResult> results;
@@ -178,32 +256,49 @@ std::optional<Buffer> PoiCorrelation::process_inputs(ElementInputs inputs)
         if (row < 0 || row >= leakage.size(0)) {
             continue;
         }
-        const auto rescored = original.result.clone(); // [channel, k, 2] = (index, score)
-        const auto channel_count = rescored.size(0);
-        for (std::int64_t channel = 0; channel < channel_count; ++channel) {
-            const auto positions = rescored[channel].select(1, 0).to(torch::kLong); // [k]
-            const auto features = traces.index_select(1, positions);                 // [T, k]
-            const auto target = leakage[row].select(1, channel).unsqueeze(1);         // [T, 1]
+        // Build a [shared_channel, k, 2] result over the shared channels only.
+        std::vector<torch::Tensor> channel_results;
+        channel_results.reserve(channel_map.poi_cols.size());
+        for (std::size_t shared = 0; shared < channel_map.poi_cols.size(); ++shared) {
+            auto channel = original.result[channel_map.poi_cols[shared]].clone();     // [k, 2]
+            const auto positions = channel.select(1, 0).to(torch::kLong);             // [k]
+            const auto features = traces.index_select(1, positions);                  // [T, k]
+            const auto target =
+                leakage[row].select(1, channel_map.target_cols[shared]).unsqueeze(1); // [T, 1]
             const auto correlation = leakflow::base::pearson_correlation(features, target, options); // [1, k]
-            rescored[channel].select(1, 1).copy_(correlation.reshape({-1}));          // overwrite scores
+            channel.select(1, 1).copy_(correlation.reshape({-1}));                    // overwrite scores
+            channel_results.push_back(std::move(channel));
         }
-        results.push_back(CorrelationPoiResult{.unit_index = original.unit_index, .result = rescored});
+        results.push_back(CorrelationPoiResult{
+            .unit_index = original.unit_index,
+            .result = torch::stack(channel_results, 0).contiguous(),
+        });
     }
     if (results.empty()) {
         throw std::invalid_argument("PoiCorrelation: no PoI units match the target unit indexes");
     }
 
-    const auto output_unit_indexes = unit_indexes_metadata(results);
-    const auto output_unit_count = results.size();
+    std::vector<std::int64_t> output_units;
+    output_units.reserve(results.size());
+    for (const auto& result : results) {
+        output_units.push_back(result.unit_index);
+    }
     auto payload = std::make_shared<CorrelationPoiPayload>(std::move(results), poi->score_name());
     Buffer output{Caps(correlation_poi_caps_type)};
     forward_metadata(*this, inputs, output);
     output.set_metadata("payload.poi.rescored", "true");
-    output.set_metadata("payload.poi.unit_count", std::to_string(output_unit_count));
-    output.set_metadata("attack.unit.count", std::to_string(output_unit_count));
-    output.set_metadata("attack.unit.indexes", output_unit_indexes);
+    output.set_metadata("payload.poi.unit_count", std::to_string(output_units.size()));
+    output.set_metadata("attack.unit.count", std::to_string(output_units.size()));
+    output.set_metadata("attack.unit.indexes", units_metadata(output_units));
     if (targets_buffer.has_metadata("attack.unit.kind")) {
         output.set_metadata("attack.unit.kind", targets_buffer.metadata("attack.unit.kind"));
+    }
+    // Re-own the shared semantic axes as first-class typed values (and re-stamp the
+    // scored channels as a curated payload fact for downstream display).
+    output.set_units(Units::of(output_units));
+    if (!channel_map.labels.empty()) {
+        output.set_channels(Channels::of(channel_map.labels));
+        output.set_metadata("payload.leakage.channels", Channels::of(channel_map.labels).format());
     }
     output.set_payload(payload);
     return output;

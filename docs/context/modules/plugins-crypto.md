@@ -46,8 +46,9 @@ CLI/inspect files if affected:
   all 16), `channels` (subset/order of `HW(m)`, `HW(m_xor_k)`, `HW(y)`, and
   `y(0)` through `y(7)`; default `[HW(y)]`; `payload-output`, downstream
   invalidation on `leakage`). Labels the output's leading axis with those bytes as
-  `Buffer::units()`, so a downstream per-unit fusion can verify it is scored against
-  the same bytes.
+  `Buffer::units()` and its channel axis (axis 2) with the channel names as
+  `Buffer::channels()`, so a downstream per-unit / per-channel fusion can verify it is
+  scored against the same bytes and channels, not merely the same shape.
 - `AesLeakageHypothesis` (`Analyze/SCA/Hypothesis/AES`): computes AES
   first-round predicted leakage hypotheses for every selected byte and guess.
   Required `plaintexts` sink pad. Output is a Torch `uint8` `[U,G,N,L]`
@@ -112,13 +113,28 @@ CLI/inspect files if affected:
   every sample against each target as a `CorrelationPayload` (`leakflow/correlation`).
   Properties: `correlation_mode` (auto/recompute/incremental), `compute_dtype`, `epsilon`.
   **Stateful** in incremental mode (`can_replay()==false`); accumulation-property changes
-  need a restart. Re-owns the target model's `payload.leakage.*`/`payload.crypto.*` facts.
+  need a restart. Re-owns the target model's `payload.leakage.*`/`payload.crypto.*` facts,
+  and carries the unit / channel identity forward as `Buffer::units()` /
+  `Buffer::channels()` (channels taken from the target buffer's typed axis, else its
+  `payload.leakage.channels` metadata).
 - `PoiSelect` (`Analyze/SCA/PoI/Select`): selects the top-k PoI sample indexes per
   (byte, channel) from a `CorrelationPayload` and emits a `CorrelationPoiPayload`.
-  Properties: `top_k`, `rank_by`. **Stateless** (`can_replay()==true`), so changing
-  `top_k`/`rank_by` in Idle re-selects from the cached correlation without re-streaming.
-  Stamps `payload.poi.*` metadata. (`PearsonCorrelator` + `PoiSelect` are the split of
-  the former `PearsonPoiFinder`.)
+  Properties: `top_k`, `rank_by`, `units` (unit subset to keep, e.g. `[0]` / `[0:16]`;
+  `none`/`[]` = all, in correlation order — a missing requested unit is an error).
+  **Stateless** (`can_replay()==true`), so changing `top_k`/`rank_by`/`units` in Idle
+  re-selects from the cached correlation without re-streaming. Stamps `payload.poi.*`
+  metadata and carries `Buffer::units()` (the selected units) / `Buffer::channels()`
+  (from the correlation's typed axis, else its `payload.leakage.channels` metadata).
+  (`PearsonCorrelator` + `PoiSelect` are the split of the former `PearsonPoiFinder`.)
+- `PoiCorrelation` (`Analyze/SCA/PoiCorrelation`): re-scores a profiling
+  `CorrelationPoiPayload`'s PoI positions with their Pearson correlation on new (attack)
+  `traces` against a fresh `targets` leakage. Aligns **both semantic axes by identity**:
+  the unit axis via `Buffer::units()` (or `attack.unit.indexes` metadata) and the channel
+  axis via `Buffer::channels()` (or `payload.leakage.channels` metadata). Only the shared
+  channels are scored, indexing each side by its own column — so a PoI profiled on
+  `[HW(m),HW(y)]` re-scores correctly against a target computed for only `[HW(y)]` (a
+  partial overlap warns; disjoint channels/units error). The `poi` pad is a `Reference`
+  input (its dataset facts forward as `origin.poi.*` provenance, not capture identity).
 - `CorrelationPoiToPlotAnnotations` (`Convert/PlotAnnotation/PoI`): converts a
   `CorrelationPoiPayload` into a generic `PlotAnnotationPayload` for
   `TracePlot.annotations`. Property `precision` (0–12, default 3).

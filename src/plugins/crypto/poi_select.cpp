@@ -4,6 +4,7 @@
 #include "leakflow/plugins/crypto/correlation_payload.hpp"
 #include "leakflow/plugins/crypto/correlation_poi_payload.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <memory>
@@ -147,14 +148,14 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
     const std::vector<RankBy>& rank_modes)
 {
     const auto& grouped = correlation.grouped_correlation();
-    const auto& unit_indexes = correlation.unit_indexes();
+    const auto& units = correlation.units();
     const auto channel_count = correlation.channel_count();
     const auto feature_count = correlation.feature_count();
 
     std::vector<CorrelationPoiResult> results;
-    results.reserve(unit_indexes.size());
+    results.reserve(units.size());
 
-    for (auto unit_offset = std::int64_t{0}; unit_offset < static_cast<std::int64_t>(unit_indexes.size());
+    for (auto unit_offset = std::int64_t{0}; unit_offset < static_cast<std::int64_t>(units.size());
          ++unit_offset) {
         const auto top_k = top_k_values.at(static_cast<std::size_t>(unit_offset));
         validate_top_k(top_k, feature_count);
@@ -171,7 +172,7 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
         }
 
         results.push_back(CorrelationPoiResult{
-            .unit_index = unit_indexes.at(static_cast<std::size_t>(unit_offset)),
+            .unit_index = units.at(static_cast<std::size_t>(unit_offset)),
             .result = torch::stack(channel_results, 0).contiguous(),
         });
     }
@@ -199,14 +200,36 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     }
 }
 
-[[nodiscard]] std::string unit_indexes_metadata(const std::vector<std::int64_t>& unit_indexes)
+// Keep only the requested unit ids, in requested order; error on a missing one. An
+// empty request keeps every unit in payload order.
+[[nodiscard]] std::vector<CorrelationPoiResult> select_units(
+    std::vector<CorrelationPoiResult> results, const std::vector<std::int64_t>& requested)
+{
+    if (requested.empty()) {
+        return results;
+    }
+    std::vector<CorrelationPoiResult> selected;
+    selected.reserve(requested.size());
+    for (const auto unit : requested) {
+        const auto found = std::find_if(results.begin(), results.end(),
+            [unit](const CorrelationPoiResult& result) { return result.unit_index == unit; });
+        if (found == results.end()) {
+            throw std::invalid_argument(
+                "PoiSelect units: requested unit " + std::to_string(unit) + " is not in the correlation");
+        }
+        selected.push_back(*found);
+    }
+    return selected;
+}
+
+[[nodiscard]] std::string units_metadata(const std::vector<std::int64_t>& units)
 {
     auto value = std::string("[");
-    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+    for (std::size_t index = 0; index < units.size(); ++index) {
         if (index != 0) {
             value += ",";
         }
-        value += std::to_string(unit_indexes[index]);
+        value += std::to_string(units[index]);
     }
     value += "]";
     return value;
@@ -235,6 +258,14 @@ ElementDescriptor PoiSelect::descriptor()
                     .output_pads = {"poi"},
                 }),
             PropertySpec("rank_by", StringList{"abs"}, "Ranking mode list per unit: abs, positive, or negative",
+                "", std::monostate{}, "",
+                PropertyEffect{
+                    .kind = PropertyEffectKind::PayloadOutput,
+                    .scope = PropertyInvalidationScope::Downstream,
+                    .output_pads = {"poi"},
+                }),
+            PropertySpec("units", Units::none(),
+                "unit indexes to keep, e.g. [0] / [0:16] / [0,2:4]; none/[] = all, in correlation order",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
@@ -303,6 +334,14 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
     const auto unit_count = payload->unit_count();
     const auto rank_modes = rank_modes_for(*this, payload->channel_count());
     auto results = per_unit_results(*payload, per_unit_top_k_for(*this, unit_count), rank_modes);
+    const auto requested_units = property_as<Units>("units").value_or(Units::none()).to_vector();
+    results = select_units(std::move(results), requested_units);
+
+    std::vector<std::int64_t> selected_units;
+    selected_units.reserve(results.size());
+    for (const auto& result : results) {
+        selected_units.push_back(result.unit_index);
+    }
 
     Buffer output{Caps(correlation_poi_caps_type)};
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "correlation", name());
@@ -314,14 +353,23 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
         output.set_metadata("payload.poi.correlation_mode", input->metadata("payload.correlation.mode"));
     }
     output.set_metadata("payload.poi.observation_count", std::to_string(payload->observation_count()));
-    output.set_metadata("payload.poi.unit_count", std::to_string(unit_count));
-    output.set_metadata("attack.unit.count", std::to_string(unit_count));
-    output.set_metadata("attack.unit.indexes", unit_indexes_metadata(payload->unit_indexes()));
+    output.set_metadata("payload.poi.unit_count", std::to_string(selected_units.size()));
+    output.set_metadata("attack.unit.count", std::to_string(selected_units.size()));
+    output.set_metadata("attack.unit.indexes", units_metadata(selected_units));
+    // Carry the semantic axes as first-class typed values. Units come from the
+    // selected units; channels from the correlation's typed channel axis, falling
+    // back to its payload.leakage.channels metadata (e.g. on a reloaded buffer).
+    output.set_units(Units::of(selected_units));
+    Channels channels = input->channels();
+    if (channels.empty() && input->has_metadata("payload.leakage.channels")) {
+        channels = Channels::parse(input->metadata("payload.leakage.channels"));
+    }
+    output.set_channels(std::move(channels));
     output.set_payload(std::make_shared<CorrelationPoiPayload>(std::move(results), payload->score_name()));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "selected Pearson correlation PoIs");
     record.fields.emplace("payload.poi.method", pearson_poi_method_id);
-    record.fields.emplace("units", std::to_string(unit_count));
+    record.fields.emplace("units", std::to_string(selected_units.size()));
     record.fields.emplace("channel_count", std::to_string(payload->channel_count()));
     record.fields.emplace("features_count", std::to_string(payload->feature_count()));
     record.fields.emplace("observation_count", std::to_string(payload->observation_count()));

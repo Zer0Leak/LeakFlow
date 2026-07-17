@@ -52,10 +52,14 @@ Tests:
   attributes; supports `uint8` and `float32`; fills a single preallocated CPU
   Torch tensor through batched hyperslab reads.
 - `Hdf5BufferArchiveWriter` / `Hdf5BufferArchiveReader`: the HDF5 backend for
-  whole-`Buffer` persistence (the `leakflow.buffer` schema), implementing the base
+  whole-`Buffer` persistence (the `leakflow.buffer` schema, v2), implementing the base
   `BufferArchiveWriter`/`Reader`. Writes the envelope as attributes (root: schema,
-  `caps.type`, `payload.type`; `/caps` and `/metadata` attribute groups) and the
-  payload body as native datasets plus scalar attributes under `/payload`. Supports
+  `caps.type`, `payload.type`, and the optional typed-axis attributes
+  `units`/`channels`; `/caps` and `/metadata` attribute groups) and the
+  payload body as native datasets plus scalar attributes under `/payload`. The typed
+  axes persist as `Units`/`Channels` `format()` strings and are the authoritative
+  identity on reload; a v1 file (no such attributes) still loads with both axes none.
+  Supports
   the full payload dtype range (`float32/64`, `int8/16/32/64`, `uint8`); HDF5 is
   hidden behind a pimpl so the header stays HDF5-free. Drives
   `BufferFileSink`/`BufferFileSrc`. Payload tensors reload on CPU.

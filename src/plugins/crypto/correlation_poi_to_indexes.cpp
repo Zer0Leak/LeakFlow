@@ -27,14 +27,14 @@ void copy_unit_metadata(const Buffer& input, Buffer& output)
     }
 }
 
-[[nodiscard]] std::string unit_indexes_metadata(const std::vector<std::int64_t>& unit_indexes)
+[[nodiscard]] std::string units_metadata(const std::vector<std::int64_t>& units)
 {
     auto value = std::string("[");
-    for (std::size_t index = 0; index < unit_indexes.size(); ++index) {
+    for (std::size_t index = 0; index < units.size(); ++index) {
         if (index != 0) {
             value += ",";
         }
-        value += std::to_string(unit_indexes[index]);
+        value += std::to_string(units[index]);
     }
     value += "]";
     return value;
@@ -53,7 +53,7 @@ void copy_unit_metadata(const Buffer& input, Buffer& output)
         "CorrelationPoiToIndexes: requested unit " + std::to_string(unit) + " is not in the PoI payload");
 }
 
-[[nodiscard]] torch::Tensor unit_indexes(const CorrelationPoiResult& result)
+[[nodiscard]] torch::Tensor poi_sample_indexes(const CorrelationPoiResult& result)
 {
     // result.result is [channel, k, 2] = (sample_index, score); take the indexes and
     // concatenate the channels -> [channel * k].
@@ -126,7 +126,7 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
         per_unit.reserve(payload->results().size());
         selected_units.reserve(payload->results().size());
         for (const auto& result : payload->results()) {
-            per_unit.push_back(unit_indexes(result));
+            per_unit.push_back(poi_sample_indexes(result));
             selected_units.push_back(result.unit_index);
         }
     } else {
@@ -134,7 +134,7 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
         per_unit.reserve(units.size());
         selected_units.reserve(units.size());
         for (const auto unit : units) {
-            per_unit.push_back(unit_indexes(result_for_unit(*payload, unit)));
+            per_unit.push_back(poi_sample_indexes(result_for_unit(*payload, unit)));
             selected_units.push_back(unit);
         }
     }
@@ -145,7 +145,7 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
     forward_metadata(*input, profile_for_klass(element_kclass()), output, "poi", name());
     copy_unit_metadata(*input, output);
     output.set_metadata("attack.unit.count", std::to_string(indexes.size(0)));
-    output.set_metadata("attack.unit.indexes", unit_indexes_metadata(selected_units));
+    output.set_metadata("attack.unit.indexes", units_metadata(selected_units));
     output.set_metadata("payload.feature.selected_count", std::to_string(indexes.size(1)));
     // The PoI rows are per unit; label the leading axis so FeatureSelect and the
     // fusion downstream carry and check unit identity, not just shape.

@@ -63,10 +63,10 @@ void require_floating_tensor(const torch::Tensor& tensor, std::string_view name,
     return output.str();
 }
 
-[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& unit_indexes, std::int64_t unit)
+[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& units, std::int64_t unit)
 {
-    if (unit >= 0 && static_cast<std::size_t>(unit) < unit_indexes.size()) {
-        return std::to_string(unit_indexes[static_cast<std::size_t>(unit)]);
+    if (unit >= 0 && static_cast<std::size_t>(unit) < units.size()) {
+        return std::to_string(units[static_cast<std::size_t>(unit)]);
     }
     return std::to_string(unit);
 }
@@ -117,7 +117,7 @@ void describe_attack_unit(
         "unit[" + std::to_string(unit) + "]",
         "best=" + std::to_string(guess) + " score=" + format_score(score),
         SummaryValueRole::Number);
-    field.add_child("attack_unit", unit_label(payload.unit_indexes(), unit), SummaryValueRole::Number);
+    field.add_child("attack_unit", unit_label(payload.units(), unit), SummaryValueRole::Number);
     field.add_child("best_guess", summary_integer(guess), SummaryValueRole::Number);
     field.add_child("best_score", format_score(score), SummaryValueRole::Number);
     field.add_child("best_channel", channel_label(payload.channel_names(), channel), SummaryValueRole::Text);
@@ -148,7 +148,7 @@ void describe_stats_unit(
         "unit[" + std::to_string(unit) + "]",
         header,
         SummaryValueRole::Number);
-    field.add_child("attack_unit", unit_label(payload.unit_indexes(), unit), SummaryValueRole::Number);
+    field.add_child("attack_unit", unit_label(payload.units(), unit), SummaryValueRole::Number);
     if (payload.has_truth()) {
         const auto rank = payload.true_rank()->to(torch::kCPU).to(torch::kInt64).contiguous()[unit].item<std::int64_t>();
         const auto true_guess = payload.true_guess()->to(torch::kCPU).to(torch::kInt64).contiguous()[unit].item<std::int64_t>();
@@ -209,7 +209,7 @@ AttackScoresPayload::AttackScoresPayload(
     torch::Tensor best_sample,
     torch::Tensor guess_values,
     std::optional<torch::Tensor> correlations,
-    std::vector<std::int64_t> unit_indexes,
+    std::vector<std::int64_t> units,
     std::vector<std::string> channel_names,
     std::string score_method,
     std::string score_channels,
@@ -224,7 +224,7 @@ AttackScoresPayload::AttackScoresPayload(
     , best_sample_(std::move(best_sample))
     , guess_values_(std::move(guess_values))
     , correlations_(std::move(correlations))
-    , unit_indexes_(std::move(unit_indexes))
+    , units_(std::move(units))
     , channel_names_(std::move(channel_names))
     , score_method_(std::move(score_method))
     , score_channels_(std::move(score_channels))
@@ -322,7 +322,7 @@ const torch::Tensor& AttackScoresPayload::best_channel() const { return best_cha
 const torch::Tensor& AttackScoresPayload::best_sample() const { return best_sample_; }
 const torch::Tensor& AttackScoresPayload::guess_values() const { return guess_values_; }
 const std::optional<torch::Tensor>& AttackScoresPayload::correlations() const { return correlations_; }
-const std::vector<std::int64_t>& AttackScoresPayload::unit_indexes() const { return unit_indexes_; }
+const std::vector<std::int64_t>& AttackScoresPayload::units() const { return units_; }
 const std::vector<std::string>& AttackScoresPayload::channel_names() const { return channel_names_; }
 const std::string& AttackScoresPayload::score_method() const { return score_method_; }
 const std::string& AttackScoresPayload::score_channels() const { return score_channels_; }
@@ -348,7 +348,7 @@ AttackStatsPayload::AttackStatsPayload(
     torch::Tensor topk_z_score,
     torch::Tensor topk_robust_z_score,
     torch::Tensor topk_separation,
-    std::vector<std::int64_t> unit_indexes,
+    std::vector<std::int64_t> units,
     std::vector<std::string> channel_names,
     std::vector<std::string> confidence_metrics)
     : true_rank_(std::move(true_rank))
@@ -367,7 +367,7 @@ AttackStatsPayload::AttackStatsPayload(
     , topk_z_score_(std::move(topk_z_score))
     , topk_robust_z_score_(std::move(topk_robust_z_score))
     , topk_separation_(std::move(topk_separation))
-    , unit_indexes_(std::move(unit_indexes))
+    , units_(std::move(units))
     , channel_names_(std::move(channel_names))
     , confidence_metrics_(std::move(confidence_metrics))
 {
@@ -491,7 +491,7 @@ const torch::Tensor& AttackStatsPayload::topk_relative_margin() const { return t
 const torch::Tensor& AttackStatsPayload::topk_z_score() const { return topk_z_score_; }
 const torch::Tensor& AttackStatsPayload::topk_robust_z_score() const { return topk_robust_z_score_; }
 const torch::Tensor& AttackStatsPayload::topk_separation() const { return topk_separation_; }
-const std::vector<std::int64_t>& AttackStatsPayload::unit_indexes() const { return unit_indexes_; }
+const std::vector<std::int64_t>& AttackStatsPayload::units() const { return units_; }
 const std::vector<std::string>& AttackStatsPayload::channel_names() const { return channel_names_; }
 const std::vector<std::string>& AttackStatsPayload::confidence_metrics() const { return confidence_metrics_; }
 std::int64_t AttackStatsPayload::unit_count() const { return top1_guess_.size(0); }

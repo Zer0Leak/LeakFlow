@@ -13,12 +13,16 @@ namespace leakflow::extras {
 namespace {
 
 inline constexpr auto schema_name = "leakflow.buffer";
-inline constexpr auto schema_version = "1";
+// v2 adds the optional typed-axis root attributes `units` and `channels`; a v1 file
+// (no such attributes) still loads, with both axes resolving to none.
+inline constexpr auto schema_version = "2";
 inline constexpr auto caps_group = "/caps";
 inline constexpr auto metadata_group = "/metadata";
 inline constexpr auto payload_group = "/payload";
 inline constexpr auto caps_type_attr = "caps.type";
 inline constexpr auto payload_type_attr = "payload.type";
+inline constexpr auto units_attr = "units";
+inline constexpr auto channels_attr = "channels";
 
 // Minimal owning HDF5 handle; closes with the supplied closer on scope exit.
 class Hdf5Id {
@@ -325,6 +329,14 @@ void Hdf5BufferArchiveWriter::set_caps_param(std::string_view key, std::string_v
     write_string_attribute(impl_->caps.get(), std::string(key), value);
 }
 
+void Hdf5BufferArchiveWriter::set_units(std::string_view value) {
+    write_string_attribute(impl_->file.get(), units_attr, value);
+}
+
+void Hdf5BufferArchiveWriter::set_channels(std::string_view value) {
+    write_string_attribute(impl_->file.get(), channels_attr, value);
+}
+
 void Hdf5BufferArchiveWriter::set_metadata(std::string_view key, std::string_view value) {
     write_string_attribute(impl_->metadata.get(), std::string(key), value);
 }
@@ -358,6 +370,8 @@ struct Hdf5BufferArchiveReader::Impl {
     Hdf5Id payload;
     std::string caps_type;
     std::string payload_type;
+    std::string units;
+    std::string channels;
     std::map<std::string, std::string> caps_params;
     std::map<std::string, std::string> metadata;
 };
@@ -373,6 +387,12 @@ Hdf5BufferArchiveReader::Hdf5BufferArchiveReader(const std::filesystem::path& pa
     }
     impl_->caps_type = read_string_attribute_by_name(impl_->file.get(), caps_type_attr);
     impl_->payload_type = read_string_attribute_by_name(impl_->file.get(), payload_type_attr);
+    if (H5Aexists(impl_->file.get(), units_attr) > 0) {
+        impl_->units = read_string_attribute_by_name(impl_->file.get(), units_attr);
+    }
+    if (H5Aexists(impl_->file.get(), channels_attr) > 0) {
+        impl_->channels = read_string_attribute_by_name(impl_->file.get(), channels_attr);
+    }
     impl_->caps_params = read_group_attributes(impl_->file.get(), caps_group);
     impl_->metadata = read_group_attributes(impl_->file.get(), metadata_group);
     impl_->payload = Hdf5Id(
@@ -387,6 +407,8 @@ Hdf5BufferArchiveReader& Hdf5BufferArchiveReader::operator=(Hdf5BufferArchiveRea
 
 const std::string& Hdf5BufferArchiveReader::caps_type() const { return impl_->caps_type; }
 const std::string& Hdf5BufferArchiveReader::payload_type() const { return impl_->payload_type; }
+const std::string& Hdf5BufferArchiveReader::units() const { return impl_->units; }
+const std::string& Hdf5BufferArchiveReader::channels() const { return impl_->channels; }
 
 const std::map<std::string, std::string>& Hdf5BufferArchiveReader::caps_params() const {
     return impl_->caps_params;

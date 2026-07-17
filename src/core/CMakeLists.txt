@@ -1,5 +1,6 @@
 add_library(leakflow_core
     units.cpp
+    channels.cpp
     buffer.cpp
     buffer_queue.cpp
     caps.cpp

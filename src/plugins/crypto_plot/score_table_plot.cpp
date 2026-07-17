@@ -63,10 +63,10 @@ namespace crypto = leakflow::plugins::crypto;
     return ++step;
 }
 
-[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& unit_indexes, std::int64_t unit)
+[[nodiscard]] std::string unit_label(const std::vector<std::int64_t>& units, std::int64_t unit)
 {
-    if (unit >= 0 && static_cast<std::size_t>(unit) < unit_indexes.size()) {
-        return std::to_string(unit_indexes[static_cast<std::size_t>(unit)]);
+    if (unit >= 0 && static_cast<std::size_t>(unit) < units.size()) {
+        return std::to_string(units[static_cast<std::size_t>(unit)]);
     }
     return std::to_string(unit);
 }
@@ -119,7 +119,7 @@ std::optional<Buffer> capture_table(Element& element, leakflow::plot::TableView&
                                      : torch::Tensor{};
     const auto success = has_truth ? payload->success()->to(torch::kCPU).to(torch::kBool).contiguous()
                                    : torch::Tensor{};
-    const auto& unit_indexes = payload->unit_indexes();
+    const auto& units = payload->units();
 
     // Correct-key highlight (green); leader (best-by-score) is emphasized in white.
     static constexpr leakflow::plot::TracePlotColor correct_key_tint{0.10F, 0.55F, 0.20F};
@@ -134,7 +134,7 @@ std::optional<Buffer> capture_table(Element& element, leakflow::plot::TableView&
     update.columns.reserve(static_cast<std::size_t>(unit_count) + 1);
     update.columns.emplace_back("rank/unit"); // corner: rows are ranks, columns are units
     for (std::int64_t unit = 0; unit < unit_count; ++unit) {
-        update.columns.emplace_back(unit_label(unit_indexes, unit));
+        update.columns.emplace_back(unit_label(units, unit));
     }
 
     update.frame.rows.assign(static_cast<std::size_t>(rank_count),
@@ -170,7 +170,7 @@ std::optional<Buffer> capture_table(Element& element, leakflow::plot::TableView&
             if (correct) {
                 cell.tint = correct_key_tint;
             }
-            cell.hover.emplace_back("unit", unit_label(unit_indexes, unit));
+            cell.hover.emplace_back("unit", unit_label(units, unit));
             cell.hover.emplace_back("guess", "0x" + format_guess(guess));
             cell.hover.emplace_back("score", format_score(score));
             cell.hover.emplace_back("rank", std::to_string(position + 1));

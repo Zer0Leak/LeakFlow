@@ -22,7 +22,7 @@ class CorrelationPayload final : public Payload {
 public:
     CorrelationPayload(
         torch::Tensor grouped_correlation,
-        std::vector<std::int64_t> unit_indexes,
+        std::vector<std::int64_t> units,
         std::int64_t channel_count,
         std::int64_t feature_count,
         std::string score_name,
@@ -34,7 +34,7 @@ public:
 
     // [unit, channel, feature] correlation.
     [[nodiscard]] const torch::Tensor& grouped_correlation() const;
-    [[nodiscard]] const std::vector<std::int64_t>& unit_indexes() const;
+    [[nodiscard]] const std::vector<std::int64_t>& units() const;
     [[nodiscard]] std::int64_t unit_count() const;
     [[nodiscard]] std::int64_t channel_count() const;
     [[nodiscard]] std::int64_t feature_count() const;
@@ -43,7 +43,7 @@ public:
 
 private:
     torch::Tensor grouped_correlation_;
-    std::vector<std::int64_t> unit_indexes_;
+    std::vector<std::int64_t> units_;
     std::int64_t channel_count_ = 1;
     std::int64_t feature_count_ = 0;
     std::string score_name_;

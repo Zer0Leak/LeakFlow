@@ -82,6 +82,14 @@ std::optional<Buffer> BufferFileSink::process(std::optional<Buffer> input)
     for (const auto& [key, value] : input->metadata()) {
         archive.set_metadata(key, value);
     }
+    // Persist the typed semantic axes as authoritative envelope identity (omitted when
+    // the axis is none).
+    if (!input->units().empty()) {
+        archive.set_units(input->units().format());
+    }
+    if (!input->channels().empty()) {
+        archive.set_channels(input->channels().format());
+    }
     archive.set_payload_type(payload_type);
     codec->save(*payload, archive);
 

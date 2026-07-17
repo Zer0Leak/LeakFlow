@@ -65,6 +65,9 @@ int main()
         buffer.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
         buffer.set_payload(payload);
         buffer.set_metadata("payload.layout", "trace/sample");
+        // Typed semantic axes are authoritative envelope identity and must round-trip.
+        buffer.set_units(leakflow::Units::of({0, 2, 5}));
+        buffer.set_channels(leakflow::Channels::of({"HW(m)", "HW(y)"}));
         const auto original_caps = buffer.caps().to_string();
 
         const auto file = (root / "tensor.h5").string();
@@ -100,6 +103,13 @@ int main()
         const auto loaded_payload = loaded->payload_as<leakflow::base::TorchTensorPayload>();
         if (!expect(loaded_payload != nullptr && torch::equal(loaded_payload->tensor(), tensor),
                 "tensor payload did not round-trip")) {
+            fail();
+        }
+        if (!expect(loaded->units() == leakflow::Units::of({0, 2, 5}), "units axis did not round-trip")) {
+            fail();
+        }
+        if (!expect(loaded->channels() == leakflow::Channels::of({"HW(m)", "HW(y)"}),
+                "channels axis did not round-trip")) {
             fail();
         }
     }

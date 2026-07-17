@@ -379,6 +379,9 @@ std::optional<Buffer> AesLeakage::process_inputs(ElementInputs inputs) {
   // Give the leading (unit) axis identity so a downstream fusion (e.g.
   // ClusteringStats) can verify it is scored against the same bytes.
   output.set_units(Units::of(std::vector<std::int64_t>(byte_indexes.begin(), byte_indexes.end())));
+  // Give the channel axis (axis 2) identity so a downstream per-channel fusion
+  // (e.g. PoiCorrelation) aligns on channel name, not column position.
+  output.set_channels(Channels::parse(channels_metadata(channels)));
   output.set_payload(
       std::make_shared<leakflow::base::TorchTensorPayload>(std::move(payload)));
   output.set_metadata("payload.layout", "unit/trace/channel");

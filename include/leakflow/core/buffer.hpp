@@ -1,10 +1,12 @@
 #pragma once
 
 #include "leakflow/core/units.hpp"
+#include "leakflow/core/channels.hpp"
 #include "leakflow/core/caps.hpp"
 #include "leakflow/core/payload.hpp"
 #include "leakflow/core/summary_document.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -50,6 +52,13 @@ public:
     [[nodiscard]] const Units& units() const;
     void set_units(Units units);
 
+    // The channels the payload's channel axis carries -- which leakage model each
+    // column is (see Channels). The channel-axis sibling of units(): an immutable
+    // value member, copied per buffer on a Tee fan-out, set by the producing element
+    // so a later per-channel fusion aligns on channel identity, not column position.
+    [[nodiscard]] const Channels& channels() const;
+    void set_channels(Channels channels);
+
     [[nodiscard]] SummaryDocument describe(std::int64_t summary_level) const;
 
     template <typename T>
@@ -74,20 +83,45 @@ private:
     std::shared_ptr<Payload> payload_;
     std::vector<std::uint32_t> provenance_;
     Units units_;
+    Channels channels_;
 };
 
-// Alignment of two leading-axis label vectors by value: the labels they share and
-// the axis-0 positions of each shared label in each input, so a caller can
-// index_select both down to a common leading axis. `shared` is in `a` order.
-// `identical` is true when a and b are the same labels in the same order (the fast
-// path, no reindex needed). A domain fusion reads this as "the shared units".
-struct LabelAlignment {
-    std::vector<std::int64_t> shared;
+// Alignment of two labelled axes by value: the labels they share and the axis
+// positions of each shared label in each input, so a caller can index_select both
+// down to a common axis. `shared` is in `a` order. `identical` is true when a and b
+// are the same labels in the same order (the fast path, no reindex needed). A domain
+// fusion reads this as "the shared units" (int labels) or "the shared channels"
+// (string labels) -- one mechanism for every labelled semantic axis.
+template <typename Label>
+struct Alignment {
+    std::vector<Label> shared;
     std::vector<std::int64_t> a_indices;
     std::vector<std::int64_t> b_indices;
     bool identical = false;
 };
 
-[[nodiscard]] LabelAlignment align_labels(const std::vector<std::int64_t>& a, const std::vector<std::int64_t>& b);
+using LabelAlignment = Alignment<std::int64_t>;
+using ChannelAlignment = Alignment<std::string>;
+
+// Label counts are tiny (a handful of attack bytes/channels), so a direct scan is
+// both simplest and fastest. Matching is by value, so a and b may list the shared
+// labels in different orders.
+template <typename Label>
+[[nodiscard]] Alignment<Label> align_labels(const std::vector<Label>& a, const std::vector<Label>& b)
+{
+    Alignment<Label> alignment;
+    for (std::size_t ai = 0; ai < a.size(); ++ai) {
+        for (std::size_t bi = 0; bi < b.size(); ++bi) {
+            if (a[ai] == b[bi]) {
+                alignment.shared.push_back(a[ai]);
+                alignment.a_indices.push_back(static_cast<std::int64_t>(ai));
+                alignment.b_indices.push_back(static_cast<std::int64_t>(bi));
+                break;
+            }
+        }
+    }
+    alignment.identical = (a == b);
+    return alignment;
+}
 
 } // namespace leakflow

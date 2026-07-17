@@ -197,7 +197,7 @@ int main()
     // align_labels: shared labels + each input's positions, matched by value so the
     // two inputs may list the shared labels in different orders.
     {
-        const auto alignment = leakflow::align_labels({1, 2, 3}, {3, 2, 5});
+        const auto alignment = leakflow::align_labels<std::int64_t>({1, 2, 3}, {3, 2, 5});
         if (!expect(alignment.shared == std::vector<std::int64_t>{2, 3}, "align_labels shared set wrong")) {
             return 1;
         }
@@ -210,10 +210,10 @@ int main()
             return 1;
         }
     }
-    if (!expect(leakflow::align_labels({0, 1}, {0, 1}).identical, "align_labels missed an identical match")) {
+    if (!expect(leakflow::align_labels<std::int64_t>({0, 1}, {0, 1}).identical, "align_labels missed an identical match")) {
         return 1;
     }
-    if (!expect(leakflow::align_labels({1}, {0}).shared.empty(), "align_labels found a phantom shared label")) {
+    if (!expect(leakflow::align_labels<std::int64_t>({1}, {0}).shared.empty(), "align_labels found a phantom shared label")) {
         return 1;
     }
 

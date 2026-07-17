@@ -218,7 +218,7 @@ int main()
             return 1;
         }
         if (!expect(correlation_payload->feature_count() == 3 && correlation_payload->channel_count() == 1
-                    && correlation_payload->unit_indexes().size() == 2,
+                    && correlation_payload->units().size() == 2,
                 "CorrelationPayload layout was wrong")) {
             return 1;
         }

@@ -28,7 +28,8 @@ Tests:
 ## Current Core API
 
 - `Caps`: lightweight type plus deterministic string parameters.
-- `Buffer`: caps, metadata, optional shared payload, vector-clock provenance, and units.
+- `Buffer`: caps, metadata, optional shared payload, vector-clock provenance, units,
+  and channels.
 - `Payload`: polymorphic data body with `type_name()`, a required non-empty
   logical `layout()`, and optional `describe(...)`.
 - `Units` (`units.hpp`): which unit each row of the payload's leading axis is (AES
@@ -36,6 +37,15 @@ Tests:
   (`none` / `[0]` / `[0:16]` / `[0,1,4:7]`, upper bound exclusive) for the property
   input and the display. A typed, immutable value on `Buffer::units()`; a per-unit
   fusion aligns its inputs on it before comparing.
+- `Channels` (`channels.hpp`): the channel-axis sibling of `Units` — which leakage
+  model each column of a secondary axis is (`HW(m)`, `HW(y)`, `y(0)`…). Same idea as
+  `Units` but string labels, because channels are named not indexed; grammar
+  `none` / `[HW(y)]` / `[HW(m),HW(y)]`. A typed, immutable value on
+  `Buffer::channels()`; a per-channel fusion aligns its inputs on it before comparing.
+- `align_labels<Label>` (`buffer.hpp`): the one shared axis-alignment primitive for
+  every labelled semantic axis — returns the shared labels and each input's positions,
+  matched by value. `LabelAlignment` (`int64`, units) and `ChannelAlignment`
+  (`string`, channels) are its instantiations.
 - `Element`: lifecycle, pads, properties, and `process(optional<Buffer>)`.
 - `Element` always has a writable string `name` property synchronized with
   `Element::name()`.

@@ -82,6 +82,62 @@ int main()
         return 1;
     }
 
+    // Channel-identity alignment: a PoI profiled on [HW(m),HW(y)] re-scored against a
+    // target computed for only [HW(y)] must align by channel name (not column), scoring
+    // just the shared HW(y) channel instead of running off the [.,.,1] target tensor.
+    {
+        const auto hw_y_leakage = target.reshape({1, 100, 1}); // one channel = HW(y)
+        std::vector<leakflow::plugins::crypto::CorrelationPoiResult> two_channel;
+        two_channel.push_back({0, torch::tensor(
+            {{{2.0, 0.1}, {5.0, 0.1}},   // channel 0 = HW(m) -> dropped (not in target)
+             {{3.0, 0.5}, {7.0, 0.5}}},  // channel 1 = HW(y) -> shared
+            torch::kFloat64)}); // [2,2,2]
+        auto poi2 = std::make_shared<leakflow::plugins::crypto::CorrelationPoiPayload>(
+            std::move(two_channel), std::string("correlation"));
+        leakflow::Buffer poi2_buffer{leakflow::Caps(leakflow::plugins::crypto::correlation_poi_caps_type)};
+        poi2_buffer.set_payload(poi2);
+        poi2_buffer.set_units(leakflow::Units::of({0}));
+        poi2_buffer.set_channels(leakflow::Channels::of({"HW(m)", "HW(y)"}));
+
+        auto target2 = torch_buffer(hw_y_leakage);
+        target2.set_units(leakflow::Units::of({0}));
+        target2.set_channels(leakflow::Channels::of({"HW(y)"}));
+
+        leakflow::ElementInputs inputs2;
+        inputs2.emplace("poi", std::move(poi2_buffer));
+        inputs2.emplace("traces", torch_buffer(traces));
+        inputs2.emplace("targets", std::move(target2));
+
+        leakflow::plugins::crypto::PoiCorrelation element2;
+        const auto out2 = element2.process_inputs(std::move(inputs2));
+        if (!expect(out2.has_value(), "no channel-aligned output")) {
+            return 1;
+        }
+        const auto rescored2 = out2->payload_as<leakflow::plugins::crypto::CorrelationPoiPayload>();
+        if (!expect(rescored2 != nullptr && rescored2->results().size() == 1, "channel-aligned output missing")) {
+            return 1;
+        }
+        const auto& cr = rescored2->results().front().result; // expect [1,2,2] (only HW(y))
+        if (!expect(cr.size(0) == 1, "output should keep only the shared HW(y) channel")) {
+            return 1;
+        }
+        if (!expect(out2->channels() == leakflow::Channels::of({"HW(y)"})
+                        && out2->metadata("payload.leakage.channels") == "[HW(y)]",
+                "output channel axis should be [HW(y)]")) {
+            return 1;
+        }
+        // Positions from the HW(y) channel preserved; scores re-scored to +1 / -1.
+        if (!expect(cr[0][0][0].item<double>() == 3.0 && cr[0][1][0].item<double>() == 7.0,
+                "channel-aligned positions not preserved")) {
+            return 1;
+        }
+        if (!expect(std::abs(cr[0][0][1].item<double>() - 1.0) < 1.0e-6
+                        && std::abs(cr[0][1][1].item<double>() + 1.0) < 1.0e-6,
+                "channel-aligned re-scores wrong")) {
+            return 1;
+        }
+    }
+
     std::cout << "poi_correlation tests passed\n";
     return 0;
 }

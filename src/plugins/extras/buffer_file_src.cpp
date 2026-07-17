@@ -87,6 +87,9 @@ std::optional<Buffer> BufferFileSrc::process(std::optional<Buffer> input)
     for (const auto& [key, value] : archive.metadata()) {
         buffer.set_metadata(key, value);
     }
+    // Restore the typed semantic axes (empty / schema-1 files parse back to none).
+    buffer.set_units(Units::parse(archive.units()));
+    buffer.set_channels(Channels::parse(archive.channels()));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "loaded buffer");
     record.fields.emplace("path", path);

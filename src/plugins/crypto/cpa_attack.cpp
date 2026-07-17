@@ -416,7 +416,7 @@ void require_numeric_tensor(const torch::Tensor& tensor, std::string_view name)
     return channels;
 }
 
-[[nodiscard]] std::vector<std::int64_t> unit_indexes_from_metadata(const Buffer& hypotheses, std::int64_t unit_count)
+[[nodiscard]] std::vector<std::int64_t> units_from_metadata(const Buffer& hypotheses, std::int64_t unit_count)
 {
     if (hypotheses.has_metadata("attack.unit.indexes")) {
         auto indexes = parse_int_list(hypotheses.metadata("attack.unit.indexes"));
@@ -873,7 +873,7 @@ std::optional<Buffer> CpaAttack::process_inputs(ElementInputs inputs)
     auto best_guess =
         guess_values.index_select(0, score_result.best_guess_index.to(guess_values.device())).to(torch::kLong).contiguous();
     const auto channels = channels_from_metadata(hypotheses_buffer, prepared.channel_count);
-    const auto unit_indexes = unit_indexes_from_metadata(hypotheses_buffer, prepared.unit_count);
+    const auto units = units_from_metadata(hypotheses_buffer, prepared.unit_count);
     const auto top_k = integer_property_or(*this, "top_k", 5);
     std::optional<torch::Tensor> emitted_correlations;
     if (bool_property_or(*this, "emit_correlations", false)) {
@@ -890,7 +890,7 @@ std::optional<Buffer> CpaAttack::process_inputs(ElementInputs inputs)
         score_result.best_sample,
         guess_values,
         emitted_correlations,
-        unit_indexes,
+        units,
         channels,
         score_method_text,
         score_channels_text,

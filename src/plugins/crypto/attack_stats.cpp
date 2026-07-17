@@ -82,16 +82,16 @@ void require_truth_tensor(const torch::Tensor& truth)
     }
 }
 
-[[nodiscard]] bool unit_indexes_fit_aes_state(const std::vector<std::int64_t>& unit_indexes)
+[[nodiscard]] bool units_fit_aes_state(const std::vector<std::int64_t>& units)
 {
-    return std::ranges::all_of(unit_indexes, [](std::int64_t value) {
+    return std::ranges::all_of(units, [](std::int64_t value) {
         return value >= 0 && value < 16;
     });
 }
 
 [[nodiscard]] std::vector<std::int64_t> truth_values_for_units(
     const torch::Tensor& truth_tensor,
-    const std::vector<std::int64_t>& unit_indexes,
+    const std::vector<std::int64_t>& units,
     std::int64_t unit_count)
 {
     require_truth_tensor(truth_tensor);
@@ -99,15 +99,15 @@ void require_truth_tensor(const torch::Tensor& truth)
     std::vector<std::int64_t> values;
     values.reserve(static_cast<std::size_t>(unit_count));
 
-    if (truth.dim() == 2 && truth.size(1) == 16 && unit_indexes_fit_aes_state(unit_indexes)) {
-        for (const auto unit_index : unit_indexes) {
+    if (truth.dim() == 2 && truth.size(1) == 16 && units_fit_aes_state(units)) {
+        for (const auto unit_index : units) {
             values.push_back(truth[0][unit_index].item<std::int64_t>());
         }
         return values;
     }
 
-    if (truth.dim() == 1 && truth.size(0) == 16 && unit_indexes_fit_aes_state(unit_indexes)) {
-        for (const auto unit_index : unit_indexes) {
+    if (truth.dim() == 1 && truth.size(0) == 16 && units_fit_aes_state(units)) {
+        for (const auto unit_index : units) {
             values.push_back(truth[unit_index].item<std::int64_t>());
         }
         return values;
@@ -359,7 +359,7 @@ std::optional<Buffer> AttackStats::process_inputs(ElementInputs inputs)
     std::optional<std::vector<std::int64_t>> truth_values;
     if (const auto found = inputs.find("truth"); found != inputs.end() && found->second) {
         const auto truth_payload = torch_payload_for(*found->second, "truth");
-        truth_values = truth_values_for_units(truth_payload->tensor(), attack_payload->unit_indexes(), unit_count);
+        truth_values = truth_values_for_units(truth_payload->tensor(), attack_payload->units(), unit_count);
     }
     const bool has_truth = truth_values.has_value();
 
@@ -492,7 +492,7 @@ std::optional<Buffer> AttackStats::process_inputs(ElementInputs inputs)
         torch::tensor(topk_z_score_values, torch::TensorOptions().dtype(torch::kFloat64)).reshape({unit_count, top_k}),
         torch::tensor(topk_robust_z_score_values, torch::TensorOptions().dtype(torch::kFloat64)).reshape({unit_count, top_k}),
         torch::tensor(topk_separation_values, torch::TensorOptions().dtype(torch::kFloat64)).reshape({unit_count, top_k}),
-        attack_payload->unit_indexes(),
+        attack_payload->units(),
         attack_payload->channel_names(),
         confidence_metrics);
 

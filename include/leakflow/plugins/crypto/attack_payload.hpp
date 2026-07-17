@@ -26,7 +26,7 @@ public:
         torch::Tensor best_sample,
         torch::Tensor guess_values,
         std::optional<torch::Tensor> correlations,
-        std::vector<std::int64_t> unit_indexes,
+        std::vector<std::int64_t> units,
         std::vector<std::string> channel_names,
         std::string score_method,
         std::string score_channels,
@@ -46,7 +46,7 @@ public:
     [[nodiscard]] const torch::Tensor& best_sample() const;
     [[nodiscard]] const torch::Tensor& guess_values() const;
     [[nodiscard]] const std::optional<torch::Tensor>& correlations() const;
-    [[nodiscard]] const std::vector<std::int64_t>& unit_indexes() const;
+    [[nodiscard]] const std::vector<std::int64_t>& units() const;
     [[nodiscard]] const std::vector<std::string>& channel_names() const;
     [[nodiscard]] const std::string& score_method() const;
     [[nodiscard]] const std::string& score_channels() const;
@@ -65,7 +65,7 @@ private:
     torch::Tensor best_sample_;
     torch::Tensor guess_values_;
     std::optional<torch::Tensor> correlations_;
-    std::vector<std::int64_t> unit_indexes_;
+    std::vector<std::int64_t> units_;
     std::vector<std::string> channel_names_;
     std::string score_method_;
     std::string score_channels_;
@@ -92,7 +92,7 @@ public:
         torch::Tensor topk_z_score,
         torch::Tensor topk_robust_z_score,
         torch::Tensor topk_separation,
-        std::vector<std::int64_t> unit_indexes,
+        std::vector<std::int64_t> units,
         std::vector<std::string> channel_names,
         std::vector<std::string> confidence_metrics);
 
@@ -119,7 +119,7 @@ public:
     [[nodiscard]] const torch::Tensor& topk_z_score() const;
     [[nodiscard]] const torch::Tensor& topk_robust_z_score() const;
     [[nodiscard]] const torch::Tensor& topk_separation() const;
-    [[nodiscard]] const std::vector<std::int64_t>& unit_indexes() const;
+    [[nodiscard]] const std::vector<std::int64_t>& units() const;
     [[nodiscard]] const std::vector<std::string>& channel_names() const;
     [[nodiscard]] const std::vector<std::string>& confidence_metrics() const;
     [[nodiscard]] std::int64_t unit_count() const;
@@ -142,7 +142,7 @@ private:
     torch::Tensor topk_z_score_;
     torch::Tensor topk_robust_z_score_;
     torch::Tensor topk_separation_;
-    std::vector<std::int64_t> unit_indexes_;
+    std::vector<std::int64_t> units_;
     std::vector<std::string> channel_names_;
     std::vector<std::string> confidence_metrics_;
 };

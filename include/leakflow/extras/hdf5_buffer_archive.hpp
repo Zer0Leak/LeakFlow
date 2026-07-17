@@ -36,6 +36,12 @@ public:
     void set_payload_type(std::string_view value);
     void set_caps_param(std::string_view key, std::string_view value);
     void set_metadata(std::string_view key, std::string_view value);
+    // The typed semantic axes, as their Units/Channels format() strings. These are
+    // authoritative envelope identity, persisted so a reloaded buffer round-trips them
+    // exactly (unlike metadata, which the Analyze profile may drop). Omit / empty when
+    // the axis is none.
+    void set_units(std::string_view value);
+    void set_channels(std::string_view value);
 
     // Payload body (codec-level, base interface).
     void write_tensor(std::string_view name, const torch::Tensor& tensor) override;
@@ -59,6 +65,10 @@ public:
     [[nodiscard]] const std::string& payload_type() const;
     [[nodiscard]] const std::map<std::string, std::string>& caps_params() const;
     [[nodiscard]] const std::map<std::string, std::string>& metadata() const;
+    // The typed semantic axes as format() strings, or empty when the axis was none /
+    // absent (e.g. a schema-1 file). Parse with Units::parse / Channels::parse.
+    [[nodiscard]] const std::string& units() const;
+    [[nodiscard]] const std::string& channels() const;
 
     // Payload body (codec-level, base interface).
     [[nodiscard]] bool has(std::string_view name) const override;

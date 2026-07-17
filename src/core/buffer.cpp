@@ -103,6 +103,16 @@ void Buffer::set_units(Units units)
     units_ = std::move(units);
 }
 
+const Channels& Buffer::channels() const
+{
+    return channels_;
+}
+
+void Buffer::set_channels(Channels channels)
+{
+    channels_ = std::move(channels);
+}
+
 SummaryDocument Buffer::describe(std::int64_t summary_level) const
 {
     SummaryDocument document("Buffer");
@@ -148,31 +158,14 @@ SummaryDocument Buffer::describe(std::int64_t summary_level) const
             }
             payload_section.add_field(axis_name, units_.format());
         }
+        if (!channels_.empty()) {
+            payload_section.add_field("channels", channels_.format());
+        }
     } else {
         payload_section.add_field("payload", "none");
     }
 
     return document;
-}
-
-LabelAlignment align_labels(const std::vector<std::int64_t>& a, const std::vector<std::int64_t>& b)
-{
-    // Unit counts are tiny (a handful of attack bytes), so a direct scan is both
-    // simplest and fastest. Matching is by value, so a and b may list the shared
-    // labels in different orders.
-    LabelAlignment alignment;
-    for (std::size_t ai = 0; ai < a.size(); ++ai) {
-        for (std::size_t bi = 0; bi < b.size(); ++bi) {
-            if (a[ai] == b[bi]) {
-                alignment.shared.push_back(a[ai]);
-                alignment.a_indices.push_back(static_cast<std::int64_t>(ai));
-                alignment.b_indices.push_back(static_cast<std::int64_t>(bi));
-                break;
-            }
-        }
-    }
-    alignment.identical = (a == b);
-    return alignment;
 }
 
 } // namespace leakflow
