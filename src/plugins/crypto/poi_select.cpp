@@ -142,14 +142,17 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
     return torch::stack({indexes.to(torch::kFloat64), values.to(torch::kFloat64)}, 1).contiguous();
 }
 
+// `channel_columns` selects which correlation channel columns to keep, in output order;
+// `rank_modes` is still indexed by the original correlation column (a channel's ranking mode
+// is a property of the leakage channel, not of its output position).
 [[nodiscard]] std::vector<CorrelationPoiResult> per_unit_results(
     const CorrelationPayload& correlation,
     const std::vector<std::int64_t>& top_k_values,
-    const std::vector<RankBy>& rank_modes)
+    const std::vector<RankBy>& rank_modes,
+    const std::vector<std::int64_t>& channel_columns)
 {
     const auto& grouped = correlation.grouped_correlation();
     const auto& units = correlation.units();
-    const auto channel_count = correlation.channel_count();
     const auto feature_count = correlation.feature_count();
 
     std::vector<CorrelationPoiResult> results;
@@ -161,10 +164,10 @@ void validate_top_k(std::int64_t top_k, std::int64_t feature_count)
         validate_top_k(top_k, feature_count);
 
         std::vector<torch::Tensor> channel_results;
-        channel_results.reserve(static_cast<std::size_t>(channel_count));
-        for (auto channel_index = std::int64_t{0}; channel_index < channel_count; ++channel_index) {
-            const auto correlations = grouped[unit_offset][channel_index];
-            const auto scores = contribution_for(correlations, rank_modes.at(static_cast<std::size_t>(channel_index)));
+        channel_results.reserve(channel_columns.size());
+        for (const auto column : channel_columns) {
+            const auto correlations = grouped[unit_offset][column];
+            const auto scores = contribution_for(correlations, rank_modes.at(static_cast<std::size_t>(column)));
             const auto [selected_scores, selected_indexes] = torch::topk(scores, top_k);
             (void)selected_scores;
             const auto selected_correlations = correlations.index_select(0, selected_indexes);
@@ -235,6 +238,72 @@ void copy_target_semantic_metadata(const Buffer& source, Buffer& sink)
     return value;
 }
 
+// Bare (bracket-less) channel projection for the payload.leakage.channels metadata, matching
+// the convention AesLeakage writes and PoiSelect parses back.
+[[nodiscard]] std::string channels_metadata(const Channels& channels)
+{
+    std::string value;
+    for (auto index = std::int64_t{0}; index < channels.size(); ++index) {
+        if (index != 0) {
+            value += ",";
+        }
+        value += channels.at(index);
+    }
+    return value;
+}
+
+struct ChannelSelection {
+    std::vector<std::int64_t> columns; // correlation column per output channel, in output order
+    Channels channels;                 // labels in output order (none when unlabeled and kept-all)
+};
+
+// Resolve which correlation channel columns to keep. An empty `channels` property keeps every
+// column in correlation order (carrying the identity through unchanged, possibly none). A
+// non-empty one keeps/reorders channels by name and therefore requires a named channel identity;
+// a requested name absent from the correlation is an error.
+[[nodiscard]] ChannelSelection channel_selection_for(
+    const Element& element, const Channels& identity, std::int64_t channel_count)
+{
+    const auto requested = string_list_property_or(element, "channels", StringList{});
+    ChannelSelection selection;
+    if (requested.empty()) {
+        selection.columns.reserve(static_cast<std::size_t>(channel_count));
+        for (auto column = std::int64_t{0}; column < channel_count; ++column) {
+            selection.columns.push_back(column);
+        }
+        selection.channels = identity;
+        return selection;
+    }
+    if (identity.empty()) {
+        throw std::invalid_argument(
+            "PoiSelect channels: the correlation carries no channel identity to select by name");
+    }
+    if (identity.size() != channel_count) {
+        throw std::invalid_argument(
+            "PoiSelect channels: correlation channel identity does not match the channel count");
+    }
+    selection.columns.reserve(requested.size());
+    std::vector<std::string> labels;
+    labels.reserve(requested.size());
+    for (const auto& name : requested) {
+        auto column = std::int64_t{-1};
+        for (auto candidate = std::int64_t{0}; candidate < identity.size(); ++candidate) {
+            if (identity.at(candidate) == name) {
+                column = candidate;
+                break;
+            }
+        }
+        if (column < 0) {
+            throw std::invalid_argument(
+                "PoiSelect channels: requested channel " + name + " is not in the correlation");
+        }
+        selection.columns.push_back(column);
+        labels.push_back(name);
+    }
+    selection.channels = Channels::of(std::move(labels));
+    return selection;
+}
+
 } // namespace
 
 ElementDescriptor PoiSelect::descriptor()
@@ -266,6 +335,15 @@ ElementDescriptor PoiSelect::descriptor()
                 }),
             PropertySpec("units", Units::none(),
                 "unit indexes to keep, e.g. [0] / [0:16] / [0,2:4]; none/[] = all, in correlation order",
+                "", std::monostate{}, "",
+                PropertyEffect{
+                    .kind = PropertyEffectKind::PayloadOutput,
+                    .scope = PropertyInvalidationScope::Downstream,
+                    .output_pads = {"poi"},
+                }),
+            PropertySpec("channels", StringList{},
+                "leakage channels to keep/reorder by name, e.g. [HW(y)] or [HW(m),HW(y)]; "
+                "[] = all, in correlation order",
                 "", std::monostate{}, "",
                 PropertyEffect{
                     .kind = PropertyEffectKind::PayloadOutput,
@@ -333,7 +411,17 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
 
     const auto unit_count = payload->unit_count();
     const auto rank_modes = rank_modes_for(*this, payload->channel_count());
-    auto results = per_unit_results(*payload, per_unit_top_k_for(*this, unit_count), rank_modes);
+
+    // The correlation's channel identity comes from the typed axis, falling back to its
+    // payload.leakage.channels metadata projection (e.g. on a reloaded buffer).
+    Channels channel_identity = input->channels();
+    if (channel_identity.empty() && input->has_metadata("payload.leakage.channels")) {
+        channel_identity = Channels::parse(input->metadata("payload.leakage.channels"));
+    }
+    const auto channel_selection = channel_selection_for(*this, channel_identity, payload->channel_count());
+
+    auto results = per_unit_results(
+        *payload, per_unit_top_k_for(*this, unit_count), rank_modes, channel_selection.columns);
     const auto requested_units = property_as<Units>("units").value_or(Units::none()).to_vector();
     results = select_units(std::move(results), requested_units);
 
@@ -356,15 +444,15 @@ std::optional<Buffer> PoiSelect::process(std::optional<Buffer> input)
     output.set_metadata("payload.poi.unit_count", std::to_string(selected_units.size()));
     output.set_metadata("attack.unit.count", std::to_string(selected_units.size()));
     output.set_metadata("attack.unit.indexes", units_metadata(selected_units));
-    // Carry the semantic axes as first-class typed values. Units come from the
-    // selected units; channels from the correlation's typed channel axis, falling
-    // back to its payload.leakage.channels metadata (e.g. on a reloaded buffer).
+    // Carry the semantic axes as first-class typed values: the selected units and the
+    // selected channels. When a channel subset/reorder was requested, re-project the
+    // authoritative axis into the payload.leakage.channels metadata so the two agree
+    // (copy_target_semantic_metadata forwarded the correlation's original list above).
     output.set_units(Units::of(selected_units));
-    Channels channels = input->channels();
-    if (channels.empty() && input->has_metadata("payload.leakage.channels")) {
-        channels = Channels::parse(input->metadata("payload.leakage.channels"));
+    output.set_channels(channel_selection.channels);
+    if (!channel_selection.channels.empty()) {
+        output.set_metadata("payload.leakage.channels", channels_metadata(channel_selection.channels));
     }
-    output.set_channels(std::move(channels));
     output.set_payload(std::make_shared<CorrelationPoiPayload>(std::move(results), payload->score_name()));
 
     auto record = make_log_record(log::LogLevel::Debug, "element", "selected Pearson correlation PoIs");

@@ -42,8 +42,9 @@ semantic axes after attaching its Torch payload: `FeatureSelect` emits
 `true_class/cluster` or `unit/true_class/cluster`.
 
 The unit axis also carries identity as typed `Buffer::units()` (a `Units`):
-`AesLeakage` (from `units`) and `CorrelationPoiToIndexes` (from `units`) set
-it, `FeatureSelect` and `GaussianMixture` carry it through, and `ClusteringStats`
+`AesLeakage` (from `units`) and `PoiSelect` (from `units`) set
+it, `CorrelationPoiToIndexes`, `FeatureSelect`, and `GaussianMixture` carry it
+through, and `ClusteringStats`
 aligns its `labels` and `truth` inputs on it before scoring — **disjoint units are
 an error**, a **partial overlap warns** and scores the shared units, and unlabeled
 inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonomy.md`.

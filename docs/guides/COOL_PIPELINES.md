@@ -330,7 +330,7 @@ Compute and save the correlation:
 
 ```bash
 leakflow --log-level warning run \
-  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); \
+  'Hdf5FileSrc@data(path=traces/aes/sync/aes_sync_attack/key_30.h5); \
    Tee@tee; AesLeakage@lk(channels=[HW(m),HW(y)],units=[]); \
    PearsonCorrelator@corr; BufferFileSink@save(path=out/aes_corr.h5); \
    @data.traces ! @tee; @tee.src_0 ! @corr.features; @tee.src_1 ! @lk.traces; \
@@ -376,7 +376,7 @@ reloaded only as the cheap backdrop the PoI markers are drawn on:
 
 ```bash
 leakflow run --graph \
-  'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); \
+  'Hdf5FileSrc@data(path=traces/aes/sync/aes_sync_attack/key_30.h5); \
    BufferFileSrc@corr_src(path=out/aes_corr.h5); \
    PoiSelect@poi(top_k=[3],rank_by=[abs]); \
    Tee@poi_tee; \
@@ -470,9 +470,9 @@ is intentionally unwanted.
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
 leakflow --log-level warning run --graph \
   "BufferFileSrc@corr_src(path=out/aes_corr.h5); \
-   PoiSelect@poi(top_k=[50],rank_by=[abs]); \
+   PoiSelect@poi(top_k=[50],rank_by=[abs],units=[0]); \
    Tee@poi_tee; \
-   CorrelationPoiToIndexes@poi2idx(units=[0]); \
+   CorrelationPoiToIndexes@poi2idx; \
    Hdf5FileSrc@data(path=$A); \
    Tee@trace_tee; \
    FeatureSelect@featsel; \
@@ -503,7 +503,7 @@ leakflow --log-level warning run --graph \
 
 The GMM `labels` (via `FeatureSelect` → `GaussianMixture`) and the vector truth
 (via `AesLeakage`) must describe the **same units**. `ClusteringEvaluate` aligns
-them by unit id, so `CorrelationPoiToIndexes(units=[...])` and
+them by unit id, so `PoiSelect(units=[...])` and
 `AesLeakage(units=[...])` need to name the same bytes: disjoint units are an
 error (*"labels and truth share no units"*), and a partial overlap warns and scores
 only the shared units. Match them — both `[0]`, or both left at the full range — for
@@ -564,7 +564,7 @@ multiple units, a horizontal **Unit** slider on Overview, Exact, Combined, the
 detail-family tabs, and Heatmap selects one typed unit; the selection follows
 you across tabs, while
 Parameters remains run-wide. To exercise it with this example,
-change both `CorrelationPoiToIndexes(units=[0])` and
+change both `PoiSelect(units=[0])` and
 `AesLeakage(units=[0])` to the same multi-unit set, such as `[0,1]`. Click a
 header within the current tab to sort ascending or descending. The table's
 **Clear** button clears that tab;

@@ -64,26 +64,6 @@ int main()
         return 1;
     }
 
-    // --- units filter: keep only byte unit 1 -> [1, 6] ---
-    {
-        std::vector<leakflow::plugins::crypto::CorrelationPoiResult> r2;
-        r2.push_back({0, make_result(torch::tensor({{10, 11, 12}, {20, 21, 22}}, torch::kLong))});
-        r2.push_back({1, make_result(torch::tensor({{30, 31, 32}, {40, 41, 42}}, torch::kLong))});
-        auto p2 = std::make_shared<leakflow::plugins::crypto::CorrelationPoiPayload>(
-            std::move(r2), std::string("correlation"));
-        leakflow::Buffer b2{leakflow::Caps(leakflow::plugins::crypto::correlation_poi_caps_type)};
-        b2.set_payload(p2);
-        leakflow::plugins::crypto::CorrelationPoiToIndexes filtered;
-        filtered.set_property("units", leakflow::Units::of({1}));
-        const auto out2 = filtered.process(std::move(b2));
-        const auto idx2 = out2->payload_as<leakflow::base::TorchTensorPayload>()->tensor();
-        const auto want = torch::tensor({{30, 31, 32, 40, 41, 42}}, torch::kLong);
-        if (!expect(idx2.sizes() == torch::IntArrayRef({1, 6}) && torch::equal(idx2, want),
-                    "units filter did not select byte unit 1")) {
-            return 1;
-        }
-    }
-
     std::cout << "correlation_poi_to_indexes tests passed\n";
     return 0;
 }

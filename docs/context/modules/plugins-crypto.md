@@ -118,13 +118,20 @@ CLI/inspect files if affected:
   `Buffer::channels()` (channels taken from the target buffer's typed axis, else its
   `payload.leakage.channels` metadata).
 - `PoiSelect` (`Analyze/SCA/PoI/Select`): selects the top-k PoI sample indexes per
-  (byte, channel) from a `CorrelationPayload` and emits a `CorrelationPoiPayload`.
-  Properties: `top_k`, `rank_by`, `units` (unit subset to keep, e.g. `[0]` / `[0:16]`;
-  `none`/`[]` = all, in correlation order — a missing requested unit is an error).
-  **Stateless** (`can_replay()==true`), so changing `top_k`/`rank_by`/`units` in Idle
-  re-selects from the cached correlation without re-streaming. Stamps `payload.poi.*`
-  metadata and carries `Buffer::units()` (the selected units) / `Buffer::channels()`
-  (from the correlation's typed axis, else its `payload.leakage.channels` metadata).
+  (byte, channel) from a `CorrelationPayload` and emits a `CorrelationPoiPayload`. It
+  owns both semantic-axis selections. Properties: `top_k`, `rank_by`, `units` (unit
+  subset to keep, e.g. `[0]` / `[0:16]`; `none`/`[]` = all, in correlation order — a
+  missing requested unit is an error), and `channels` (leakage-channel subset/reorder
+  by name, e.g. `[HW(y)]` / `[HW(m),HW(y)]`; `[]` = all, in correlation order —
+  selecting by name requires a named channel identity, and a missing requested channel
+  is an error). **Stateless** (`can_replay()==true`), so changing
+  `top_k`/`rank_by`/`units`/`channels` in Idle re-selects from the cached correlation
+  without re-streaming. Stamps `payload.poi.*` metadata and carries `Buffer::units()`
+  (the selected units) / `Buffer::channels()` (the selected channels; resolved from the
+  correlation's typed axis, else its `payload.leakage.channels` metadata, and
+  re-projected into that metadata when narrowed). Because `PoiSelect` is the single
+  place unit/channel subsetting happens, `CorrelationPoiToIndexes` is a pure converter
+  that just flattens whatever axes the payload carries.
   (`PearsonCorrelator` + `PoiSelect` are the split of the former `PearsonPoiFinder`.)
 - `PoiCorrelation` (`Analyze/SCA/PoiCorrelation`): re-scores a profiling
   `CorrelationPoiPayload`'s PoI positions with their Pearson correlation on new (attack)

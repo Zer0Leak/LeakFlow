@@ -40,19 +40,6 @@ void copy_unit_metadata(const Buffer& input, Buffer& output)
     return value;
 }
 
-// Result for a specific unit index, or throw if the payload has no such unit.
-[[nodiscard]] const CorrelationPoiResult& result_for_unit(
-    const CorrelationPoiPayload& payload, std::int64_t unit)
-{
-    for (const auto& result : payload.results()) {
-        if (static_cast<std::int64_t>(result.unit_index) == unit) {
-            return result;
-        }
-    }
-    throw std::invalid_argument(
-        "CorrelationPoiToIndexes: requested unit " + std::to_string(unit) + " is not in the PoI payload");
-}
-
 [[nodiscard]] torch::Tensor poi_sample_indexes(const CorrelationPoiResult& result)
 {
     // result.result is [channel, k, 2] = (sample_index, score); take the indexes and
@@ -73,16 +60,6 @@ ElementDescriptor CorrelationPoiToIndexes::descriptor()
         },
         .output_pads = {
             Pad("indexes", PadDirection::Output, Caps(leakflow::base::torch_tensor_caps_type)),
-        },
-        .property_specs = {
-            PropertySpec("units", Units::none(),
-                "unit indexes to keep, e.g. [0] / [0:16] / [0,2:4]; none/[] = all, in payload order",
-                "", std::monostate{}, "",
-                PropertyEffect{
-                    .kind = PropertyEffectKind::PayloadOutput,
-                    .scope = PropertyInvalidationScope::Downstream,
-                    .output_pads = {"indexes"},
-                }),
         },
         .keywords = {"poi", "indexes", "feature", "select", "sca"},
         .metadata_set_by_element = {
@@ -118,27 +95,17 @@ std::optional<Buffer> CorrelationPoiToIndexes::process(std::optional<Buffer> inp
         throw std::invalid_argument("CorrelationPoiToIndexes: PoI payload has no units");
     }
 
-    const auto units = property_as<Units>("units").value_or(Units::none()).to_vector();
+    // Flatten every unit the payload carries, in payload order. Unit selection is an
+    // upstream PoiSelect concern, not this converter's.
     std::vector<torch::Tensor> per_unit;
     std::vector<std::int64_t> selected_units;
-    if (units.empty()) {
-        // All units, in payload order.
-        per_unit.reserve(payload->results().size());
-        selected_units.reserve(payload->results().size());
-        for (const auto& result : payload->results()) {
-            per_unit.push_back(poi_sample_indexes(result));
-            selected_units.push_back(result.unit_index);
-        }
-    } else {
-        // Only the requested units, in the requested order.
-        per_unit.reserve(units.size());
-        selected_units.reserve(units.size());
-        for (const auto unit : units) {
-            per_unit.push_back(poi_sample_indexes(result_for_unit(*payload, unit)));
-            selected_units.push_back(unit);
-        }
+    per_unit.reserve(payload->results().size());
+    selected_units.reserve(payload->results().size());
+    for (const auto& result : payload->results()) {
+        per_unit.push_back(poi_sample_indexes(result));
+        selected_units.push_back(result.unit_index);
     }
-    const auto indexes = torch::stack(per_unit, 0).contiguous(); // [len(units), N_sel]
+    const auto indexes = torch::stack(per_unit, 0).contiguous(); // [units, N_sel]
 
     auto index_payload = leakflow::base::TorchTensorPayload(indexes);
     Buffer output{index_payload.caps()};

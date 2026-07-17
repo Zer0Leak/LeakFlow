@@ -13,9 +13,12 @@ namespace leakflow::plugins::crypto {
 inline constexpr auto pearson_poi_method_id = "pearson-correlation";
 
 // Selects the top-k points of interest per (unit, channel) from a CorrelationPayload
-// and emits a CorrelationPoiPayload. This is the *stateless* half of the old
-// PearsonPoiFinder: its output is a pure function of (correlation, top_k, rank_by),
-// so it is replayable (can_replay() default true) -- changing top_k / rank_by in Idle
+// and emits a CorrelationPoiPayload. It also owns semantic-axis selection: the `units`
+// property keeps/reorders byte units and the `channels` property keeps/reorders leakage
+// channels (by name), so a single (unit, channel) slice can be carried downstream without a
+// separate converter re-subsetting it. This is the *stateless* half of the old
+// PearsonPoiFinder: its output is a pure function of (correlation, top_k, rank_by, units,
+// channels), so it is replayable (can_replay() default true) -- changing any of them in Idle
 // re-selects from the cached correlation through the normal partial-rerun path, no
 // re-accumulation. The accumulation lives upstream in PearsonCorrelator.
 class PoiSelect final : public Element {

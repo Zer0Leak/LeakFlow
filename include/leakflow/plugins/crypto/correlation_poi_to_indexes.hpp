@@ -13,9 +13,11 @@ namespace leakflow::plugins::crypto {
 // channels are concatenated (N_sel = channels * top_k). This bridges PoiSelect to the generic
 // FeatureSelect element, which truncates traces to those columns for one GMM per byte.
 //
-// The `units` property (default [] = all) restricts/reorders the output to specific byte units
-// (target byte indexes), so a single unit can be clustered -- pair it with the same subset on
-// the truth side, e.g. AesLeakage(byte_indexes=[0]), to keep the U axes aligned.
+// This is a pure format converter: it flattens whatever units/channels the payload carries, in
+// payload order, and does not itself subset them. Semantic-axis selection (which byte units,
+// which leakage channels) belongs upstream on PoiSelect (its `units` / `channels` properties),
+// so pair a single-unit PoiSelect(units=[...]) with the matching truth side, e.g.
+// AesLeakage(units=[...]), to keep the U axes aligned.
 class CorrelationPoiToIndexes final : public Element {
 public:
     explicit CorrelationPoiToIndexes(std::string name = "poiindexes0");

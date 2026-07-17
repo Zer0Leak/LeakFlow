@@ -477,6 +477,50 @@ int main()
         return 1;
     }
 
+    // --- PoiSelect channels: keep only HW(y), narrowing the channel axis by name ---
+    {
+        crypto_plugin::PearsonCorrelator ccorr;
+        crypto_plugin::PoiSelect cpoi;
+        cpoi.set_property("top_k", leakflow::IntList{1});
+        cpoi.set_property("rank_by", leakflow::StringList{"abs"});
+        cpoi.set_property("channels", leakflow::StringList{"HW(y)"});
+        auto channel_target = torch_buffer(aes_targets);
+        channel_target.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
+        channel_target.set_metadata("attack.unit.indexes", "[3,5]");
+        channel_target.set_metadata("attack.unit.count", "2");
+        const auto out = select(ccorr, cpoi, torch_buffer(features), std::move(channel_target));
+        const auto p = out->payload_as<crypto_plugin::CorrelationPoiPayload>();
+        if (!expect(p != nullptr && p->result(0).result.size(0) == 1,
+                "PoiSelect channels did not narrow the channel axis to one channel")) {
+            return 1;
+        }
+        if (!expect(out->channels().format() == "[HW(y)]",
+                "PoiSelect channels did not set the typed channel axis")) {
+            return 1;
+        }
+        if (!expect(out->metadata("payload.leakage.channels") == "HW(y)",
+                "PoiSelect channels did not re-project the channel metadata")) {
+            return 1;
+        }
+    }
+
+    // --- PoiSelect channels: an unknown channel name is an error ---
+    {
+        crypto_plugin::PearsonCorrelator ecorr;
+        crypto_plugin::PoiSelect epoi;
+        epoi.set_property("top_k", leakflow::IntList{1});
+        epoi.set_property("channels", leakflow::StringList{"HW(k)"});
+        auto bad_target = torch_buffer(aes_targets);
+        bad_target.set_metadata("payload.leakage.channels", "HW(m),HW(y)");
+        bad_target.set_metadata("attack.unit.indexes", "[3,5]");
+        bad_target.set_metadata("attack.unit.count", "2");
+        if (!expect(throws_invalid_argument(
+                        [&] { (void)select(ecorr, epoi, torch_buffer(features), std::move(bad_target)); }),
+                "PoiSelect accepted an unknown channel name")) {
+            return 1;
+        }
+    }
+
     leakflow::SummarySection aes_payload_summary("Payload");
     aes_payload->describe(aes_payload_summary, 1);
     bool saw_byte_3 = false;
