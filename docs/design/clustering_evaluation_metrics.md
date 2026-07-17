@@ -12,6 +12,11 @@ For experiment-facing interpretation of every implemented metric, alignment,
 and Heatmap value, see
 [`docs/guides/CLUSTERING_EVALUATION.md`](../guides/CLUSTERING_EVALUATION.md).
 
+A separate discussion-only note records a possible distribution-aware semantic
+fragmentation extension:
+[`docs/design/clustering_semantic_fragmentation.md`](clustering_semantic_fragmentation.md).
+It is not implemented, scheduled, or part of Phase A's metric inventory.
+
 This design adds a complete, clustering-algorithm-independent evaluation layer
 and a follow-up visualization layer. The motivating experiments use GMM labels
 and Hamming-weight semantics, but no API or implementation may depend on GMM,

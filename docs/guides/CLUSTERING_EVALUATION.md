@@ -425,6 +425,12 @@ This reports fragmentation for one exact truth group.
 With `detail=full`, sort these records descending to find the worst preserved
 truth groups.
 
+A distribution-aware semantic fragmentation metric has been discussed but is
+not implemented. Its deferred design note explains why predicted-cluster
+centroids are insufficient and considers semantic transport between complete
+truth-vector distributions:
+[`docs/design/clustering_semantic_fragmentation.md`](../design/clustering_semantic_fragmentation.md).
+
 ## Combined Quality
 
 `combined_quality` is optional and requires semantic evaluation. Define:
