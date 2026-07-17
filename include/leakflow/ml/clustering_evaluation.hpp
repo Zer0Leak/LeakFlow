@@ -39,6 +39,8 @@ enum class ClusteringMetricId : std::uint8_t {
   SemanticAlignmentCost = 25,
   SemanticAlignmentDimensionError = 26,
   CombinedQuality = 27,
+  SemanticPartitionSeparation = 28,
+  SemanticPartitionQuality = 29,
 };
 
 enum class MetricFamily : std::uint8_t {
@@ -93,6 +95,7 @@ enum class MetricUndefinedReason : std::uint8_t {
   NoMergeErrorPairs = 6,
   NoEligibleTruthGroups = 7,
   NoMatchedPredictedCluster = 8,
+  NoSemanticVariation = 9,
 };
 
 [[nodiscard]] std::string_view
@@ -151,6 +154,11 @@ struct SemanticClusteringMetrics {
   MetricValue macro_impurity;
   MetricValue merge_error_rate;
   MetricValue conditional_merge_error_severity;
+  // Fraction of the dataset's total pairwise semantic cost that lies between
+  // predicted clusters: 1 - D_within / D_all. Unlike micro_impurity, this is
+  // zero for a one-cluster collapse and one when all nonzero semantic cost is
+  // separated by predicted-cluster boundaries.
+  MetricValue partition_separation;
   std::vector<SemanticDimensionMetrics> dimensions;
 
   // nullopt for Global detail; engaged for Full detail. Singleton clusters are
@@ -180,6 +188,14 @@ struct CombinedClusteringQuality {
   // undefined reasons remain explicit beside the derived score.
   MetricValue semantic_micro_impurity;
   MetricValue fragmentation_micro;
+};
+
+struct SemanticPartitionClusteringQuality {
+  MetricValue quality;
+  // Source records are copied verbatim so their distinct supports and
+  // undefined reasons remain explicit beside the derived score.
+  MetricValue semantic_partition_separation;
+  MetricValue pair_recall;
 };
 
 inline constexpr std::int64_t kUnmatchedAlignmentIndex = -1;
@@ -308,8 +324,12 @@ struct ClusteringEvaluationUnitResult {
   ExactClusteringMetrics exact;
   SemanticClusteringMetrics semantic;
   FragmentationClusteringMetrics fragmentation;
-  // Absent unless ClusteringEvaluationOptions::combined_quality is enabled.
+  // Legacy score; absent unless
+  // ClusteringEvaluationOptions::combined_quality is enabled.
   std::optional<CombinedClusteringQuality> combined_quality;
+  // Preferred cross-K semantic score; absent unless
+  // ClusteringEvaluationOptions::semantic_partition_quality is enabled.
+  std::optional<SemanticPartitionClusteringQuality> semantic_partition_quality;
   std::optional<ClusteringAlignmentIdentities> alignment_identities;
   std::optional<ExactOverlapAlignment> exact_alignment;
   std::optional<SemanticCostAlignment> semantic_alignment;
@@ -345,11 +365,14 @@ struct ClusteringEvaluationOptions {
   std::vector<double> semantic_weights;
   std::int64_t power = 2;
   AlignmentEvaluationMode alignment = AlignmentEvaluationMode::None;
+  // Deprecated legacy composite retained for result compatibility. It is not
+  // suitable for comparing different predicted-cluster counts.
   bool combined_quality = false;
+  bool semantic_partition_quality = false;
 };
 
 struct ClusteringEvaluationResult {
-  std::uint32_t schema_version = 4;
+  std::uint32_t schema_version = 5;
   ClusteringEvaluationOptions effective_options;
   bool batched = false;
   std::int64_t observation_count = 0;

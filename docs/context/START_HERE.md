@@ -80,7 +80,8 @@ not default startup context:
 - `docs/design/profiling.md` — execution timing telemetry / profiling design
   (per-element + op-scope timing, `--print-profile`, `--profile-file` trace).
 - `docs/design/clustering_evaluation_metrics.md` — design of record for full
-  clustering evaluation (implemented through A4 table inspection) and its
+  clustering evaluation (implemented through A4 table inspection, the bounded
+  comparison-view extension, and the schema-v5 quality correction) and its
   deferred, unblocked persistence/additional-visualization follow-up; read only
   for clustering metric/result/plot work.
 

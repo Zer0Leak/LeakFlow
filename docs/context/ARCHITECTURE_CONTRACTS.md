@@ -539,20 +539,24 @@ Design of record: `docs/design/clustering_evaluation_metrics.md`. The numeric
 result boundary through Phase A3 and the A4 pipeline/table boundary are
 implemented. A user-requested bounded post-A4 extension adds explicit N/S
 comparison columns and a same-window stored-contingency Heatmap tab without
-changing that numeric boundary.
+changing that numeric boundary. A later post-A4 quality correction deliberately
+extends the numeric result to schema v5 with append-only metric IDs and one new
+undefined reason.
 
 The full evaluator is split across existing architectural layers:
 
 - `leakflow_ml` owns only the generic numeric options, algorithms, and
   `ClusteringEvaluationResult`. A1/A2/A3 exact, semantic, fragmentation, and
-  rectangular alignment records are implemented there. It remains Torch-numeric
+  rectangular alignment records are implemented there. Schema v5 also owns
+  semantic partition separation and the optional corrected semantic partition
+  quality; both remain generic and GMM-independent. It remains Torch-numeric
   only and has no core, buffer, plugin, plot, AES, or Kyber dependency.
 - `leakflow_plugins_ml` owns `ClusteringEvaluate` and the core-derived
   `ClusteringEvaluationPayload`. The payload wraps the numeric result, records
   effective `evaluation.*` options and bounded labels-side producer parameters,
   and exposes a bounded summary. Typed unit identity is carried by the enclosing
-  `Buffer`, not duplicated in the payload. Versioned persistence is unblocked
-  but deferred.
+  `Buffer`, not duplicated in the payload. The schema version is `5`; old metric
+  IDs are never renumbered. Versioned persistence is unblocked but deferred.
 - `leakflow_plugins_ml_plot` owns the implemented bridge for
   `ClusteringMetricsTablePlot`. It consumes that payload and fills the existing
   domain-free `TableView`; neither the view nor `PlotRuntime` knows clustering
@@ -590,12 +594,25 @@ direction, family, and averaging. Exact partition metrics and semantic-cost
 metrics remain separate. Exact-overlap and semantic-cost alignment are separate
 result variants with explicit unmatched support.
 
+For semantic mode, schema v5 defines total semantic pair cost `D_all` over all
+unordered observation pairs and `D_within` over pairs placed in the same
+predicted cluster. `semantic_partition_separation = 1 - D_within / D_all` is
+therefore zero for a one-cluster collapse and one when every nonzero semantic
+cost crosses a predicted-cluster boundary. If `D_all == 0`, it is unavailable
+with `no_semantic_variation`. The opt-in `semantic_partition_quality` is the
+harmonic mean of that separation and exact pair recall. This second term makes
+all-singleton fragmentation score zero; a perfect partition scores one. The
+original opt-in `combined_quality` is retained unchanged as deprecated legacy
+data and must not be used to compare different predicted-cluster counts.
+
 `ClusteringStats` remains the compatibility matrix adapter. Its scalar-truth
 input, tensor output, caps, and `ClusteringStats ! HeatmapPlot` behavior must not
 silently change with `ClusteringEvaluate` available.
 
 Evaluator properties that affect numeric results are `payload-output` with
-downstream invalidation. `ClusteringMetricsTablePlot.update_mode` is
+downstream invalidation. `semantic_partition_quality` defaults off and requires
+power semantic evaluation; `combined_quality` also defaults off but is
+deprecated. `ClusteringMetricsTablePlot.update_mode` is
 `UiControl`/`ElementUi`, accepts `auto|accumulate|replace`, and has a read-only
 `active_update_mode` (`UiControl`/`None`). `auto` resolves to accumulate when the
 element is live-driven and replace otherwise. Changing the selector does not
@@ -611,6 +628,12 @@ and the bounded captured parameters. Its update contract is
 selector using typed `Buffer.units()` identities; clear empties retained table
 state; and each column supports deterministic stable ascending or descending
 ordering.
+
+Overview promotes `semantic_partition_separation` and, when requested,
+`semantic_partition_quality` as the preferred semantic comparison columns. The
+deprecated `combined_quality` is not a headline; it remains visible with its
+copied components in the Combined detail tab under a legacy section. Plotting
+does not reinterpret historical values or compute either score.
 
 The user-requested bounded post-A4 extension names Overview's primary shape
 columns `Observations (N)` and `Features (S)`; absent producer feature metadata

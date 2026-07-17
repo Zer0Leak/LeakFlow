@@ -452,7 +452,7 @@ Notes:
 ### Compare PoI Transfer And GMM Clusters
 
 This extended version selects the profiling PoIs, extracts those columns from
-the attack traces, clusters them with an 81-component GMM, and evaluates the
+the attack traces, clusters them with a 49-component GMM, and evaluates the
 clusters directly against the vector truth `(HW(m), HW(y))`. The structured
 metrics, effective evaluator options, captured GMM parameters, and bounded
 stored-contingency heatmap are shown in one tabbed comparison window. The same
@@ -461,7 +461,10 @@ selected PoIs are also re-correlated on the attack traces and shown beside the p
 
 See [Interpreting Clustering Evaluation Metrics](CLUSTERING_EVALUATION.md) for
 the meaning, direction, and limitations of every displayed metric and heatmap
-value.
+value. This graph opts into `semantic_partition_quality`, the preferred
+separation/pair-recall composite for comparing cluster counts. The older
+`combined_quality` is deprecated because it can assign a misleadingly high
+value to a one-cluster collapse.
 
 ```bash
 A=traces/aes/sync/aes_sync_attack/key_01.h5  # or an HDF5 subset such as A=out/key05_sub.h5 for a fast interactive run
@@ -478,7 +481,7 @@ leakflow --log-level warning run --graph \
    PoiCorrelation@poicorr; \
    PoiTablePlot@tbl(title=\"Profiling vs attack PoIs\",reference_label=profiling,current_label=attack,precision=3); \
    GaussianMixture@gmm(n_components=49,covariance_type=diagonal,n_init=1,max_iter=100,seed=0); \
-   ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,combined_quality=true); \
+   ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],detail=full,alignment=both,semantic_partition_quality=true); \
    ClusteringMetricsTablePlot@metrics(title=\"GMM clustering evaluation\",update_mode=accumulate); \
    @corr_src ! @poi ! @poi_tee; \
    @poi_tee.src_0 ! @tbl.reference; \
@@ -511,9 +514,10 @@ The metrics window has eight tabs:
 
 - **Overview** is the place to start. It shows one row per run and unit, with
   explicit `Observations (N)` and `Features (S)` columns, group/cluster counts,
-  headline quality metrics, and the core GMM and experiment parameters needed
-  to compare configurations. GMM supplies the feature value from its fitted axis;
-  a producer without `payload.cluster.n_features` displays `N/A`.
+  headline metrics including semantic partition separation and the optional
+  semantic partition quality, and the core GMM and experiment parameters
+  needed to compare configurations. GMM supplies the feature value from its
+  fitted axis; a producer without `payload.cluster.n_features` displays `N/A`.
 - **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment**
   contain the complete stored metric detail without duplicating a metric across
   tabs. `↑` after a metric means higher is better; `↓` means lower is better.

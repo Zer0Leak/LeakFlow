@@ -2004,8 +2004,11 @@ Status: **implemented**. Phase A1 (exact numeric evaluation), A2 (semantic and
 fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline payload
 plus table inspection) are complete. A user-requested, bounded post-A4 extension
 adds explicit N/S comparison columns and a same-window stored-contingency
-Heatmap tab. Payload persistence, `MetricView`, and a standalone/selectable
-clustering matrix plot remain deferred.
+Heatmap tab. A subsequent post-A4 quality correction adds schema-v5 semantic
+partition separation and an opt-in composite that remains meaningful when the
+predicted-cluster count changes; the original combined score is retained only
+as a deprecated legacy record. Payload persistence, `MetricView`, and a
+standalone/selectable clustering matrix plot remain deferred.
 
 Authoritative design:
 `docs/design/clustering_evaluation_metrics.md` (Phase A).
@@ -2033,7 +2036,8 @@ Implementation sequence:
   semantic dummy penalty, per-dimension errors, and contingency-mass error
   records. Both rectangular directions are covered by hand-checked fixtures.
 - **A4 — pipeline and table-inspection contract (done):** the default-off
-  optional combined-quality record/property, `ClusteringEvaluationPayload`,
+  optional combined-quality record/property (now retained as a deprecated
+  legacy record), `ClusteringEvaluationPayload`,
   `ClusteringEvaluate`, typed-unit alignment, bounded summaries and captured
   parameters, descriptor registration, and compatibility tests. It added the
   `leakflow_plugins_ml_plot` bridge with `ClusteringMetricsTablePlot`, reusing
@@ -2046,6 +2050,15 @@ Implementation sequence:
   and S to explicit shape columns; and `ClusteringMetricsTablePlot` gains an
   eighth same-window Heatmap tab over stored Full-detail contingency. This does
   not add persistence, a new plot element, or selectable matrix modes.
+- **Post-A4 clustering-quality correction (done, user-requested):** schema v5
+  appends `semantic_partition_separation = 1 - D_within / D_all` and the
+  default-off `semantic_partition_quality`, the harmonic mean of semantic
+  partition separation and exact pair recall. The score is `0` for both a
+  one-cluster collapse and all-singleton fragmentation, and `1` for a perfect
+  semantic/exact partition. The old `combined_quality` is unchanged for result
+  compatibility but deprecated because it rewards collapse and is not
+  comparable across predicted-cluster counts. Overview prefers the corrected
+  score and keeps the legacy record only in the Combined detail tab.
 
 Locked decisions:
 
@@ -2056,6 +2069,10 @@ Locked decisions:
   purity, pair precision/recall/F1, plus compatibility NMI.
 - Semantic results keep merge frequency, merge severity, impurity, and
   fragmentation separate; both micro and macro supports are explicit.
+- Semantic partition separation compares within-predicted-cluster semantic cost
+  with the same dataset's all-pairs semantic cost. Its optional composite uses
+  exact pair recall as the anti-fragmentation term; it does not use truth during
+  clustering and is not a training objective.
 - The semantic quantity is a normalized power **cost**, not a mathematical
   distance. Exact-only mode needs no semantic ranges; semantic mode supports
   `power=1|2` (default 2), explicit ranges, and strict range validation so
@@ -2074,10 +2091,12 @@ Locked decisions:
 Delivered A4 integration and post-A4 bounded extension:
 
 - `ClusteringEvaluate`, its descriptor/properties, bounded summary, typed-unit
-  alignment, optional combined quality, effective `evaluation.*` parameters,
-  and bounded generic clustering-producer parameters captured only from the
-  labels buffer's `payload.cluster.*` metadata. Typed unit identity remains on
-  the output `Buffer`, not inside `ClusteringEvaluationPayload`.
+  alignment, optional corrected and legacy combined quality records, effective
+  `evaluation.*` parameters, and bounded generic clustering-producer parameters
+  captured only from the labels buffer's `payload.cluster.*` metadata. Typed
+  unit identity remains on the output `Buffer`, not inside
+  `ClusteringEvaluationPayload`. Schema v5 appends the corrected metric IDs and
+  the `no_semantic_variation` undefined reason without renumbering old IDs.
 - `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. Its `sink` pad
   consumes the structured payload and fills generic named table tabs. The
   original A4 bridge provides Overview, the five metric-family tabs, and
@@ -2088,8 +2107,9 @@ Delivered A4 integration and post-A4 bounded extension:
   producer context. Overview
   has one row per run and unit, led by `Observations (N)` and `Features (S)`
   (`N/A` when the producer did not report a feature count), followed by counts,
-  headline metrics, and the core producer/experiment parameters needed for
-  comparison. Exact, Semantic,
+  headline metrics (including semantic partition separation and the corrected
+  semantic partition quality), and the core producer/experiment parameters
+  needed for comparison. Exact, Semantic,
   Fragmentation, Combined, and Alignment retain every stored `MetricValue`
   exactly once in its family tab; Parameters shows captured payload and
   explicitly stamped evaluation-buffer `payload.parameter.*` values once per
@@ -2120,6 +2140,10 @@ Delivered A4 integration and post-A4 bounded extension:
   degeneracies, both rectangular directions, deterministic assignment ties,
   arbitrary IDs, `D=1/2/4`, numeric batches/dtypes/validation, all current
   undefined denominators, and non-quadratic AMI/semantic/alignment stress cases.
+  The quality-correction fixtures additionally cover hand-computed `p=1`/`p=2`
+  values, perfect/collapse/singleton endpoints, no-semantic-variation
+  unavailability, and rejection of corrected-quality requests when semantic
+  evaluation is disabled.
 
 Out of scope:
 
@@ -2147,6 +2171,8 @@ Exit criteria:
   alignment results when enabled, are available through the structured
   result/payload for batched and unbatched inputs.
 - Undefined/value/support/direction/averaging semantics are explicit and tested.
+- Schema v5 exposes semantic partition separation and the opt-in corrected
+  quality while preserving the deprecated legacy combined score unchanged.
 - Numeric reference, pipeline, table-bridge, and compatibility tests pass.
 - The tabbed table exposes one-row-per-run/unit overview comparisons, every
   stored metric value exactly once in the family tabs, and parameters once per

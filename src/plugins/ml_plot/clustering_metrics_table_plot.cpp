@@ -228,16 +228,23 @@ parameter_records(const ml_plugin::ClusteringEvaluationPayload &payload,
        std::string(alignment_name(options.alignment))},
       {"Evaluator", "combined_quality",
        options.combined_quality ? "true" : "false"},
+      {"Evaluator", "semantic_partition_quality",
+       options.semantic_partition_quality ? "true" : "false"},
   };
 
   // Effective options above are authoritative. The payload also carries these
   // exact keys for summaries, so skip only those known duplicates. Unknown
   // evaluation.* keys remain visible as forward-compatible payload context.
-  constexpr std::array<std::string_view, 8> effective_parameter_names{
-      "evaluation.detail",           "evaluation.semantic",
-      "evaluation.dimension_names",  "evaluation.semantic_ranges",
-      "evaluation.semantic_weights", "evaluation.power",
-      "evaluation.alignment",        "evaluation.combined_quality",
+  constexpr std::array<std::string_view, 9> effective_parameter_names{
+      "evaluation.detail",
+      "evaluation.semantic",
+      "evaluation.dimension_names",
+      "evaluation.semantic_ranges",
+      "evaluation.semantic_weights",
+      "evaluation.power",
+      "evaluation.alignment",
+      "evaluation.combined_quality",
+      "evaluation.semantic_partition_quality",
   };
   for (const auto &[name, value] : payload.parameters()) {
     if (!std::ranges::contains(effective_parameter_names, name)) {
@@ -378,6 +385,8 @@ metric_rows(const ml::ClusteringEvaluationResult &result) {
                   value.semantic.merge_error_rate);
     append_metric(rows, unit, TableSection::Semantic, "Global", "",
                   value.semantic.conditional_merge_error_severity);
+    append_metric(rows, unit, TableSection::Semantic, "Global", "",
+                  value.semantic.partition_separation);
     for (const auto &dimension : value.semantic.dimensions) {
       const auto item = dimension_item(result, dimension.dimension_index);
       append_metric(rows, unit, TableSection::Semantic, "Dimension", item,
@@ -405,8 +414,20 @@ metric_rows(const ml::ClusteringEvaluationResult &result) {
       }
     }
 
-    if (value.combined_quality) {
+    if (value.semantic_partition_quality) {
       append_metric(rows, unit, TableSection::Combined, "Global", "",
+                    value.semantic_partition_quality->quality);
+      append_metric(
+          rows, unit, TableSection::Combined, "Component",
+          "Semantic partition separation",
+          value.semantic_partition_quality->semantic_partition_separation);
+      append_metric(rows, unit, TableSection::Combined, "Component",
+                    "Pair recall",
+                    value.semantic_partition_quality->pair_recall);
+    }
+
+    if (value.combined_quality) {
+      append_metric(rows, unit, TableSection::Combined, "Legacy global", "",
                     value.combined_quality->quality);
       // These are copied component records stored inside the combined result.
       // Keep them beside the quality score even though their descriptors retain
@@ -630,8 +651,9 @@ void push_overview(Element &element, plot::TableView &view,
   }
   update.columns.insert(update.columns.end(),
                         {"ARI \u2191", "AMI \u2191", "Pair F1 \u2191",
+                         "Semantic partition separation \u2191",
                          "Semantic impurity \u2193", "Fragmentation \u2193",
-                         "Combined quality \u2191"});
+                         "Semantic partition quality \u2191"});
 
   update.frame.rows.reserve(result.units.size());
   for (std::size_t dense_unit = 0; dense_unit < result.units.size();
@@ -652,11 +674,13 @@ void push_overview(Element &element, plot::TableView &view,
     cells.push_back(
         headline_metric_value_cell(unit.exact.adjusted_mutual_information));
     cells.push_back(headline_metric_value_cell(unit.exact.pair_f1));
+    cells.push_back(
+        headline_metric_value_cell(unit.semantic.partition_separation));
     cells.push_back(headline_metric_value_cell(unit.semantic.micro_impurity));
     cells.push_back(headline_metric_value_cell(unit.fragmentation.micro));
-    if (unit.combined_quality) {
+    if (unit.semantic_partition_quality) {
       cells.push_back(
-          headline_metric_value_cell(unit.combined_quality->quality));
+          headline_metric_value_cell(unit.semantic_partition_quality->quality));
     } else {
       auto unavailable = text_cell("N/A");
       unavailable.sort_value.reset();

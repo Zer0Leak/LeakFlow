@@ -256,7 +256,7 @@ set_tests_properties(leakflow_cli_run_correlation_poi_to_plot_annotations PROPER
 
 add_test(NAME leakflow_cli_run_clustering_evaluate
     COMMAND leakflow --log-level warning run
-        "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakage@leak(channels=[HW(m),HW(y)],units=[0]); Tee@targets; GaussianMixture@gmm(n_components=2,covariance_type=diagonal,n_init=1,max_iter=2,seed=0); ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],alignment=both,combined_quality=true); Summary@summary(level=2); @data.traces ! @leak.traces; @data.plaintexts ! @leak.plaintexts; @data.keys ! @leak.keys; @leak ! @targets; @targets.src_0 ! @gmm ! @eval.labels; @targets.src_1 ! @eval.truth; @eval ! @summary"
+        "Hdf5FileSrc@data(path=${LEAKFLOW_AES_HDF5}); AesLeakage@leak(channels=[HW(m),HW(y)],units=[0]); Tee@targets; GaussianMixture@gmm(n_components=2,covariance_type=diagonal,n_init=1,max_iter=2,seed=0); ClusteringEvaluate@eval(semantic=power,semantic_ranges=[8,8],dimension_names=[hm,hy],alignment=both,semantic_partition_quality=true); Summary@summary(level=2); @data.traces ! @leak.traces; @data.plaintexts ! @leak.plaintexts; @data.keys ! @leak.keys; @leak ! @targets; @targets.src_0 ! @gmm ! @eval.labels; @targets.src_1 ! @eval.truth; @eval ! @summary"
 )
 set_tests_properties(leakflow_cli_run_clustering_evaluate PROPERTIES
     PASS_REGULAR_EXPRESSION "payload=leakflow/clustering-evaluation"

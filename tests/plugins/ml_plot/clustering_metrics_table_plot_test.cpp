@@ -98,6 +98,7 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   result.effective_options.power = 2;
   result.effective_options.alignment = ml::AlignmentEvaluationMode::Both;
   result.effective_options.combined_quality = true;
+  result.effective_options.semantic_partition_quality = true;
   result.observation_count = 6;
   result.semantic_dimension_count = 2;
 
@@ -133,6 +134,8 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   unit.semantic.conditional_merge_error_severity =
       undefined_metric(ml::ClusteringMetricId::ConditionalMergeErrorSeverity,
                        ml::MetricUndefinedReason::NoMergeErrorPairs);
+  unit.semantic.partition_separation = defined_metric(
+      ml::ClusteringMetricId::SemanticPartitionSeparation, 0.75, 15);
   unit.semantic.dimensions = {
       {
           .dimension_index = 0,
@@ -181,6 +184,15 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   combined.fragmentation_micro =
       defined_metric(ml::ClusteringMetricId::FragmentationMicro, 0.33, 14);
   unit.combined_quality = std::move(combined);
+
+  ml::SemanticPartitionClusteringQuality semantic_partition;
+  semantic_partition.quality =
+      defined_metric(ml::ClusteringMetricId::SemanticPartitionQuality, 0.81, 6);
+  semantic_partition.semantic_partition_separation = defined_metric(
+      ml::ClusteringMetricId::SemanticPartitionSeparation, 0.75, 15);
+  semantic_partition.pair_recall =
+      defined_metric(ml::ClusteringMetricId::PairRecall, 0.88, 12);
+  unit.semantic_partition_quality = std::move(semantic_partition);
 
   ml::ExactAlignmentTruthGroupDetail exact_group;
   exact_group.truth_group_index = 0;
@@ -243,8 +255,10 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
   result.effective_options.semantic = ml::SemanticEvaluationMode::Off;
   result.effective_options.alignment = ml::AlignmentEvaluationMode::None;
   result.effective_options.combined_quality = false;
+  result.effective_options.semantic_partition_quality = false;
   auto &unit = result.units.front();
   unit.combined_quality.reset();
+  unit.semantic_partition_quality.reset();
   unit.exact_alignment.reset();
   unit.semantic_alignment.reset();
 
@@ -257,6 +271,8 @@ defined_metric(ml::ClusteringMetricId id, double value, std::uint64_t support) {
       undefined_metric(ml::ClusteringMetricId::MergeErrorRate, disabled);
   unit.semantic.conditional_merge_error_severity = undefined_metric(
       ml::ClusteringMetricId::ConditionalMergeErrorSeverity, disabled);
+  unit.semantic.partition_separation = undefined_metric(
+      ml::ClusteringMetricId::SemanticPartitionSeparation, disabled);
   for (auto &dimension : unit.semantic.dimensions) {
     dimension.micro_impurity = undefined_metric(
         ml::ClusteringMetricId::SemanticImpurityDimensionMicro, disabled);
@@ -493,6 +509,7 @@ int main() {
     auto multi_result = evaluation_result();
     multi_result.units.push_back(multi_result.units.front());
     multi_result.units.back().combined_quality.reset();
+    multi_result.units.back().semantic_partition_quality.reset();
     multi_result.units.back().exact_alignment.reset();
     multi_result.units.back().semantic_alignment.reset();
     multi_result.units.back().truth_group_count = 2;
@@ -900,12 +917,16 @@ int main() {
                   "0.820000" &&
               overview_row[column_index(overview, "Pair F1 \u2191")].text ==
                   "0.890000" &&
+              overview_row[column_index(overview,
+                                        "Semantic partition separation \u2191")]
+                      .text == "0.750000" &&
               overview_row[column_index(overview, "Semantic impurity \u2193")]
                       .text == "0.200000" &&
               overview_row[column_index(overview, "Fragmentation \u2193")]
                       .text == "0.300000" &&
-              overview_row[column_index(overview, "Combined quality \u2191")]
-                      .text == "0.700000",
+              overview_row[column_index(overview,
+                                        "Semantic partition quality \u2191")]
+                      .text == "0.810000",
           "overview headline values/direction arrows are wrong") ||
       !expect(
           std::holds_alternative<double>(
@@ -969,11 +990,13 @@ int main() {
   }
   if (!expect(!std::ranges::contains(parameters.columns, std::string("Unit")),
               "run-wide Parameters must not repeat per unit") ||
-      !expect(parameter_rows.size() == 16 &&
+      !expect(parameter_rows.size() == 17 &&
                   parameter_identities.size() == parameter_rows.size(),
               "parameters were repeated, lost, or conflated") ||
       !expect(
           parameter_identities.contains({"Evaluator", "power"}) &&
+              parameter_identities.contains(
+                  {"Evaluator", "semantic_partition_quality"}) &&
               parameter_identities.contains(
                   {"Clustering", "labels.cluster.covariance_type"}) &&
               parameter_identities.contains(
@@ -1010,15 +1033,15 @@ int main() {
   if (!expect(
           snapshot_for(snapshots, "Exact").frames.back().rows.size() == 10 &&
               snapshot_for(snapshots, "Semantic").frames.back().rows.size() ==
-                  9 &&
+                  10 &&
               snapshot_for(snapshots, "Fragmentation")
                       .frames.back()
                       .rows.size() == 3 &&
               snapshot_for(snapshots, "Combined").frames.back().rows.size() ==
-                  3 &&
+                  6 &&
               snapshot_for(snapshots, "Alignment").frames.back().rows.size() ==
                   8 &&
-              total_metric_rows(snapshots) == 33,
+              total_metric_rows(snapshots) == 37,
           "stored metrics were dropped or duplicated across family tabs")) {
     return 1;
   }
@@ -1053,10 +1076,12 @@ int main() {
   for (const auto &row : combined.frames.back().rows) {
     combined_ids.insert(*hover_value(row[combined_metric], "raw id"));
   }
-  if (!expect(combined_ids == std::set<std::string>{"combined_quality",
-                                                    "fragmentation_micro",
-                                                    "semantic_impurity_micro"},
-              "Combined tab does not own all three stored combined records")) {
+  if (!expect(combined_ids ==
+                  std::set<std::string>{
+                      "combined_quality", "fragmentation_micro", "pair_recall",
+                      "semantic_impurity_micro", "semantic_partition_quality",
+                      "semantic_partition_separation"},
+              "Combined tab does not own all stored combined records")) {
     return 1;
   }
 
@@ -1092,7 +1117,7 @@ int main() {
                                                plot::TableGroupLayout::Tabs;
                                   }),
               "group/title did not update every owned tab") ||
-      !expect(total_metric_rows(snapshots) == 33,
+      !expect(total_metric_rows(snapshots) == 37,
               "presentation change altered stored metric rows")) {
     return 1;
   }
@@ -1115,7 +1140,7 @@ int main() {
                   snapshot_for(snapshots, "Overview").frames.size() == 1,
               "accumulate did not retain Overview comparison rows") ||
       !expect(snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                      33 &&
+                      35 &&
                   snapshot_for(snapshots, "Parameters").frames.size() == 1,
               "accumulate repeated or lost long-form parameter rows")) {
     return 1;
@@ -1201,14 +1226,14 @@ int main() {
               snapshot_for(snapshots, "Exact").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.size() == 1 &&
               snapshot_for(snapshots, "Parameters").frames.back().rows.size() ==
-                  16,
+                  17,
           "replace did not retain only the latest run")) {
     return 1;
   }
   const auto &latest_overview = snapshot_for(snapshots, "Overview");
   const auto &latest_overview_row = latest_overview.frames.back().rows.front();
   const auto combined_headline =
-      column_index(latest_overview, "Combined quality \u2191");
+      column_index(latest_overview, "Semantic partition quality \u2191");
   if (!expect(
           latest_overview_row[combined_headline].text == "N/A" &&
               hover_value(latest_overview_row[combined_headline], "reason") ==

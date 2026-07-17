@@ -23,7 +23,8 @@ Start with a small set of complementary metrics:
 | Are truth groups being split across clusters? | `pair_recall`, `fragmentation_micro` | ↑, ↓ |
 | Is one particular group or cluster causing the problem? | per-group fragmentation and per-cluster semantic impurity | ↓ |
 | How good is the best one-to-one exact mapping? | `exact_alignment_matched_accuracy` | ↑ |
-| Is one compact scalar needed for sorting otherwise comparable runs? | `combined_quality` | ↑ |
+| How much semantic variation lies across cluster boundaries? | `semantic_partition_separation` | ↑ |
+| Is one compact scalar needed for a same-data cluster-count sweep? | `semantic_partition_quality` | ↑ |
 
 No single metric is sufficient. In particular:
 
@@ -32,8 +33,11 @@ No single metric is sufficient. In particular:
 - an exact-aligned Heatmap shows the selected mapping, not the complete quality
   of the partition; when `G > K`, unmatched truth rows also prevent every
   selected pair from occupying the geometric diagonal;
-- combined quality is useful for ranking comparable runs, not as a replacement
-  for its semantic-impurity and fragmentation components.
+- `semantic_partition_quality` is useful for ranking comparable runs, not as a
+  replacement for ARI/AMI or its separation and pair-recall components;
+- the older `combined_quality` is retained for compatibility but is deprecated:
+  it can reward a one-cluster collapse and must not be used to compare different
+  cluster counts.
 
 ## Vocabulary
 
@@ -123,6 +127,7 @@ exist. It is not silently converted to zero.
 | `no_matched_predicted_cluster` | A rectangular exact alignment left this truth group unmatched. |
 | `semantic_disabled` | Evaluation used `semantic=off`. |
 | `dependent_metric_undefined` | A derived metric cannot be calculated because one of its inputs is undefined. |
+| `no_semantic_variation` | Every observation pair has zero configured semantic cost, so there is no total variation to separate. |
 
 ## Pair Language: TP, FP, and FN
 
@@ -341,7 +346,8 @@ This is the best single answer to:
 > Considering both how often incompatible observations are merged and how far
 > apart their semantic values are, how bad is the clustering?
 
-It is also the semantic component used by `combined_quality`.
+It is also the semantic component used by the deprecated legacy
+`combined_quality`.
 
 ### `semantic_impurity_macro` ↓
 
@@ -390,6 +396,41 @@ predicted clusters.
 Use micro/macro dimension pairs to distinguish, for example, whether `hm`
 mixing is concentrated in large or small clusters.
 
+## Semantic Partition Separation
+
+### `semantic_partition_separation` ↑
+
+Let `s(i,j)` be the configured semantic power cost between observations `i`
+and `j`. Define:
+
+```text
+D_all    = sum s(i,j) over every unordered observation pair
+D_within = sum s(i,j) only when i and j share a predicted cluster
+
+semantic_partition_separation = 1 - D_within / D_all
+```
+
+This answers:
+
+> What fraction of all semantic variation in this dataset did the predicted
+> cluster boundaries separate?
+
+- `1`: all nonzero semantic variation lies across predicted-cluster
+  boundaries;
+- `0`: none of it does, as in a one-cluster collapse;
+- between `0` and `1`: some semantic variation remains inside clusters.
+
+Its support is all `N(N-1)/2` observation pairs. It is `N/A` with
+`no_semantic_variation` when `D_all=0`, because a dataset with no configured
+semantic variation has nothing to separate. Under `semantic=off`, it is `N/A`
+with `semantic_disabled`.
+
+Unlike `semantic_impurity_micro`, separation uses a fixed dataset-wide
+denominator. It can therefore compare different predicted-cluster counts on
+the same observations and semantic configuration. It deliberately reaches `1`
+for one cluster per observation, so it must be read with `pair_recall`, which
+reaches `0` under that complete over-split.
+
 ## Fragmentation Metrics
 
 Fragmentation asks whether observations with the same complete truth vector are
@@ -404,7 +445,8 @@ fragmentation_micro = FN / (TP + FN) = 1 - pair_recall
 This is the probability that a supported same-truth observation pair was split
 across predicted clusters.
 
-It is the group-preservation component used by `combined_quality`.
+It is the group-preservation component used by both
+`semantic_partition_quality` and the deprecated legacy `combined_quality`.
 
 ### `fragmentation_macro` ↓
 
@@ -431,37 +473,77 @@ centroids are insufficient and considers semantic transport between complete
 truth-vector distributions:
 [`docs/design/clustering_semantic_fragmentation.md`](../design/clustering_semantic_fragmentation.md).
 
-## Combined Quality
+## Semantic Partition Quality
 
-`combined_quality` is optional and requires semantic evaluation. Define:
+### `semantic_partition_quality` ↑
+
+This is the preferred optional composite for comparing predicted-cluster
+counts. It requires `semantic=power` and is enabled explicitly with
+`semantic_partition_quality=true`:
 
 ```text
-semantic cohesion  C = 1 - semantic_impurity_micro
-group preservation G = 1 - fragmentation_micro = pair_recall
+S = semantic_partition_separation
+R = pair_recall
 
-combined_quality Q = 2*C*G / (C+G)
+semantic_partition_quality Q = 2*S*R / (S+R)
 ```
 
-`Q` is in `[0,1]` and higher is better. It is a harmonic mean, so one weak
-component strongly reduces it.
+When both components are defined and zero, `Q` is defined as zero. If either
+component is unavailable, `Q` is `N/A` with
+`dependent_metric_undefined`. The quality record uses `N` observations as its
+support; the copied component rows retain their own pair supports.
 
-- `1`: perfect semantic cohesion and group preservation;
-- `0`: at least one component is at its worst endpoint;
-- values near zero indicate weak combined structure.
+The harmonic mean rejects both opposite degeneracies:
 
-There is no universal threshold for “good.” Compare against baselines and other
-runs with the same data and semantic configuration. A value of `0.10` is better
-than `0.07`, but both are low in absolute terms.
+| Predicted partition | Separation `S` | Pair recall `R` | Quality `Q` |
+|---|---:|---:|---:|
+| One cluster | `0` | `1` | `0` |
+| Exact semantic truth groups | `1` | `1` | `1` |
+| One cluster per observation | `1` | `0` | `0` |
 
-Always inspect the copied component rows beside the score. For example, a low
-score can mean:
+This endpoint table assumes `D_all>0` and at least one same-truth observation
+pair. Otherwise the affected component and derived quality are `N/A` with the
+explicit reasons described above.
 
-- clusters are semantically coherent but truth groups are heavily fragmented;
-- truth groups stay together but clusters merge semantically distant groups;
-- both problems are present.
+There is no universal threshold for “good.” Compare only runs with the same
+observations, truth definition, semantic ranges, weights, and power. Always
+inspect `S` and `R` beside `Q`: a low score distinguishes neither
+under-clustering from over-clustering by itself. ARI and AMI remain important
+independent whole-partition checks.
 
-Combined quality does not use Hungarian alignment and should not be interpreted
-as matched accuracy.
+The score does not use Hungarian alignment and is not a matched accuracy.
+
+## Deprecated Legacy `combined_quality`
+
+The original A4 score remains available for reading old results and for
+explicit compatibility experiments:
+
+```text
+C = 1 - semantic_impurity_micro
+G = 1 - fragmentation_micro = pair_recall
+
+combined_quality = 2*C*G / (C+G)
+```
+
+Do not use this legacy score to compare different `n_components` values. Its
+semantic term is one minus an average normalized within-cluster cost, so it can
+remain close to one even when a single cluster merges every truth group. At the
+same time, a one-cluster result has `pair_recall=1` by construction.
+
+For example, with balanced byte-Hamming-weight marginals,
+`semantic_ranges=[8,8]`, equal weights, and `power=2`, the one-cluster average
+semantic cost is `16/255 ≈ 0.062745`. The legacy terms are therefore:
+
+```text
+C = 239/255 ≈ 0.937255
+G = 1
+combined_quality = 239/247 ≈ 0.967611
+```
+
+That high value describes the legacy formula, not a good clustering. For the
+same one-cluster partition, `semantic_partition_separation=0` and the preferred
+`semantic_partition_quality=0` exactly. Existing legacy values and metric ID
+remain unchanged; they were not silently reinterpreted.
 
 ## Alignment Metrics
 
@@ -637,7 +719,8 @@ Start here when comparing runs. It contains one row per run and unit with:
 
 - `Observations (N)` and `Features (S)`;
 - observed truth-group and predicted-cluster counts;
-- selected headline exact, semantic, fragmentation, and combined metrics;
+- headline ARI, AMI, pair F1, semantic partition separation, semantic
+  impurity, fragmentation, and optional semantic partition quality;
 - captured clustering and explicitly stamped experiment parameters.
 
 Never compare rows without checking that the data, unit, N, semantic options,
@@ -653,7 +736,8 @@ splits.
 
 Contains global, per-dimension, and—when `detail=full`—per-cluster semantic
 records. Use merge rate for frequency, conditional severity for semantic
-distance, and micro impurity for their combined effect.
+distance, and micro impurity for their combined effect. Partition separation
+shows how much dataset-wide semantic variation lies across cluster boundaries.
 
 ### Fragmentation
 
@@ -661,8 +745,11 @@ Contains micro, macro, and—when `detail=full`—per-truth-group fragmentation.
 
 ### Combined
 
-Contains combined quality and its copied semantic-impurity and fragmentation
-components. It is intended for sorting otherwise comparable experiments.
+Contains the optional preferred `semantic_partition_quality` and copied
+separation/pair-recall components. If explicitly requested, it also shows the
+deprecated `combined_quality` under **Legacy global** with its copied
+semantic-impurity/fragmentation components. The legacy score is intentionally
+absent from Overview.
 
 ### Alignment
 
@@ -688,6 +775,7 @@ Typical signs:
 
 - homogeneity and pair precision decrease;
 - merge-error rate and semantic impurity increase;
+- semantic partition separation decreases and reaches zero for one cluster;
 - completeness and pair recall may remain deceptively high;
 - Heatmap columns receive mass from several truth-group rows.
 
@@ -698,6 +786,8 @@ Typical signs:
 - purity and homogeneity may remain high;
 - completeness and pair recall decrease;
 - fragmentation increases;
+- semantic partition separation may increase while pair recall falls, so the
+  preferred composite prevents separation alone from rewarding the split;
 - exact alignment leaves extra predicted clusters unmatched when `K > G`;
 - one truth-group row spreads across several columns.
 
@@ -740,9 +830,11 @@ For accumulated runs, use this workflow:
 4. Compare pair precision/merge-error rate for merges.
 5. Compare pair recall/fragmentation for splits.
 6. Compare semantic impurity and conditional severity for HW-aware merge cost.
-7. Use combined quality only after inspecting its two components.
-8. Inspect exact matched accuracy and the worst per-group alignment rows.
-9. Use the Heatmap and per-cluster/per-group detail to localize the problem.
+7. Compare semantic partition separation for dataset-wide semantic separation.
+8. Use semantic partition quality only after inspecting separation and pair
+   recall; never use legacy `combined_quality` across cluster counts.
+9. Inspect exact matched accuracy and the worst per-group alignment rows.
+10. Use the Heatmap and per-cluster/per-group detail to localize the problem.
 
 When changing `n_components`, expect tradeoffs:
 
@@ -750,9 +842,9 @@ When changing `n_components`, expect tradeoffs:
 - decreasing components can improve preservation while worsening semantic
   mixing.
 
-When changing semantic `power`, ranges, or weights, the semantic metrics and
-combined quality change meaning. Do not rank those rows as though the scale were
-unchanged.
+When changing semantic `power`, ranges, or weights, semantic impurity,
+partition separation, and both composite scores change meaning. Do not rank
+those rows as though the scale were unchanged.
 
 ## Practical Baselines and “Is This Good?”
 
@@ -780,7 +872,7 @@ ClusteringEvaluate(
   dimension_names=[hm,hy],
   detail=full,
   alignment=both,
-  combined_quality=true
+  semantic_partition_quality=true
 )
 ```
 
@@ -794,58 +886,68 @@ ClusteringEvaluate(
 - `detail=global|full`: Full adds per-cluster, per-group, contingency, and other
   detailed records needed by the Heatmap.
 - `alignment=none|exact|semantic|both`: selects optional stored assignments.
-- `combined_quality=true|false`: requests the optional harmonic composite.
+- `semantic_partition_quality=true|false`: requests the preferred optional
+  harmonic composite of semantic partition separation and pair recall; default
+  `false`.
+- `combined_quality=true|false`: requests the deprecated legacy harmonic
+  composite; default `false`. Use only for compatibility, not cluster-count
+  comparison.
 
-`alignment=semantic|both` and `combined_quality=true` require
-`semantic=power`; invalid combinations are rejected rather than producing
-misleading values.
+`alignment=semantic|both`, `semantic_partition_quality=true`, and legacy
+`combined_quality=true` require `semantic=power`; invalid combinations are
+rejected rather than producing misleading values.
 
 ## Complete Metric Inventory
 
-The implemented descriptor inventory contains 28 metrics:
+Clustering-evaluation result schema version **5** has 30 metric descriptors.
+The bracketed numbers below are the stable zero-based metric IDs. IDs are
+append-only, so the two post-A4 metrics remain `[28]` and `[29]` even though
+they are grouped here with their semantic families.
 
 ### Exact
 
-1. `adjusted_rand_index`
-2. `adjusted_mutual_information`
-3. `homogeneity`
-4. `completeness`
-5. `v_measure`
-6. `purity`
-7. `pair_precision`
-8. `pair_recall`
-9. `pair_f1`
-10. `normalized_mutual_information`
+- `[0]` `adjusted_rand_index`
+- `[1]` `adjusted_mutual_information`
+- `[2]` `homogeneity`
+- `[3]` `completeness`
+- `[4]` `v_measure`
+- `[5]` `purity`
+- `[6]` `pair_precision`
+- `[7]` `pair_recall`
+- `[8]` `pair_f1`
+- `[9]` `normalized_mutual_information`
 
 ### Semantic
 
-11. `semantic_impurity_micro`
-12. `semantic_impurity_macro`
-13. `merge_error_rate`
-14. `conditional_merge_error_severity`
-15. `semantic_impurity_dimension_micro`
-16. `semantic_impurity_dimension_macro`
-17. `semantic_impurity_per_cluster`
+- `[10]` `semantic_impurity_micro`
+- `[11]` `semantic_impurity_macro`
+- `[12]` `merge_error_rate`
+- `[13]` `conditional_merge_error_severity`
+- `[14]` `semantic_impurity_dimension_micro`
+- `[15]` `semantic_impurity_dimension_macro`
+- `[16]` `semantic_impurity_per_cluster`
+- `[28]` `semantic_partition_separation`
 
 ### Fragmentation
 
-18. `fragmentation_micro`
-19. `fragmentation_macro`
-20. `fragmentation_per_group`
+- `[17]` `fragmentation_micro`
+- `[18]` `fragmentation_macro`
+- `[19]` `fragmentation_per_group`
 
 ### Alignment
 
-21. `exact_alignment_matched_accuracy`
-22. `exact_alignment_precision_per_group`
-23. `exact_alignment_recall_per_group`
-24. `exact_alignment_f1_per_group`
-25. `exact_alignment_jaccard_per_group`
-26. `semantic_alignment_cost`
-27. `semantic_alignment_dimension_error`
+- `[20]` `exact_alignment_matched_accuracy`
+- `[21]` `exact_alignment_precision_per_group`
+- `[22]` `exact_alignment_recall_per_group`
+- `[23]` `exact_alignment_f1_per_group`
+- `[24]` `exact_alignment_jaccard_per_group`
+- `[25]` `semantic_alignment_cost`
+- `[26]` `semantic_alignment_dimension_error`
 
 ### Combined
 
-28. `combined_quality`
+- `[27]` `combined_quality` (deprecated legacy score)
+- `[29]` `semantic_partition_quality` (preferred optional composite)
 
 The design record remains authoritative for exact formulas, result structures,
 tie-breaking, validation, and implementation contracts. This guide is the

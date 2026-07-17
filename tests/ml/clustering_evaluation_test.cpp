@@ -119,14 +119,14 @@ int main() {
   {
     const auto exact_descriptors = exact_clustering_metric_descriptors();
     const auto descriptors = clustering_metric_descriptors();
-    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 28,
+    if (!expect(exact_descriptors.size() == 10 && descriptors.size() == 30,
                 "descriptors: wrong exact metric count")) {
       return 1;
     }
     if (!expect(exact_descriptors.front().name == "adjusted_rand_index" &&
                     exact_descriptors.back().name ==
                         "normalized_mutual_information" &&
-                    descriptors.back().name == "combined_quality",
+                    descriptors.back().name == "semantic_partition_quality",
                 "descriptors: names/order wrong")) {
       return 1;
     }
@@ -146,6 +146,10 @@ int main() {
         ClusteringMetricId::ExactAlignmentJaccardPerGroup);
     const auto &combined =
         clustering_metric_descriptor(ClusteringMetricId::CombinedQuality);
+    const auto &partition_separation = clustering_metric_descriptor(
+        ClusteringMetricId::SemanticPartitionSeparation);
+    const auto &partition_quality = clustering_metric_descriptor(
+        ClusteringMetricId::SemanticPartitionQuality);
     if (!expect(semantic.family == MetricFamily::Semantic &&
                     semantic.direction == MetricDirection::LowerIsBetter &&
                     semantic.averaging == MetricAveraging::PerDimension &&
@@ -157,8 +161,14 @@ int main() {
                     alignment.averaging == MetricAveraging::PerGroup &&
                     combined.family == MetricFamily::Combined &&
                     combined.direction == MetricDirection::HigherIsBetter &&
-                    combined.averaging == MetricAveraging::Micro,
-                "descriptors: A2/A3/A4 metadata wrong")) {
+                    combined.averaging == MetricAveraging::Micro &&
+                    partition_separation.family == MetricFamily::Semantic &&
+                    partition_separation.direction ==
+                        MetricDirection::HigherIsBetter &&
+                    partition_quality.family == MetricFamily::Combined &&
+                    partition_quality.direction ==
+                        MetricDirection::HigherIsBetter,
+                "descriptors: metric metadata wrong")) {
       return 1;
     }
     if (!expect(metric_family_name(MetricFamily::Exact) == "exact" &&
@@ -206,7 +216,10 @@ int main() {
                         "no_eligible_truth_groups" &&
                     metric_undefined_reason_name(
                         MetricUndefinedReason::NoMatchedPredictedCluster) ==
-                        "no_matched_predicted_cluster",
+                        "no_matched_predicted_cluster" &&
+                    metric_undefined_reason_name(
+                        MetricUndefinedReason::NoSemanticVariation) ==
+                        "no_semantic_variation",
                 "descriptors: enum names wrong")) {
       return 1;
     }
@@ -245,7 +258,7 @@ int main() {
     const auto result = evaluate_clustering(predicted, truth, options);
     const auto &unit = only_unit(result);
 
-    if (!expect(result.schema_version == 4 && !result.batched &&
+    if (!expect(result.schema_version == 5 && !result.batched &&
                     result.observation_count == 6 &&
                     result.semantic_dimension_count == 2 &&
                     result.effective_options.detail == options.detail &&
@@ -254,7 +267,9 @@ int main() {
                     result.effective_options.alignment ==
                         AlignmentEvaluationMode::None &&
                     !result.effective_options.combined_quality &&
+                    !result.effective_options.semantic_partition_quality &&
                     !unit.combined_quality.has_value() &&
+                    !unit.semantic_partition_quality.has_value() &&
                     !unit.alignment_identities.has_value() &&
                     !unit.exact_alignment.has_value() &&
                     !unit.semantic_alignment.has_value() &&
@@ -893,6 +908,126 @@ int main() {
     }
   }
 
+  // Semantic partition quality balances the fraction of total semantic cost
+  // separated by predicted boundaries with exact same-truth pair recall. It
+  // must reject both the one-cluster collapse and singleton over-splitting.
+  {
+    const auto truth = scalar_truth({0, 0, 1, 1, 2, 2});
+    const auto predicted =
+        torch::tensor({10, 10, 10, 20, 20, 20}, torch::kLong);
+    ClusteringEvaluationOptions options;
+    options.semantic = SemanticEvaluationMode::Power;
+    options.semantic_ranges = {2.0};
+    options.power = 1;
+    options.semantic_partition_quality = true;
+
+    const auto linear =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    const auto &linear_quality = *linear.semantic_partition_quality;
+    if (!metric_close(linear.semantic.partition_separation, 3.0 / 4.0,
+                      "partition quality p1: separation") ||
+        !metric_close(linear_quality.quality, 12.0 / 17.0,
+                      "partition quality p1: quality") ||
+        !metric_close(linear_quality.semantic_partition_separation, 3.0 / 4.0,
+                      "partition quality p1: copied separation") ||
+        !metric_close(linear_quality.pair_recall, 2.0 / 3.0,
+                      "partition quality p1: copied pair recall") ||
+        !expect(linear.semantic.partition_separation.support_count == 15 &&
+                    linear_quality.quality.support_count == 6 &&
+                    linear_quality.semantic_partition_separation.metric ==
+                        ClusteringMetricId::SemanticPartitionSeparation &&
+                    linear_quality.pair_recall.metric ==
+                        ClusteringMetricId::PairRecall &&
+                    linear_quality.pair_recall.support_count == 3,
+                "partition quality p1: IDs/supports wrong")) {
+      return 1;
+    }
+
+    options.power = 2;
+    const auto squared =
+        only_unit(evaluate_clustering(predicted, truth, options));
+    if (!metric_close(squared.semantic.partition_separation, 5.0 / 6.0,
+                      "partition quality p2: separation") ||
+        !metric_close(squared.semantic_partition_quality->quality, 20.0 / 27.0,
+                      "partition quality p2: quality")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions endpoint_options;
+    endpoint_options.semantic = SemanticEvaluationMode::Power;
+    endpoint_options.semantic_ranges = {1.0};
+    endpoint_options.power = 1;
+    endpoint_options.semantic_partition_quality = true;
+    const auto endpoint_truth = scalar_truth({0, 0, 1, 1});
+
+    const auto perfect = only_unit(
+        evaluate_clustering(torch::tensor({9, 9, -2, -2}, torch::kLong),
+                            endpoint_truth, endpoint_options));
+    if (!metric_close(perfect.semantic.partition_separation, 1.0,
+                      "partition quality perfect: separation") ||
+        !metric_close(perfect.semantic_partition_quality->quality, 1.0,
+                      "partition quality perfect: quality")) {
+      return 1;
+    }
+
+    const auto collapsed = only_unit(evaluate_clustering(
+        torch::zeros({4}, torch::kLong), endpoint_truth, endpoint_options));
+    if (!metric_close(collapsed.semantic.partition_separation, 0.0,
+                      "partition quality collapse: separation") ||
+        !metric_close(collapsed.semantic_partition_quality->pair_recall, 1.0,
+                      "partition quality collapse: pair recall") ||
+        !metric_close(collapsed.semantic_partition_quality->quality, 0.0,
+                      "partition quality collapse: quality")) {
+      return 1;
+    }
+
+    const auto singletons =
+        only_unit(evaluate_clustering(torch::tensor({0, 1, 2, 3}, torch::kLong),
+                                      endpoint_truth, endpoint_options));
+    if (!metric_close(singletons.semantic.partition_separation, 1.0,
+                      "partition quality singletons: separation") ||
+        !metric_close(singletons.semantic_partition_quality->pair_recall, 0.0,
+                      "partition quality singletons: pair recall") ||
+        !metric_close(singletons.semantic_partition_quality->quality, 0.0,
+                      "partition quality singletons: quality") ||
+        !metric_undefined(singletons.semantic.micro_impurity,
+                          MetricUndefinedReason::NoPredictedWithinClusterPairs,
+                          0, "partition quality singletons: legacy impurity")) {
+      return 1;
+    }
+
+    const auto no_variation = only_unit(
+        evaluate_clustering(torch::tensor({0, 0, 1, 1}, torch::kLong),
+                            scalar_truth({0, 0, 0, 0}), endpoint_options));
+    if (!metric_undefined(no_variation.semantic.partition_separation,
+                          MetricUndefinedReason::NoSemanticVariation, 6,
+                          "partition quality: no semantic variation") ||
+        !metric_undefined(no_variation.semantic_partition_quality->quality,
+                          MetricUndefinedReason::DependentMetricUndefined, 4,
+                          "partition quality: no-variation dependency")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions zero_weight_variation_options =
+        endpoint_options;
+    zero_weight_variation_options.semantic_ranges = {1.0, 1.0};
+    zero_weight_variation_options.semantic_weights = {1.0, 0.0};
+    const auto zero_weight_variation = only_unit(evaluate_clustering(
+        torch::tensor({0, 0, 1, 1}, torch::kLong),
+        torch::tensor({{0, 0}, {0, 0}, {0, 1}, {0, 1}}, torch::kLong),
+        zero_weight_variation_options));
+    if (!metric_undefined(
+            zero_weight_variation.semantic.partition_separation,
+            MetricUndefinedReason::NoSemanticVariation, 6,
+            "partition quality: zero-weight-only semantic variation") ||
+        !metric_undefined(
+            zero_weight_variation.semantic_partition_quality->quality,
+            MetricUndefinedReason::DependentMetricUndefined, 4,
+            "partition quality: zero-weight-only dependency")) {
+      return 1;
+    }
+  }
+
   // Zero-weight dimensions stay visible in per-dimension metrics but do not
   // contribute to aggregate semantic impurity.
   {
@@ -954,6 +1089,9 @@ int main() {
         !metric_undefined(unit.semantic.conditional_merge_error_severity,
                           MetricUndefinedReason::SemanticDisabled, 0,
                           "semantic off: severity") ||
+        !metric_undefined(unit.semantic.partition_separation,
+                          MetricUndefinedReason::SemanticDisabled, 3,
+                          "semantic off: partition separation") ||
         !expect(unit.semantic.dimensions.size() == 2 &&
                     unit.semantic.cluster_details.has_value() &&
                     unit.semantic.cluster_details->size() == 2,
@@ -1861,6 +1999,18 @@ int main() {
                       valid_predicted, valid_truth, combined_without_power));
                 }),
                 "validation: combined quality without power accepted")) {
+      return 1;
+    }
+
+    ClusteringEvaluationOptions partition_quality_without_power;
+    partition_quality_without_power.semantic_partition_quality = true;
+    if (!expect(
+            throws_invalid_argument([&] {
+              static_cast<void>(
+                  evaluate_clustering(valid_predicted, valid_truth,
+                                      partition_quality_without_power));
+            }),
+            "validation: semantic partition quality without power accepted")) {
       return 1;
     }
 

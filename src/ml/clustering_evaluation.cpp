@@ -19,7 +19,7 @@ namespace leakflow::ml {
 namespace {
 
 constexpr std::size_t kExactMetricCount = 10;
-constexpr std::array<ClusteringMetricDescriptor, 28> kMetricDescriptors{{
+constexpr std::array<ClusteringMetricDescriptor, 30> kMetricDescriptors{{
     {ClusteringMetricId::AdjustedRandIndex, "adjusted_rand_index",
      MetricFamily::Exact, MetricDirection::HigherIsBetter,
      MetricAveraging::None},
@@ -95,6 +95,12 @@ constexpr std::array<ClusteringMetricDescriptor, 28> kMetricDescriptors{{
      "semantic_alignment_dimension_error", MetricFamily::Alignment,
      MetricDirection::LowerIsBetter, MetricAveraging::PerDimension},
     {ClusteringMetricId::CombinedQuality, "combined_quality",
+     MetricFamily::Combined, MetricDirection::HigherIsBetter,
+     MetricAveraging::Micro},
+    {ClusteringMetricId::SemanticPartitionSeparation,
+     "semantic_partition_separation", MetricFamily::Semantic,
+     MetricDirection::HigherIsBetter, MetricAveraging::Micro},
+    {ClusteringMetricId::SemanticPartitionQuality, "semantic_partition_quality",
      MetricFamily::Combined, MetricDirection::HigherIsBetter,
      MetricAveraging::Micro},
 }};
@@ -925,6 +931,8 @@ compute_fragmentation_metrics(const ContingencyCounts &contingency,
 struct SemanticPairSums {
   std::vector<long double> aggregate_by_cluster;
   std::vector<std::vector<long double>> dimension_by_cluster;
+  long double aggregate_all = 0.0L;
+  std::vector<long double> dimension_all;
 };
 
 class RunningVariance {
@@ -963,6 +971,19 @@ private:
 [[nodiscard]] long double validated_pair_sum(long double value,
                                              std::uint64_t pair_count) {
   return validated_bounded_sum(value, pair_count, "semantic pair");
+}
+
+[[nodiscard]] long double
+absolute_pair_sum(std::vector<long double> &coordinate_values) {
+  std::sort(coordinate_values.begin(), coordinate_values.end());
+  CompensatedSum prefix;
+  CompensatedSum pair_sum;
+  for (std::size_t index = 0; index < coordinate_values.size(); ++index) {
+    const auto value = coordinate_values[index];
+    pair_sum.add(static_cast<long double>(index) * value - prefix.value());
+    prefix.add(value);
+  }
+  return pair_sum.value();
 }
 
 template <typename Scalar>
@@ -1033,9 +1054,13 @@ template <typename Scalar>
   result.aggregate_by_cluster.assign(clusters, 0.0L);
   result.dimension_by_cluster.assign(
       clusters, std::vector<long double>(dimension_count, 0.0L));
+  result.dimension_all.assign(dimension_count, 0.0L);
+  const auto all_pair_count =
+      checked_comb2(static_cast<std::uint64_t>(observations));
 
   if (options.power == 2) {
     std::vector<RunningVariance> moments(clusters * dimension_count);
+    std::vector<RunningVariance> all_moments(dimension_count);
     for (std::int64_t observation = 0; observation < observations;
          ++observation) {
       const auto cluster =
@@ -1048,6 +1073,7 @@ template <typename Scalar>
                                               minima[dimension_index]) /
             static_cast<long double>(options.semantic_ranges[dimension_index]);
         moments[flat_index].add(value);
+        all_moments[dimension_index].add(value);
       }
     }
     for (std::size_t cluster = 0; cluster < clusters; ++cluster) {
@@ -1059,18 +1085,25 @@ template <typename Scalar>
             validated_pair_sum(moments[flat_index].pair_sum(), pair_count);
       }
     }
+    for (std::size_t dimension = 0; dimension < dimension_count; ++dimension) {
+      result.dimension_all[dimension] =
+          validated_pair_sum(all_moments[dimension].pair_sum(), all_pair_count);
+    }
   } else {
     std::vector<std::vector<long double>> values(clusters * dimension_count);
+    std::vector<std::vector<long double>> all_values(dimension_count);
     for (std::int64_t observation = 0; observation < observations;
          ++observation) {
       const auto cluster =
           static_cast<std::size_t>(predicted_assignment[observation]);
       for (std::int64_t dimension = 0; dimension < dimensions; ++dimension) {
         const auto dimension_index = static_cast<std::size_t>(dimension);
-        values[cluster * dimension_count + dimension_index].push_back(
+        const auto value =
             nonnegative_coordinate_difference(truth[observation][dimension],
                                               minima[dimension_index]) /
-            static_cast<long double>(options.semantic_ranges[dimension_index]));
+            static_cast<long double>(options.semantic_ranges[dimension_index]);
+        values[cluster * dimension_count + dimension_index].push_back(value);
+        all_values[dimension_index].push_back(value);
       }
     }
     for (std::size_t cluster = 0; cluster < clusters; ++cluster) {
@@ -1078,18 +1111,13 @@ template <typename Scalar>
       for (std::size_t dimension = 0; dimension < dimension_count;
            ++dimension) {
         auto &coordinate_values = values[cluster * dimension_count + dimension];
-        std::sort(coordinate_values.begin(), coordinate_values.end());
-        CompensatedSum prefix;
-        CompensatedSum pair_sum;
-        for (std::size_t index = 0; index < coordinate_values.size(); ++index) {
-          const auto value = coordinate_values[index];
-          pair_sum.add(static_cast<long double>(index) * value -
-                       prefix.value());
-          prefix.add(value);
-        }
-        result.dimension_by_cluster[cluster][dimension] =
-            validated_pair_sum(pair_sum.value(), pair_count);
+        result.dimension_by_cluster[cluster][dimension] = validated_pair_sum(
+            absolute_pair_sum(coordinate_values), pair_count);
       }
+    }
+    for (std::size_t dimension = 0; dimension < dimension_count; ++dimension) {
+      result.dimension_all[dimension] = validated_pair_sum(
+          absolute_pair_sum(all_values[dimension]), all_pair_count);
     }
   }
 
@@ -1110,6 +1138,14 @@ template <typename Scalar>
         validated_pair_sum(weighted_sum.value() / scaled_weight_sum.value(),
                            checked_comb2(predicted_marginal[cluster]));
   }
+  CompensatedSum all_weighted_sum;
+  for (std::size_t dimension = 0; dimension < dimension_count; ++dimension) {
+    all_weighted_sum.add(static_cast<long double>(
+                             options.semantic_weights[dimension] / max_weight) *
+                         result.dimension_all[dimension]);
+  }
+  result.aggregate_all = validated_pair_sum(
+      all_weighted_sum.value() / scaled_weight_sum.value(), all_pair_count);
   return result;
 }
 
@@ -1137,6 +1173,9 @@ semantic_disabled_metrics(const std::vector<std::uint64_t> &predicted_marginal,
       MetricUndefinedReason::SemanticDisabled);
   result.conditional_merge_error_severity = undefined_metric(
       ClusteringMetricId::ConditionalMergeErrorSeverity, pairs.false_positive,
+      MetricUndefinedReason::SemanticDisabled);
+  result.partition_separation = undefined_metric(
+      ClusteringMetricId::SemanticPartitionSeparation, pairs.total_pairs,
       MetricUndefinedReason::SemanticDisabled);
   result.dimensions.reserve(static_cast<std::size_t>(dimensions));
   for (std::int64_t dimension = 0; dimension < dimensions; ++dimension) {
@@ -1234,10 +1273,25 @@ compute_semantic_metrics(const torch::TensorAccessor<Scalar, 2> &truth,
   // numerator is supported only by false-positive (merge-error) pairs.
   const auto semantic_error_total =
       validated_pair_sum(aggregate_total.value(), pairs.false_positive);
+  const auto semantic_total =
+      validated_pair_sum(pair_sums.aggregate_all, pairs.total_pairs);
   std::vector<long double> dimension_error_totals(dimension_count, 0.0L);
   for (std::size_t dimension = 0; dimension < dimension_count; ++dimension) {
     dimension_error_totals[dimension] = validated_pair_sum(
         dimension_totals[dimension].value(), pairs.false_positive);
+  }
+
+  if (semantic_total == 0.0L) {
+    result.partition_separation = undefined_metric(
+        ClusteringMetricId::SemanticPartitionSeparation, pairs.total_pairs,
+        MetricUndefinedReason::NoSemanticVariation);
+  } else {
+    const auto separation = 1.0L - semantic_error_total / semantic_total;
+    result.partition_separation =
+        defined_metric(ClusteringMetricId::SemanticPartitionSeparation,
+                       static_cast<double>(validated_bounded_sum(
+                           separation, 1, "semantic separation")),
+                       pairs.total_pairs);
   }
 
   if (pairs.predicted_within_cluster_pairs == 0) {
@@ -1348,6 +1402,39 @@ compute_combined_quality(const SemanticClusteringMetrics &semantic,
                                   static_cast<double>(validated_bounded_sum(
                                       quality, 1, "combined quality")),
                                   observations);
+  return result;
+}
+
+[[nodiscard]] SemanticPartitionClusteringQuality
+compute_semantic_partition_quality(const SemanticClusteringMetrics &semantic,
+                                   const ExactClusteringMetrics &exact,
+                                   std::uint64_t observations) {
+  SemanticPartitionClusteringQuality result;
+  result.semantic_partition_separation = semantic.partition_separation;
+  result.pair_recall = exact.pair_recall;
+  if (!semantic.partition_separation.defined() ||
+      !exact.pair_recall.defined()) {
+    result.quality = undefined_metric(
+        ClusteringMetricId::SemanticPartitionQuality, observations,
+        MetricUndefinedReason::DependentMetricUndefined);
+    return result;
+  }
+
+  const auto separation = validated_bounded_sum(
+      static_cast<long double>(*semantic.partition_separation.value), 1,
+      "semantic partition separation");
+  const auto pair_recall =
+      validated_bounded_sum(static_cast<long double>(*exact.pair_recall.value),
+                            1, "semantic partition pair recall");
+  const auto denominator = separation + pair_recall;
+  const auto quality = denominator == 0.0L
+                           ? 0.0L
+                           : (2.0L * separation * pair_recall) / denominator;
+  result.quality =
+      defined_metric(ClusteringMetricId::SemanticPartitionQuality,
+                     static_cast<double>(validated_bounded_sum(
+                         quality, 1, "semantic partition quality")),
+                     observations);
   return result;
 }
 
@@ -1673,6 +1760,10 @@ template <typename Scalar>
     result.combined_quality = compute_combined_quality(
         result.semantic, result.fragmentation, observations_u64);
   }
+  if (options.semantic_partition_quality) {
+    result.semantic_partition_quality = compute_semantic_partition_quality(
+        result.semantic, result.exact, observations_u64);
+  }
   const auto exact_alignment_requested =
       options.alignment == AlignmentEvaluationMode::Exact ||
       options.alignment == AlignmentEvaluationMode::Both;
@@ -1810,6 +1901,12 @@ effective_evaluation_options(const ClusteringEvaluationOptions &options,
       options.semantic != SemanticEvaluationMode::Power) {
     throw std::invalid_argument("clustering evaluation combined quality "
                                 "requires power semantic evaluation");
+  }
+  if (options.semantic_partition_quality &&
+      options.semantic != SemanticEvaluationMode::Power) {
+    throw std::invalid_argument(
+        "clustering evaluation semantic partition quality requires power "
+        "semantic evaluation");
   }
   if (options.power != 1 && options.power != 2) {
     throw std::invalid_argument(
@@ -1964,6 +2061,8 @@ std::string_view metric_undefined_reason_name(MetricUndefinedReason reason) {
     return "no_eligible_truth_groups";
   case MetricUndefinedReason::NoMatchedPredictedCluster:
     return "no_matched_predicted_cluster";
+  case MetricUndefinedReason::NoSemanticVariation:
+    return "no_semantic_variation";
   }
   throw std::invalid_argument("unknown clustering metric undefined reason");
 }

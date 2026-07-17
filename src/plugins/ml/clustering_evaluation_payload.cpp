@@ -153,8 +153,16 @@ void ClusteringEvaluationPayload::describe(SummarySection &section,
       add_metric_child(field, "pair_f1", unit.exact.pair_f1);
       add_metric_child(field, "semantic_impurity_micro",
                        unit.semantic.micro_impurity);
+      add_metric_child(field, "semantic_partition_separation",
+                       unit.semantic.partition_separation);
       add_metric_child(field, "fragmentation_micro", unit.fragmentation.micro);
+      if (unit.semantic_partition_quality) {
+        add_metric_child(field, "semantic_partition_quality",
+                         unit.semantic_partition_quality->quality);
+      }
       if (unit.combined_quality) {
+        // Keep the established summary key for compatibility. The evaluator
+        // property and plot label document that this score is legacy.
         add_metric_child(field, "combined_quality",
                          unit.combined_quality->quality);
       }

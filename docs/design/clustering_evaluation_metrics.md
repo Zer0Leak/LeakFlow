@@ -4,7 +4,10 @@ Status: **Phase A implemented**. A1 (exact numeric core), A2 (semantic and
 fragmentation metrics), A3 (rectangular alignments), and A4 (pipeline result
 contract plus bounded table inspection) are complete. A user-requested bounded
 post-A4 comparison-view extension adding explicit N/S columns and an eighth
-same-window Heatmap tab is also implemented. Payload persistence, generic
+same-window Heatmap tab is also implemented. A post-A4 quality correction adds
+`semantic_partition_separation` and the optional
+`semantic_partition_quality`, while retaining the former `combined_quality`
+unchanged as a deprecated legacy record. Payload persistence, generic
 `MetricView`, and a standalone/selectable matrix plot are unblocked but remain
 deferred.
 
@@ -56,6 +59,13 @@ Implemented Phase A slices:
   eighth same-window Heatmap tab with a bounded row-normalized view of already
   stored Full-detail contingency. It adds no persistence, new plot element,
   selectable matrix mode, or numeric recomputation.
+- **Post-A4 semantic partition quality correction (implemented,
+  user-requested):** adds a globally normalized semantic-separation component
+  and its harmonic combination with pair recall. The new score is zero for a
+  one-cluster collapse and for complete singleton over-splitting, and one for a
+  perfect semantic truth partition. Metric IDs are append-only and the result
+  schema advances to version 5; the A4 `combined_quality` formula remains
+  readable but is deprecated for cross-cluster-count comparison.
 
 ### Phase A — Full Clustering Evaluation Metrics
 
@@ -401,35 +411,114 @@ where \(\mathcal G_2\) is the set of non-singleton truth groups.
 No semantic power cost is applied to a fragmented pair: equal semantic vectors
 have zero semantic cost, while the error is their separation.
 
-## 6. Optional Combined Quality
+## 6. Semantic Partition Separation and Quality
 
-Implementation scheduling: this optional record and its default-off property
-were added in A4 with the pipeline payload/property contract. A2 reports both
-component metrics but does not calculate the composite.
+The preferred post-A4 composite must reject both degenerate endpoints when
+comparing different predicted-cluster counts: collapsing every observation
+into one cluster and splitting every observation into its own cluster.
 
-A composite score may be requested for ranking experiments, but it is never the
-only reported result.
+Using the configured semantic power cost, define:
 
-Define semantic cohesion and group preservation:
+\[
+D_{\mathrm{all}}=\sum_{i<j}s_p(\mathbf h_i,\mathbf h_j),
+\]
+
+\[
+D_{\mathrm{within}}=
+\sum_{i<j,\;c_i=c_j}s_p(\mathbf h_i,\mathbf h_j).
+\]
+
+`D_all` measures the configured, weighted semantic variation of the dataset
+before considering the predicted partition. `D_within` measures the part left
+inside predicted clusters; it is the unaveraged numerator from which semantic
+micro impurity is derived. Since the within-cluster pairs are a subset of all
+pairs, \(0\leq D_{\mathrm{within}}\leq D_{\mathrm{all}}\).
+
+Then `semantic_partition_separation` is the fraction of the dataset's total
+semantic variation placed across predicted-cluster boundaries:
+
+\[
+S_{\mathrm{partition}}=
+1-\frac{D_{\mathrm{within}}}{D_{\mathrm{all}}}
+=\frac{D_{\mathrm{between}}}{D_{\mathrm{all}}}.
+\]
+
+It is higher-is-better, uses all \(\binom N2\) observation pairs as its support,
+and is unavailable with `no_semantic_variation` when
+\(D_{\mathrm{all}}=0\). This reason is relative to the configured ranges and
+weights: variation exclusively in zero-weight dimensions is intentionally not
+semantic variation for this metric. Semantic-off mode retains the record with
+`semantic_disabled`. It remains defined as one when no observations share a
+predicted cluster but \(D_{\mathrm{all}}>0\); unlike the legacy micro impurity,
+it does not require a predicted-within-cluster denominator.
+
+Separation alone rewards over-splitting, while pair recall alone rewards
+collapse. Their harmonic mean is therefore used so either failure mode can
+drive the composite to zero. The composite is a comparison aid, not a universal
+replacement for the full exact, semantic, and fragmentation metric set.
+
+Combine separation with exact same-truth group preservation:
+
+\[
+R_{\mathrm{pair}}=\frac{TP}{TP+FN},
+\]
+
+\[
+Q_{\mathrm{partition}}=
+\frac{2S_{\mathrm{partition}}R_{\mathrm{pair}}}
+{S_{\mathrm{partition}}+R_{\mathrm{pair}}}.
+\]
+
+`semantic_partition_quality` is disabled by default and requires
+`semantic=power`. Its stored result copies both source records with their own
+supports and undefined reasons. The derived quality uses observation count as
+support, is unavailable with `dependent_metric_undefined` when either source is
+unavailable, and is defined as zero when both defined components are zero.
+The separation source has support \(\binom N2\); the pair-recall source has
+support \(TP+FN\), the number of true within-group pairs. Consequently, a
+dataset with no true within-group pair leaves pair recall and the composite
+undefined even if separation itself is defined.
+
+The endpoint contract is:
+
+| Predicted partition | Separation | Pair recall | Quality |
+|---|---:|---:|---:|
+| one cluster | 0 | 1 | 0 |
+| exact semantic truth groups | 1 | 1 | 1 |
+| one cluster per observation | 1 | 0 | 0 |
+
+The table assumes nonzero configured semantic variation and at least one true
+within-group pair. Otherwise the explicit undefined rules above take
+precedence. Predicted label values and label ordering do not affect any row.
+
+### Deprecated legacy `combined_quality`
+
+The A4 formula remains unchanged for result compatibility:
 
 \[
 C_{\mathrm{semantic}}=1-I_{\mathrm{micro}},\qquad
 G_{\mathrm{preservation}}=1-F_{\mathrm{micro}}
-=R_{\mathrm{pair}}.
+=R_{\mathrm{pair}},
 \]
 
-Then:
-
 \[
-Q=
+Q_{\mathrm{legacy}}=
 \frac{2C_{\mathrm{semantic}}G_{\mathrm{preservation}}}
 {C_{\mathrm{semantic}}+G_{\mathrm{preservation}}}.
 \]
 
-`combined_quality` is disabled by default. If requested, it is undefined when
-either underlying metric is undefined and is always accompanied by both
-underlying values. If both defined components are zero, the harmonic score is
-defined as zero.
+`combined_quality` is disabled by default and retains its former undefined and
+source-copy semantics: semantic micro impurity keeps predicted-within-pair
+support, fragmentation keeps true-within-pair support, the derived record uses
+observation support, and an unavailable source produces
+`dependent_metric_undefined`. It is deprecated for comparing different values of
+`n_components`: a one-cluster partition has perfect pair preservation, while
+normalized squared Hamming-weight costs can keep semantic cohesion close to
+one even after every truth group is merged. Existing metric ID 27 and stored
+values are not silently reinterpreted. New experiment comparisons should use
+`semantic_partition_quality` together with ARI, AMI, pair F1, and the two
+component metrics; legacy values may be displayed for historical reproduction
+but must be labeled as legacy.
 
 ## 7. Alignment Results
 
@@ -564,7 +653,7 @@ Every metric value carries:
 
 - stable metric name;
 - optional numeric value;
-- family: exact, semantic, fragmentation, or alignment;
+- family: exact, semantic, fragmentation, alignment, or combined;
 - direction: higher-is-better or lower-is-better;
 - averaging: none, micro, macro, per-cluster, per-group, or per-dimension;
 - support counts used by its denominator;
@@ -577,15 +666,22 @@ configuration error.
 
 The result contains:
 
-- schema version and effective options;
+- schema version and effective options. The post-A4 quality correction uses
+  schema version 5; existing metric IDs remain stable and the two new IDs are
+  appended as `SemanticPartitionSeparation = 28` and
+  `SemanticPartitionQuality = 29`;
 - semantic dimension names, ranges, weights, and power;
 - one result record per aligned unit; the enclosing pipeline `Buffer` carries
   the corresponding typed unit identities;
 - observation, truth-group, predicted-cluster, and eligible-pair counts;
-- all required global metrics;
+- all required global metrics, including semantic partition separation in
+  power mode;
 - per-dimension metrics;
 - optional per-cluster and per-group details;
-- optional contingency and alignment records.
+- optional contingency and alignment records;
+- the optional preferred semantic-partition quality and the separately
+  optional deprecated legacy combined quality, each with copied component
+  records so its inputs remain inspectable.
 
 When either alignment is requested, canonical predicted IDs and truth vectors
 are materialized as alignment identities even in Global detail, so dense mapping
@@ -618,7 +714,11 @@ element properties, copy `payload.parameter.*` metadata, or flatten the
 structured evaluation result into metadata.
 
 The payload summary prints a bounded headline view: counts, ARI, AMI,
-V-measure, purity, pair precision/recall/F1, semantic impurity, and fragmentation.
+V-measure, purity, pair precision/recall/F1, semantic impurity, semantic
+partition separation, and fragmentation. It adds
+`semantic_partition_quality` when requested. If the old score is requested, it
+keeps the established `combined_quality` summary key for compatibility; its
+property description and the table view identify it as deprecated/legacy.
 Undefined values render as `N/A` with a short reason. Full detail belongs in
 the payload or table view, not unbounded terminal metadata.
 
@@ -650,7 +750,17 @@ Properties:
 - `dimension_names` (optional);
 - `detail` = `global|full`;
 - `alignment` = `none|exact|semantic|both`;
-- `combined_quality` (default `false`).
+- `semantic_partition_quality` (default `false`), the preferred optional
+  harmonic score for comparisons across predicted-cluster counts;
+- `combined_quality` (default `false`), retained only as the deprecated A4
+  legacy score and not comparable across predicted-cluster counts.
+
+`semantic_partition_separation` is not gated by a separate property: its
+record is produced whenever the semantic result is produced and is defined in
+`semantic=power` mode when the configured weighted semantics have nonzero
+global variation. Both optional composite properties require
+`semantic=power`; requesting either in semantic-off mode is a configuration
+error.
 
 Metric-affecting properties are `payload-output` with downstream invalidation.
 Display selection is not an evaluator property.
@@ -666,13 +776,18 @@ inspection contract is:
   **Fragmentation**, **Combined**, **Alignment**, **Heatmap**, and **Parameters**
   tabs;
 - put one row per run and typed unit in Overview, beginning with
-  `Observations (N)` and `Features (S)`, then count context, headline metrics,
-  and the core producer and explicit experiment parameters needed to compare
-  configurations. The feature value reads `labels.cluster.n_features` and
-  displays `N/A` when the producer did not report it;
+  `Observations (N)` and `Features (S)`, then count context, the current
+  headline set (ARI, AMI, pair F1, partition separation, semantic impurity,
+  fragmentation, and preferred partition quality), and the core producer and
+  explicit experiment parameters needed to compare configurations. The feature
+  value reads `labels.cluster.n_features` and displays `N/A` when the producer
+  did not report it; the optional quality displays `N/A` when not requested;
 - place every stored `MetricValue` exactly once across the five family tabs,
   preserving value/defined state, averaging, support, scope/item detail, and
-  undefined reason; append `↑` or `↓` to the metric label for its direction;
+  undefined reason; append `↑` or `↓` to the metric label for its direction.
+  Partition separation belongs to Semantic; the preferred score and copied
+  inputs belong to Combined, where requested old-score records are visibly
+  marked as legacy;
 - show effective `evaluation.*` options, bounded labels-side
   `payload.cluster.*` parameters stored by the payload, and scalar
   `payload.parameter.*` metadata explicitly stamped on the evaluation input in
@@ -755,17 +870,22 @@ The bridge defines these tabs:
 
 - **Overview:** one row per run and typed unit. Columns begin with
   `Observations (N)` and `Features (S)`, then truth-group and predicted-cluster
-  counts; headline ARI, AMI, pair F1,
-  semantic impurity, fragmentation, and combined-quality metrics; and the core
+  counts; headline ARI, AMI, pair F1, semantic partition separation, semantic
+  impurity, fragmentation, and semantic partition quality; and the core
   clustering-producer and explicit experiment parameters required to compare
-  configurations. Missing producer feature width is shown as `N/A`.
+  configurations. Missing producer feature width or an unrequested partition
+  quality is shown as `N/A`. The deprecated legacy combined quality is not an
+  Overview headline.
 - **Exact**, **Semantic**, **Fragmentation**, **Combined**, and **Alignment:**
   long-form metric tables with run, unit, scope, item, metric, value, support,
   averaging/defined state, and undefined reason as applicable. Across these
   family tabs every stored `MetricValue` is represented exactly once, including
   per-dimension, per-cluster, and per-group detail. Metric labels carry `↑` for
   higher-is-better or `↓` for lower-is-better; the direction marker is not the
-  active column-sort arrow.
+  active column-sort arrow. The Semantic tab includes partition separation.
+  The Combined tab shows the preferred quality with its copied separation and
+  pair-recall components; if requested, the old quality and its copied inputs
+  remain visibly separated under `Legacy global`.
 - **Parameters:** effective evaluator options, bounded labels-side
   `payload.cluster.*` producer parameters, and explicit evaluation-buffer
   `payload.parameter.*` experiment metadata once per run. Source identity is
@@ -831,12 +951,23 @@ For \(p=2\), per-cluster/per-dimension semantic sums use:
 n\sum_i x_i^2-\left(\sum_i x_i\right)^2.
 \]
 
-For \(p=1\), sort each cluster/dimension and use prefix sums to obtain the total
-absolute pair difference in \(O(n\log n)\). Semantic-cost alignment uses
-contingency counts and truth-group representative vectors. It precomputes the
-\(G\times G\) truth-group power costs, accumulates the \(K\times G\) assignment
-matrix from the \(Z\) nonzero contingency cells, and never enumerates
-observation pairs.
+The same identity is applied once to every predicted cluster to obtain
+\(D_{\mathrm{within}}\) and once to all observations to obtain
+\(D_{\mathrm{all}}\). Running moments therefore compute the separation inputs
+for \(p=2\) in \(O(ND+KD)\) time and \(O(KD)\) auxiliary memory.
+
+For \(p=1\), sort each cluster/dimension and use prefix sums to obtain each
+within-cluster absolute-pair sum, and separately sort all observations in each
+dimension for the global sum. The total worst-case cost is
+\(O(DN\log N)\) time and \(O(DN+DK)\) auxiliary memory. Neither power
+materializes the \(\binom N2\) observation pairs. Ranges and normalized weights
+are applied identically to the within and global sums before their ratio is
+formed.
+
+Semantic-cost alignment uses contingency counts and truth-group representative
+vectors. It precomputes the \(G\times G\) truth-group power costs, accumulates
+the \(K\times G\) assignment matrix from the \(Z\) nonzero contingency cells,
+and never enumerates observation pairs.
 
 Use sparse/hash mappings for semantic vectors and contingency entries. A dense
 matrix is materialized only when an alignment requests the assignment problem.
@@ -913,7 +1044,9 @@ Use hand-computed fixtures for:
 - merge rate and conditional severity;
 - micro/macro/per-group fragmentation;
 - exact and semantic-cost alignments;
-- the optional combined score.
+- semantic partition separation and the preferred optional partition quality;
+- the deprecated optional A4 combined score, without changing its historical
+  values.
 
 Required scenario coverage:
 
@@ -937,14 +1070,26 @@ fragmentation records, both rectangular alignment directions, exact and
 semantic mappings that intentionally differ, a tie that requires an
 equality-graph matching flip, both powers, `D=1/2/4`, zero weights, numeric dtype
 edges, batching, observation permutation, and large-`N`/small-assignment stress.
-The optional combined score is covered with A4's property/payload contract.
+The optional legacy combined score is covered with A4's property/payload
+contract.
+
+The post-A4 correction adds hand-computed \(p=1\) and \(p=2\) separation and
+quality fixtures, including a two-cluster mixed partition whose expected values
+are \(S=3/4,\ Q=12/17\) for \(p=1\) and
+\(S=5/6,\ Q=20/27\) for \(p=2\). Endpoint tests require a perfect semantic
+partition to produce one, one-cluster collapse to produce zero, and singleton
+over-splitting to produce zero. Separate tests cover
+`no_semantic_variation`, dependent undefined propagation, copied component
+supports, append-only descriptors/schema version 5, and rejection of
+`semantic_partition_quality=true` in semantic-off mode.
 
 ### Pipeline Tests
 
 - descriptor/property validation;
 - vector-truth shape validation;
 - unit alignment;
-- optional combined-quality behavior;
+- preferred optional semantic-partition-quality behavior and deprecated
+  optional combined-quality behavior;
 - structured payload contents, effective evaluator options, output-`Buffer`
   typed units, and bounded summary;
 - deterministic bounded capture of scalar `payload.cluster.*` labels metadata,
@@ -957,11 +1102,14 @@ The optional combined score is covered with A4's property/payload contract.
 - deterministic translation from a fixture payload into the seven A4 table tabs
   plus the post-A4 Heatmap tab;
 - one Overview row per run and unit with `Observations (N)`, producer-supplied or
-  unavailable `Features (S)`, headline metrics, counts, and core producer/
-  experiment parameters;
+  unavailable `Features (S)`, headline metrics including partition separation
+  and the preferred quality, counts, and core producer/experiment parameters;
 - exact, semantic, fragmentation, combined, alignment, per-dimension/detail,
   direction, support, and undefined-reason records, with every stored
   `MetricValue` placed exactly once across the family tabs;
+- separation in the Semantic tab; preferred quality plus copied separation and
+  pair recall in Combined; and any requested old score visibly isolated as
+  `Legacy global`;
 - effective options, captured `payload.cluster.*` values, and explicit
   `payload.parameter.*` input metadata once per run in Parameters, preserving
   collision-proof source identity and the captured GMM feature width;
@@ -1009,6 +1157,11 @@ post-A4 extension.
 - The user-requested post-A4 extension promotes N/S in Overview and adds an
   eighth same-window Heatmap tab with bounded row-normalized stored-contingency
   frames and the same unit/run controls.
+- The post-A4 quality correction exposes globally normalized semantic partition
+  separation and the opt-in separation/pair-recall harmonic quality with the
+  documented collapse, perfect-partition, over-splitting, support, and
+  undefined contracts. Schema version 5 appends metric IDs without changing
+  the deprecated A4 `combined_quality` record.
 - Table/Heatmap operations over copied data do not rerun evaluation or alignment.
 - Existing `ClusteringStats` pipelines and tests remain unchanged and green.
 - No plotting dependency enters ML or core targets; the bridge dependency is

@@ -67,7 +67,7 @@ int main() {
                 "descriptor pads/caps are wrong")) {
       return 1;
     }
-    if (!expect(descriptor.property_specs.size() == 8,
+    if (!expect(descriptor.property_specs.size() == 9,
                 "descriptor should expose all evaluator properties")) {
       return 1;
     }
@@ -110,26 +110,27 @@ int main() {
     const auto payload =
         output->payload_as<plugin::ClusteringEvaluationPayload>();
     if (!expect(payload && payload->layout() == "unit/evaluation" &&
-                    payload->result().schema_version == 4 &&
+                    payload->result().schema_version == 5 &&
                     output->metadata_or("payload.layout", "") ==
                         "unit/evaluation",
                 "structured payload identity/schema is wrong")) {
       return 1;
     }
     const auto &unit = payload->result().units.front();
-    if (!expect(unit.exact.adjusted_rand_index.value == 1.0 &&
-                    !unit.combined_quality.has_value() &&
-                    payload->parameters().at("labels.cluster.method") ==
-                        "gaussian-mixture" &&
-                    payload->parameters().at(
-                        "labels.cluster.covariance_type") == "diagonal" &&
-                    payload->parameters().at("labels.cluster.n_features") ==
-                        "4" &&
-                    payload->parameters().at("evaluation.semantic") == "off" &&
-                    !payload->parameters().contains("labels.parameter.seed") &&
-                    !payload->parameters().contains("truth.cluster.method") &&
-                    !payload->parameters().contains("truth.parameter.model"),
-                "unbatched values/parameters are wrong")) {
+    if (!expect(
+            unit.exact.adjusted_rand_index.value == 1.0 &&
+                !unit.combined_quality.has_value() &&
+                !unit.semantic_partition_quality.has_value() &&
+                payload->parameters().at("labels.cluster.method") ==
+                    "gaussian-mixture" &&
+                payload->parameters().at("labels.cluster.covariance_type") ==
+                    "diagonal" &&
+                payload->parameters().at("labels.cluster.n_features") == "4" &&
+                payload->parameters().at("evaluation.semantic") == "off" &&
+                !payload->parameters().contains("labels.parameter.seed") &&
+                !payload->parameters().contains("truth.cluster.method") &&
+                !payload->parameters().contains("truth.parameter.model"),
+            "unbatched values/parameters are wrong")) {
       return 1;
     }
     leakflow::SummarySection summary("evaluation");
@@ -206,6 +207,7 @@ int main() {
     element.set_property("power", std::int64_t{1});
     element.set_property("alignment", std::string("both"));
     element.set_property("combined_quality", true);
+    element.set_property("semantic_partition_quality", true);
     const auto output = element.process_inputs(inputs(labels, truth));
     const auto payload =
         output->payload_as<plugin::ClusteringEvaluationPayload>();
@@ -230,7 +232,9 @@ int main() {
                     unit.exact_alignment.has_value() &&
                     unit.semantic_alignment.has_value() &&
                     unit.combined_quality.has_value() &&
-                    unit.combined_quality->quality.defined(),
+                    unit.combined_quality->quality.defined() &&
+                    unit.semantic_partition_quality.has_value() &&
+                    unit.semantic_partition_quality->quality.defined(),
                 "full semantic property/result mapping is wrong")) {
       return 1;
     }
@@ -246,6 +250,21 @@ int main() {
                   (void)element.process_inputs(inputs(labels, truth));
                 }),
                 "combined quality with semantic=off must be rejected")) {
+      return 1;
+    }
+  }
+
+  // Semantic partition quality is explicit and cannot be requested with
+  // semantics off.
+  {
+    plugin::ClusteringEvaluate element;
+    element.set_property("semantic_partition_quality", true);
+    const auto labels = tensor_buffer(torch::tensor({0, 0}, torch::kLong));
+    const auto truth = tensor_buffer(torch::tensor({{0}, {0}}, torch::kLong));
+    if (!expect(
+            throws_invalid_argument(
+                [&] { (void)element.process_inputs(inputs(labels, truth)); }),
+            "semantic partition quality with semantic=off must be rejected")) {
       return 1;
     }
   }

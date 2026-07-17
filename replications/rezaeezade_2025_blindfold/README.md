@@ -57,3 +57,11 @@ Reload a saved correlation without recomputing it:
 ```bash
 leakflow run 'BufferFileSrc(path=out/aes_corr.h5) ! PoiSelect(top_k=[5],rank_by=[abs]) ! Summary ! FakeSink'
 ```
+
+## GMM comparison
+
+The controlled, single-seed comparison between LeakFlow's 49-component GMM and
+the original code's scikit-learn 81-component GMM is recorded in
+[GMM_COMPARISON.md](GMM_COMPARISON.md). It evaluates both labelings against the
+same 8,000 AES observations and includes the exact caveats needed to interpret
+the result.

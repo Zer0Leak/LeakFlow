@@ -53,7 +53,9 @@ support:
   mixtures, constrained Sinkhorn transport, the legacy scalar-class clustering
   metrics, and the complete Phase A vector-truth exact, semantic,
   fragmentation, rectangular-alignment, and optional combined-quality
-  evaluator.
+  evaluator. Its schema-v5 post-A4 correction adds semantic partition
+  separation and an opt-in corrected semantic partition quality; the original
+  combined score remains deprecated legacy data.
 - `leakflow_plugins_ml` exists and provides `FeatureSelect`, `GaussianMixture`,
   `ClusteringStats`, and the structured `ClusteringEvaluate` /
   `ClusteringEvaluationPayload` boundary, including typed-unit
@@ -218,7 +220,10 @@ rectangular alignments, and A4 pipeline/table inspection are complete. Payload
 persistence, generic metric charts, and a standalone/selectable clustering
 matrix plot are unblocked but remain deferred. A user-requested bounded post-A4
 extension adds explicit N/S comparison columns and a same-window stored-
-contingency Heatmap tab. Zarr parity remains a separate deferred candidate.
+contingency Heatmap tab. A separate post-A4 schema-v5 correction adds semantic
+partition separation and the opt-in corrected quality used for comparisons
+across predicted-cluster counts, while retaining the old combined score as
+deprecated legacy data. Zarr parity remains a separate deferred candidate.
 
 Generic `Convert`, the conversion registry, and conversion-registry dynamic pads
 remain deferred as low-priority future infrastructure.
@@ -374,12 +379,20 @@ ML:
   mode. Full detail adds exact per-truth scores and semantic contingency-mass
   error records; semantic alignment uses the configured power cost and a fixed
   maximum dummy penalty of `1.0`.
-- Phase A4 added the default-off combined-quality record,
+- Phase A4 added the default-off combined-quality record (now deprecated as a
+  legacy score because it rewards cluster collapse),
   `ClusteringEvaluationPayload`, and `ClusteringEvaluate`. The element aligns
   typed units carried by its input/output `Buffer`s, stores effective
   `evaluation.*` options plus bounded labels-side `payload.cluster.*` producer
   parameters in the payload, and emits a bounded summary. The payload itself
   does not own unit identity.
+- The post-A4 quality correction advances the numeric result schema to v5 and
+  appends `semantic_partition_separation = 1 - D_within / D_all`. Optional
+  `semantic_partition_quality` is the harmonic mean of that separation and
+  exact pair recall: perfect partitions score `1`, while both a one-cluster
+  collapse and all-singleton fragmentation score `0`. The old
+  `combined_quality` formula and ID remain unchanged for compatibility, but it
+  is not suitable for comparing different predicted-cluster counts.
 
 ML plugin elements:
 
@@ -401,7 +414,9 @@ ML plot bridge:
   row per run and unit with explicit `Observations (N)` and `Features (S)` shape
   columns, counts, headline metrics, and core producer plus experiment
   parameters. `Features (S)` reads captured `labels.cluster.n_features` and is
-  `N/A` for producers that do not report it. Exact, Semantic, Fragmentation,
+  `N/A` for producers that do not report it. Overview prefers semantic partition
+  separation and semantic partition quality; the deprecated combined quality is
+  retained only in the Combined detail tab. Exact, Semantic, Fragmentation,
   Combined, and Alignment contain every stored `MetricValue` exactly once, while Parameters
   presents effective/captured parameters once per run, retaining
   `labels.cluster.n_features`. Heatmap is the eighth tab: it consumes only stored

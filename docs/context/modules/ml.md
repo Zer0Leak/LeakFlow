@@ -97,7 +97,11 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   exact-overlap and semantic-cost alignments are separate records with canonical
   mapping identities, deterministic predicted-major ties, unmatched marginal
   supports, exact per-group scores, semantic per-dimension errors, and
-  Full-detail contingency-mass error records.
+  Full-detail contingency-mass error records. Schema v5 appends
+  `semantic_partition_separation = 1 - D_within / D_all` and the optional
+  `semantic_partition_quality`, its harmonic mean with exact pair recall. The
+  original `combined_quality` remains unchanged but deprecated because it is not
+  comparable across predicted-cluster counts.
 - `ClusteringEvaluate`: pipeline wrapper with `labels` and `truth` inputs and an
   `evaluation` output. It aligns typed unit identity carried by the input
   `Buffer`s, emits that identity on the output `Buffer`, and produces a bounded
@@ -111,10 +115,12 @@ inputs fall back to a plain shape check. See `docs/design/metadata_klass_taxonom
   post-A4 extension supplies the explicit N/S columns and eighth Heatmap. Its
   tabs are Overview, Exact, Semantic, Fragmentation, Combined, Alignment,
   Heatmap, and Parameters. Overview uses one row per run and unit with explicit
-  `Observations (N)` and `Features (S)` columns; the feature value comes from captured
-  `labels.cluster.n_features` and is `N/A` when absent. Family tabs retain each
-  stored `MetricValue` exactly once; Parameters records context once per run and
-  retains the feature-count parameter. Heatmap uses only stored Full-detail
+  `Observations (N)` and `Features (S)` columns; the feature value comes from
+  captured `labels.cluster.n_features` and is `N/A` when absent. It promotes
+  semantic partition separation and the opt-in semantic partition quality; the
+  deprecated combined quality remains only in Combined detail. Family tabs
+  retain each stored `MetricValue` exactly once; Parameters records context once
+  per run and retains the feature-count parameter. Heatmap uses only stored Full-detail
   sparse contingency, applies a stored exact-overlap column permutation when
   present (raw otherwise), row-normalizes copied counts, and labels canonical
   truth-vector rows and actual predicted-ID columns. Unit-bearing tabs share a
@@ -144,9 +150,10 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
   both rectangular directions, strict tie behavior, and fixed semantic dummy
   penalty semantics.
 - **A4 done:** `ClusteringEvaluate`, `ClusteringEvaluationPayload`, typed-unit
-  alignment, optional combined quality, bounded summaries, effective
-  `evaluation.*` options, and bounded generic `payload.cluster.*` capture only
-  from labels metadata in `leakflow_plugins_ml`; plus
+  alignment, optional combined quality (now deprecated legacy data), bounded
+  summaries, effective `evaluation.*` options, and bounded generic
+  `payload.cluster.*` capture only from labels metadata in
+  `leakflow_plugins_ml`; plus
   `ClusteringMetricsTablePlot` in `leakflow_plugins_ml_plot`. The table reuses
   generic domain-free `TableView` tabs and accepts explicitly stamped
   `payload.parameter.*` metadata on its input `Buffer`. Overview compares one
@@ -167,6 +174,13 @@ Authoritative design: `docs/design/clustering_evaluation_metrics.md`.
   exact-aligned when the stored mapping is available, with shared typed-unit and
   independent run-history controls. It adds no persistence, standalone plot
   element, selectable matrix mode, or recomputation.
+- **Post-A4 clustering-quality correction done (user-requested):** schema v5
+  appends semantic partition separation and default-off semantic partition
+  quality. Separation is `1 - D_within / D_all`; quality is its harmonic mean
+  with exact pair recall. Perfect/collapse/singleton endpoints are `1/0/0`, and
+  zero total semantic variation is explicit unavailability. The legacy
+  `combined_quality` option and record are preserved unchanged but deprecated;
+  Overview uses the corrected values and Combined keeps legacy detail.
 - Support exact-only evaluation without ranges. Semantic mode uses an explicit
   normalized power cost with configured ranges/weights and `power=1|2` (default
   2). Keep undefined value, reason, support, direction, family, and averaging in
@@ -196,7 +210,9 @@ assignments, or clustering labels.
   mappings that deliberately differ by objective, both powers, `D=1/2/4`,
   batches, zero weights, dtype edges, strict ties, and large-N/small-assignment
   stress.
-- The A4 combined-score case is hand-checked.
+- The A4 legacy combined-score case is hand-checked. Schema-v5 correction tests
+  hand-check `p=1` and `p=2`, perfect/collapse/singleton endpoints,
+  no-semantic-variation unavailability, and option validation.
 - Cover arbitrary IDs, rectangular mappings, `D=1/2/4`, unit batching/alignment,
   all undefined denominators, invalid ranges/weights/power, overflow, and a
   non-quadratic stress case.
@@ -218,6 +234,9 @@ assignments, or clustering labels.
 - All heavy math runs in float64 for stability.
 - Structured evaluation details belong in the ML plugin payload, not string
   metadata. The numeric result itself remains core-free.
+- Metric IDs are append-only. Schema v5 appends semantic partition separation,
+  corrected quality, and `no_semantic_variation` without renumbering legacy
+  records.
 - The A4 plot dependency is isolated in `leakflow_plugins_ml_plot`; neither
   `leakflow_ml` nor `leakflow_plugins_ml` links plotting.
 - Payload persistence, `MetricView`, and the standalone/selectable clustering
