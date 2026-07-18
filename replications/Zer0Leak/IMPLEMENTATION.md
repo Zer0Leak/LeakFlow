@@ -34,10 +34,10 @@ Each maps to a LeakFlow API to build:
 
 | Prototype (NumPy) | LeakFlow target | Layer |
 |---|---|---|
-| `corr_poi(T, model)` | `leakflow::crypto::pearson_correlation` (exists) / `PearsonCorrelator` | crypto |
+| `corr_poi(T, model)` | `leakflow::base::pearson_correlation` (exists, `include/leakflow/base/statistics.hpp`); `PearsonCorrelator` element in `leakflow_plugins_crypto` | base |
 | `matched_proj(T, weights, poi)` | app helper (matched filter) or `FeatureSelect`+reduce | app |
-| `fit_linbin(f)` (3-param EM) | `leakflow::ml::HwTemplate::fit(...)` | ml |
-| `label_gaussmath(f)` → labels + `C` | `HwTemplate::labels()`, `HwTemplate::confusion()` | ml |
+| `fit_linbin(f)` (3-param EM) | `leakflow::ml::fit_hw_template(...)` → `HwTemplateFit` | ml |
+| `label_gaussmath(f)` → labels + `C` | `HwTemplateFit::labels`, `HwTemplateFit::confusion` (fields of the returned struct) | ml |
 | `Jk_all()` (AES 9×9 per key) | `leakflow::crypto::aes_joint_hw_distributions()` | crypto |
 | `attack(fm, fy, ...)` (LL, orientation) | `leakflow::ml::confusion_aware_rank(...)` + app orientation loop | ml + app |
 
