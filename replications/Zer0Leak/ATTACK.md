@@ -17,9 +17,18 @@ distribution** using a **confusion-aware maximum-likelihood criterion**. On an
 unprotected ChipWhisperer AES capture the correct key byte ranks **3 / 256**; on a
 jitter-desynchronized capture it ranks **6 / 256** — the only *honestly blind*
 method (no deep network, no key-based model selection) that clears the standard
-`GE ≤ 10` success bar under desynchronization in our comparison. The method is a
-classical, deterministic re-instantiation of Clavier & Reynaud (CHES 2017) with
-multi-PoI matched-filter projection and a physically constrained blind template.
+`GE ≤ 10` success bar under desynchronization in our comparison.
+
+**The method has no algorithmic novelty.** It is Clavier & Reynaud (CHES 2017) —
+their joint-distribution fingerprint (from Linge et al.), their blind
+linear-Gaussian HW template, and their confusion-aware maximum-likelihood criterion
+— run with a **multi-PoI matched-filter front-end** in place of their single PoI.
+We verified this directly: Clavier's *unmodified* criterion with 8 PoIs reaches the
+same rank as ours (sync 3, jitter 7; see §5). Our contributions are therefore
+**empirical and methodological, not algorithmic**: (i) the *classical* criterion
+with multiple PoIs clears a jitter/desync countermeasure **without a deep network**
+(which prior work claimed required deep learning), and (ii) it is **honestly blind**
+— no key-based model selection, unlike the deep-learning approach.
 
 ## 1. Threat model
 
@@ -102,12 +111,20 @@ f ~ Σ_{h=0..8}  Binom(h; 8, ½) · N( a + b·h ,  σ² )
 - variance `σ²` is **shared** across levels,
 - mixing weights are **fixed to the binomial** `[1,8,28,56,70,56,28,8,1]/256`.
 
-Only **3 parameters** `(a, b, σ)` are fitted, by EM. This constraint is the
-crux of the blind template: a *free* 9-component GMM has 27 parameters and, at
-realistic overlap, carves the leakage blob into arbitrary lumps that do **not**
-correspond to Hamming-weight levels (blind confusion built from it fails — rank
-~155 in our tests). The 3-parameter model *cannot* overfit and recovers the true
-levels. The per-trace label is `argmax_h posterior(h | f)`.
+Only **3 parameters** `(a, b, σ)` are fitted, by EM. This constraint matters: a
+*free* 9-component GMM has 27 parameters and, at realistic overlap, carves the
+leakage blob into arbitrary lumps that do **not** correspond to Hamming-weight
+levels (blind confusion built from it fails — rank ~155 in our tests). The
+3-parameter model *cannot* overfit and recovers the true levels. The per-trace
+label is `argmax_h posterior(h | f)` (the prior-weighted nearest bell, a MAP
+decision).
+
+> This template **is Clavier's *Variance Analysis* model** (`l = α·HW + β + ε`,
+> Gaussian noise, binomial `Var(HW)`). Fitting it by binomial-weighted EM and
+> hard-labelling by MAP argmax is a **standard Bayesian-classifier variant** of
+> their continuous `h = (l−β)/α` estimate — not a new technique, and not an
+> improvement (see §4–§5). It is described in detail here only because it is the
+> exact procedure the implementation reproduces.
 
 ### Stage 3 — Blind confusion matrix `C` (closed-form Gaussian)
 The labels are noisy; the *confusion matrix* `C[t,e] = Pr(label = e | true HW =
@@ -121,12 +138,15 @@ template — no truth, no Monte-Carlo:
   Gaussian integrated over the region where the labeler outputs `e`.
 
 We build a separate `C_m` and `C_y` (the two channels' errors are independent —
-this separability is exactly Clavier CHES 2017 Eq. 3, and is what makes Case B the
-right structure). **Important subtlety:** because our labeling uses the binomial
-prior it is *biased* (pulled toward `HW=4`); the confusion `C` must be **faithful
-to that biased labeler** (integrate over the actual argmax regions). A literal
-copy of Clavier's *symmetric* Gaussian `C` (which assumes an unbiased
-`h = (l−β)/α` estimate) underperforms on our biased labeler (rank 39/188 vs. 3).
+this separability is exactly Clavier CHES 2017 Eq. 3). **Important subtlety, and it
+is only a consistency requirement, not an advantage:** because our labeling uses the
+binomial prior it is *biased* (pulled toward `HW=4`), so the confusion `C` must be
+**faithful to that biased labeler** (integrate over the actual argmax regions). A
+literal copy of Clavier's *symmetric* Gaussian `C` underperforms (rank 39) **only
+because we mis-paired it with our biased argmax labels**. Clavier's own consistent
+pairing — an unbiased continuous `h = (l−β)/α` estimate + the symmetric `C` — is
+perfectly fine and reaches the **same rank as ours** (§5). So the argmax-region `C`
+is a *fix for the labeling choice we made*, **not** an improvement over Clavier.
 
 ### Stage 4 — Theoretical per-key joint distributions `J_k`
 For every key hypothesis `k ∈ {0..255}`, precompute (cipher-only, no traces) the
@@ -175,16 +195,31 @@ it must appear in any paper.
 | GMM / multi-PoI ("MC") labeling | **Rezaeezade et al.**, USENIX Security 2025 |
 | Multi-round fusion via the key schedule (belief propagation) | **Le Bouder et al.**, FPS 2016 |
 
-**What is genuinely ours (a modest delta):**
-1. A **classical, deterministic** pipeline (no deep network) that combines
-   *multi-PoI matched-filter* projection with a **physically-constrained 3-parameter
-   blind template** per channel, and derives the confusion matrix **faithfully to
-   the biased argmax labeler** via closed-form argmax-region CDFs.
-2. Demonstrating this **handles a jitter/desynchronization countermeasure**
-   without a DNN — a case prior classical work never cleared (they report
-   `GE = 55–208`, above the `GE ≤ 10` bar).
-3. An explicit **honest-blindness argument**: the method needs **no key-based
-   model selection**, unlike the deep-learning approach (see §7).
+**What is NOT ours — the algorithm.** The joint-distribution fingerprint (Linge),
+the blind linear-Gaussian HW template (Clavier *Variance Analysis*), the binomial
+size prior (Linge/Clavier), and the confusion-aware ML criterion (Clavier Eq. 2–3)
+are all prior work. Our per-channel labeling (binomial-weighted EM + MAP argmax +
+argmax-region confusion) is a *standard* Bayesian-template variant of Clavier's
+continuous VA labeling — **not an improvement**. This is verified in §5: with the
+same 8-PoI front-end, Clavier's **unmodified** criterion reaches the same rank as
+ours (sync 3, jitter 7). **So the pipeline has no algorithmic novelty: it is
+Clavier + multi-PoI.** Even multi-PoI is a standard extension, and Rezaeezade
+already used many PoIs (with a DNN).
+
+**What is genuinely ours — empirical and methodological, not algorithmic:**
+1. **Multi-PoI + the *classical* criterion clears jitter without a DNN.** Single-PoI
+   classical fails on our desync capture (rank 88); the identical criterion with
+   8 PoIs succeeds (rank 7). Prior classical blind SCA used one PoI and never
+   cleared desync (`GE = 55–208`); Rezaeezade cleared it only with deep learning
+   and MC labeling. We show the *classical* Clavier criterion suffices once it is
+   given multiple PoIs — no neural network, no training.
+2. **Honest-blindness critique.** The method needs **no model selection at all**
+   (see §7), whereas the deep-learning approach's headline `GE ≈ 1` depends on
+   selecting the top-10 of 100 models **by guessing entropy**, which requires the
+   secret key.
+
+These are the contributions to foreground. The paper should be positioned as a
+**reproduction + empirical study + methodological critique**, not as a new attack.
 
 ## 5. Results
 
@@ -199,6 +234,22 @@ profiled on `key_30`, attack on `key_01`. Single deterministic run, per-byte ran
 |---|--:|--:|--:|---|
 | sync (unprotected) | **3** | 0.37 | 0.49 | σ_HW ≈ 0.71 both channels |
 | jitter (desync) | **6** | 0.31 | 0.20 | 8 PoI/ch; 30 PoI → 131, 100 PoI → 75 |
+
+**Decisive control — Clavier + multi-PoI = ours.** We ran Clavier's *unmodified*
+ML criterion (continuous VA estimate + symmetric-Gaussian Eq. 2–3) on the **same**
+traces, at 1 PoI (their original) and 8 PoI (our front-end):
+
+| Method | sync rank | jitter rank |
+|---|--:|--:|
+| Clavier, 1 PoI/channel (their original) | 78 | 88 |
+| Clavier, 8 PoI/channel | **3** | **7** |
+| Ours, 8 PoI/channel | **3** | **6** |
+
+The single→multi-PoI jump (78→3, 88→7) is the **entire** improvement, and
+Clavier-8-PoI matches ours (the 6-vs-7 is noise). This is the empirical proof that
+our pipeline carries no algorithmic advantage over Clavier — it *is* Clavier with a
+multi-PoI front-end. Single-PoI Clavier (78/88) sits in the classical "fails,
+`GE > 10`" regime consistent with the literature's ~55–223.
 
 **PoI transfer (profiling `key_30` → attack `key_01`).**
 - sync: HW(m) leak at samples 528–533 (`|r|` 0.51→0.19), HW(y) at 1932–1939
@@ -218,8 +269,9 @@ profiled on `key_30`, attack on `key_01`. Single deterministic run, per-byte ran
   **constrained** linear-binomial template: rank **3**. → the physical constraint
   is essential.
 - Monte-Carlo `C` and closed-form argmax-region Gaussian `C` agree (both rank 3).
-- Symmetric Clavier Eq. 5 `C` on our *biased* labeler: rank 39/188. Faithful
-  argmax-region `C`: rank 3.
+- Symmetric Clavier `C` *mis-paired* with our biased argmax labels: rank 39 — a
+  consistency error **on our side**, not a flaw in Clavier (his unbiased continuous
+  labeling + symmetric `C` reaches rank 3, per the control above).
 - More PoIs hurt under jitter (matched filter averages the desync-smeared leak).
 
 **Comparison with prior blind AES results (honestly-blind only).**

@@ -228,6 +228,14 @@ cmake --build build --target leakflow_zer0leak_blind_attack -j
 
 ## 5. Design notes / gotchas (learned in the prototype)
 
+- **What this pipeline is (no over-claiming).** It is **Clavier & Reynaud CHES
+  2017 with a multi-PoI matched-filter front-end** — verified: Clavier's unmodified
+  criterion at 8 PoI reaches the same rank as ours (sync 3, jitter 7; ATTACK.md §5).
+  The `HwTemplate` **is** Clavier's *Variance Analysis* linear-Gaussian model; the
+  `confusion_aware_rank` **is** Clavier Eq. 2–3. Build them as generic, correct
+  numerics — but do not describe them as novel in code comments or the paper. The
+  contribution is empirical (classical multi-PoI handles jitter, no DNN) +
+  methodological (honest blindness), not algorithmic.
 - **Constrained template, not free GMM.** A free 9-component GMM's self-derived
   confusion fails (rank ~155). The 3-parameter linear-binomial model is what makes
   blind `C` correct. Do **not** substitute `leakflow_ml::GaussianMixture` here
