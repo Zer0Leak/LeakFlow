@@ -19,9 +19,10 @@ LeakFlow is a **framework first**. Follow the framework-oriented rule:
   - the per-key theoretical joint `(HW(m), HW(y))` distributions `J_k`.
 - **Pipeline elements** → `leakflow_plugins_ml` (labeler) and
   `leakflow_plugins_crypto` (key ranker), wrapping the numerics as `Element`s.
-- **Attack-specific tuning** → `replications/Zer0Leak/` (this app). Hard-codes:
-  dataset paths, byte index, PoI count (8), matched-filter, orientation search,
-  end-to-end wiring, and result reporting. May hard-code anything paper-specific.
+- **Attack-specific tuning** → `replications/Zer0Leak/confusion_aware_joint_hw/` (this app). Hard-codes:
+  dataset paths, byte index, PoI count (8), matched-filter, orientation (from the
+  profiling sign), end-to-end wiring, and result reporting. May hard-code anything
+  paper-specific.
 
 Nothing about "8 PoIs", "byte 0", "ChipWhisperer", or "matched filter" belongs in
 framework code — those are app choices. The framework only learns generic
@@ -39,7 +40,7 @@ Each maps to a LeakFlow API to build:
 | `fit_linbin(f)` (3-param EM) | `leakflow::ml::fit_hw_template(...)` → `HwTemplateFit` | ml |
 | `label_gaussmath(f)` → labels + `C` | `HwTemplateFit::labels`, `HwTemplateFit::confusion` (fields of the returned struct) | ml |
 | `Jk_all()` (AES 9×9 per key) | `leakflow::crypto::aes_joint_hw_distributions()` | crypto |
-| `attack(fm, fy, ...)` (LL, orientation) | `leakflow::ml::confusion_aware_rank(...)` + app orientation loop | ml + app |
+| `attack(fm, fy, ...)` (LL, orientation) | `leakflow::ml::confusion_aware_rank(...)` + app orientation **from profiling sign** (no search) | ml + app |
 
 ## 2. Data contract
 
@@ -97,8 +98,11 @@ struct HwTemplateFit {
 ```
 Algorithm (port of `fit_linbin` + `label_gaussmath`):
 1. EM with fixed binomial weights, linear means, shared σ (3 params).
-2. If `slope < 0`, negate `f` and refit so levels ascend with `f` (record
-   `ascending`); the app resolves the physical orientation later.
+2. A `slope < 0` guard (negate `f`, refit) keeps the fitted means ascending — a
+   numerical normalization for the confusion formula only. With a signed-filter input
+   (§ app step 3) `f` already ascends with HW, so this should not fire in practice and
+   it is **not** an orientation decision (orientation is settled upstream in the
+   filter; `HwTemplate` stays orientation-agnostic).
 3. Labels = argmax posterior.
 4. Confusion `C[t,e]` via **closed-form argmax-region CDF**: boundaries where
    adjacent posteriors are equal, then `Φ((edge_e−μ_t)/σ) − Φ((edge_{e-1}−μ_t)/σ)`.
@@ -169,7 +173,7 @@ for a fixed key the number of nonzero cells matches the known 42–49 range.
 checked-in `key_01` fixture (or a synthetic high-SNR fixture) so CI does not
 depend on the local `traces/` tree.
 
-### Phase 4 — The replication app (`replications/Zer0Leak/`)
+### Phase 4 — The replication app (`replications/Zer0Leak/confusion_aware_joint_hw/`)
 
 **Files:** `CMakeLists.txt`, `src/blind_attack_main.cpp`, `README.md`. Register
 in `replications/CMakeLists.txt` (`add_subdirectory(Zer0Leak)`), gated by
@@ -177,14 +181,24 @@ in `replications/CMakeLists.txt` (`add_subdirectory(Zer0Leak)`), gated by
 
 The app is the **tuned end-to-end attack** and hard-codes the paper's choices:
 1. Load profiling + attack captures (`Hdf5FileSrc`) or reuse `out/aes_corr.h5`.
-2. Compute/read the profiling correlation, pick **top-8 PoI per channel** for
-   `HW(m)` and `HW(y)` (this is the app's tuning knob).
-3. **Matched-filter** project the attack traces onto each channel's PoIs (app
-   helper: correlation-weighted sum + standardize).
-4. For each channel, `ml::fit_hw_template(...)` → labels + confusion.
-5. **Orientation search**: 4 combinations (reverse labels `h→8−h` and confusion
-   per axis); for each, build `Nobs`, call `crypto::aes_joint_hw_distributions()`
-   + `ml::confusion_aware_rank(...)`; keep the max-LL combination.
+2. From the **profiling** capture only, compute the correlation, pick **top-8 PoI
+   per channel** for `HW(m)` and `HW(y)`, and keep the **signed** correlation at each
+   PoI. **Never compute correlation on the attack traces** — the attack key is
+   unknown, so no such correlation exists; the profiling weights are all we have.
+3. **Matched-filter** project the *attack* traces through those **signed** profiling
+   weights (`f = Σ r[poi]·trace[:,poi]`, then standardize). The signed weights make
+   `f` ascend with HW automatically — a negative correlation inverts the value here,
+   at the filter. Apply this **even for a single PoI** (route the sample through its
+   signed weight; never use the raw sample). This is the *only* place orientation is
+   handled.
+4. For each channel, `ml::fit_hw_template(...)` → labels + confusion. The labeler
+   assumes labels ascend with HW (guaranteed by step 3); **no orientation flip**.
+5. Build `Nobs`, call `crypto::aes_joint_hw_distributions()` +
+   `ml::confusion_aware_rank(...)` **once**. There is **no orientation search** —
+   > a likelihood guess of the HW(m) direction is unbreakable and self-defeating: it
+   > is identical to testing the complement key `~k = k⊕0xFF`, so it ties `LL.max`
+   > and flips the true-key rank (sync 3↔186, jitter 6↔156). Orientation is settled
+   > in step 3 by the signed profiling correlation; do not revisit it.
 6. Report the recovered byte and its rank; if the file's key is present, print the
    true rank (scoring only).
 
@@ -202,9 +216,14 @@ leakflow_zer0leak_blind_attack --correlation out/aes_corr.h5 \
 Optionally support `--graph` to visualize (reuse the plot runtime) and
 `--all-bytes` to rank all 16 (groundwork for the Phase-5 key-schedule fusion).
 
-**Validation targets (must reproduce the prototype):**
-- sync `key_01` byte 0 → rank **3**
-- jitter `key_01` byte 0, 8 PoI → rank **6** (and 30 PoI → 131, 100 PoI → 75)
+**Validation targets (must reproduce the prototype, orientation fixed from
+profiling sign):**
+- sync `key_01` byte 0, 8 PoI → rank **3** (deterministic)
+- jitter `key_01` byte 0, 8 PoI → rank **6** (deterministic)
+
+(The earlier "30 PoI → 131 / 100 PoI → 75" prototype numbers came from the broken
+max-LL orientation search and are **not** reliable — re-measure any PoI-count sweep
+with the fixed orientation before quoting it.)
 
 ### Phase 5 — (future) full-key fusion via the key schedule
 
@@ -248,10 +267,21 @@ cmake --build build --target leakflow_zer0leak_blind_attack -j
 - **Separable `C_m`, `C_y`.** Keep the two channels' confusions independent
   (Case B). This is both correct here (independent leaks, `corr≈0.06`) and the
   form the ML criterion expects.
-- **Orientation** is a per-axis sign ambiguity; resolve by max achievable LL. Keep
-  it in the app (it is attack-level policy), not in the generic `HwTemplate`.
-- **PoI count is a tuning knob**, not a framework constant. Fewer, stronger PoIs
-  win under jitter (matched filter dilutes on desync-smeared leaks).
+- **Orientation lives entirely in the filter.** Weight each PoI by its **signed
+  profiling correlation** (Stage 1) — a negative correlation inverts the sample there,
+  so `f` always ascends with HW, even for a single PoI. Then there is **no orientation
+  flip and no search** anywhere downstream. Do not add a likelihood-based orientation
+  search: it is identical to testing the complement key `~k=k⊕0xFF`, ties `LL.max`,
+  and flips the rank (sync 3↔186 / jitter 6↔156). The generic `HwTemplate` stays
+  orientation-agnostic. **Only profiling correlation is ever used — never compute
+  correlation on the attack traces (the key is unknown).**
+- **PoI count is a tuning knob**, not a framework constant. Re-measure any PoI-count
+  sweep with the fixed orientation; the old "more PoIs hurt under jitter" numbers
+  were confounded by the orientation bug.
+- **Everything is 1-D per channel.** The 8 PoIs are collapsed to one scalar by the
+  matched filter (one-way); the template, confusion, and ranking never see 8-D. A
+  multivariate template/LDA offers ~no headroom here (PoI noise ~independent; oracle
+  ceiling +4% SNR).
 - **Everything blind except PoI location.** The truth (`/keys`) enters only the
   final scoring. Assert this in the app (no key bytes read before the rank step).
 - **float64** for all template/rank math (matches the rest of `leakflow_ml`).
@@ -261,5 +291,5 @@ cmake --build build --target leakflow_zer0leak_blind_attack -j
 - [ ] Phase 1 — `HwTemplate`, `confusion_aware_rank` (+ tests) in `leakflow_ml`
 - [ ] Phase 2 — `aes_joint_hw_distributions` (+ test) in `leakflow_crypto`
 - [ ] Phase 3 — `BlindHwLabel`, `BlindKeyRank` elements (+ tests)
-- [ ] Phase 4 — `replications/Zer0Leak` app; reproduce rank 3 (sync) / 6 (jitter)
+- [ ] Phase 4 — `replications/Zer0Leak/confusion_aware_joint_hw` app; reproduce rank 3 (sync) / 6 (jitter)
 - [ ] Phase 5 — key-schedule BP full-key fusion (future)

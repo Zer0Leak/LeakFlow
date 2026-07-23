@@ -27,7 +27,7 @@ We verified this directly: Clavier's *unmodified* criterion with 8 PoIs reaches 
 same rank as ours (sync 3, jitter 7; see §5). Our contributions are therefore
 **empirical and methodological, not algorithmic**: (i) the *classical* criterion
 with multiple PoIs clears a jitter/desync countermeasure **without a deep network**
-(which prior work claimed required deep learning), and (ii) it is **honestly blind**
+(Rezaeezade et al. 2025), and (ii) it is **honestly blind**
 — no key-based model selection, unlike the deep-learning approach.
 
 ## 1. Threat model
@@ -42,7 +42,7 @@ with multiple PoIs clears a jitter/desync countermeasure **without a deep networ
   the *attack device* (`key_01`). This is the **one non-blind assumption shared by
   all prior blind-SCA work** (Linge, Clavier, Rezaeezade all state it). Fully
   blind PoI selection is an open problem and out of scope. We verified the PoIs
-  transfer cleanly across devices (rank correlation of `|r|` across all 5000
+  transfer cleanly across different capture sessions (rank correlation of `|r|` across all 5000
   samples ≈ **0.937**; the S-box leak lands on the same sample, 1932, on both
   devices).
 - **Leakage model.** First-order Hamming-weight leakage with additive Gaussian
@@ -81,22 +81,34 @@ fingerprint* the attack matches against.
 Six stages. Stages 1–5 are fully blind; stage 0 is the shared profiling
 assumption.
 
-### Stage 0 — PoI location (offline profiling)
-On the characterization device, correlate every sample with the (known)
-`HW(m)` and `HW(y)`; keep the **top 8 samples per channel** by `|r|`. These sample
-indices are transferred to the attack device. (8 was the sweet spot; see §5.)
+### Stage 0 — PoI location and signed weights (offline profiling only)
+On the characterization device (known key), correlate every sample with `HW(m)`
+and `HW(y)`; keep the **top 8 samples per channel** by `|r|`. Retain the **signed**
+correlation `r_m[poi]`, `r_y[poi]` at those samples (not just `|r|`). The PoI
+indices *and their signed weights* are transferred to the attack device. **This is
+the only correlation we ever compute** — during the attack the key is unknown, so
+no correlation can be (or is) computed on the attack traces.
 
-### Stage 1 — Matched-filter projection
-Collapse each channel's 8 PoIs into a single scalar per trace via a
-correlation-weighted sum (a matched filter), then standardize:
+### Stage 1 — Matched-filter projection (carries the orientation)
+Collapse each channel's PoIs into a single scalar per trace by a **signed**
+profiling-correlation-weighted sum, then standardize:
 
 ```
 f_m = standardize( Σ_i  r_m[poi_i] · trace[:, poi_i] )     ≈ noisy HW(m)
 f_y = standardize( Σ_i  r_y[poi_i] · trace[:, poi_i] )     ≈ noisy HW(y)
 ```
 
+Weighting by the **signed** profiling correlation is what orients the projection:
+where a PoI's correlation is negative (more power = *lower* HW), the negative weight
+inverts it, so `f` **always ascends with HW**, on both channels, automatically.
+This is applied **even for a single PoI** — the point is to route every measurement
+through its signed weight, never the raw sample, so a negative correlation is always
+inverted at the filter and never handled anywhere else (see "Orientation" below).
+
 `f_m` and `f_y` are two independent 1-D leakage estimates (measured
-`corr(f_m, f_y) ≈ 0.06` — the two leaks are physically separate in time).
+`corr(f_m, f_y) ≈ 0.06` — the two leaks are physically separate in time). This
+PoI → 1-scalar reduction is **one-way**: everything downstream is 1-D per channel;
+the individual PoIs are not used again.
 
 ### Stage 2 — Per-channel blind labeling (physically-constrained template)
 We label each axis **separately** (this is "Case B"; see §6 for why this does not
@@ -172,12 +184,28 @@ This is the decisive step: matching the *blurred* observed histogram against the
 *clean* `J_k` fails (rank ~68); matching against `C_mᵀ J_k C_y` succeeds (rank 3).
 `J̃_k = C_mᵀ J_k C_y` is exactly Clavier CHES 2017 Eq. 2–3.
 
-### Orientation resolution
-Blindly we do not know whether higher leakage means higher or lower Hamming
-weight (a per-axis sign ambiguity). We try both orientations per axis (reverse the
-HW labels `h → 8−h` and reverse `C` accordingly) and keep the combination with the
-**highest achievable log-likelihood** — a blind criterion (no truth). In our runs
-this selects the correct orientation.
+### Orientation — handled entirely by the signed filter (no separate step)
+There is a per-axis sign ambiguity: does higher leakage mean higher or lower
+Hamming weight? **It is resolved once, in Stage 1**, by weighting each PoI with its
+**signed profiling correlation** — a negative correlation inverts the measurement at
+the filter, so `f` always ascends with HW. There is **no orientation flip, no search,
+and nothing to decide downstream**; the labeler simply assumes labels ascend with HW.
+The sign is a stable profiling quantity (~18σ solid even on the weak jitter HW(y)
+channel) and transfers to the attack device; concretely the profiling peak-correlation
+signs here are sync `(+,+)` and jitter `(+,−)`.
+
+> **Do not add a blind orientation search — it would be worse than useless.** If you
+> instead tried to guess the HW(m) direction by likelihood, you would find it *cannot*
+> be guessed: flipping the HW(m) axis is **mathematically identical to testing the
+> complement key** `~k = k ⊕ 0xFF` (complementing the plaintext sends
+> `HW(m) → 8 − HW(m)`, and `J_k` with its HW(m) axis reversed equals `J_{k ⊕ 0xFF}`,
+> verified exactly). So the two orientations give the **same 256 likelihood scores**
+> with every key swapped for its complement — an unbreakable tie whose "winner" is
+> `k*` under one orientation and `~k*` under the other (true-key rank **3 vs 186** on
+> sync, **6 vs 156** on jitter). The signed profiling correlation is the *only* thing
+> that disambiguates `k*` from `~k*`, which is why we bake it into the filter and
+> never search. (Prototype note: an early version *did* add this search on top of the
+> signed filter and inherited the coin-flip; it was removed.)
 
 ## 4. Relationship to prior work (honesty section)
 
@@ -226,14 +254,15 @@ These are the contributions to foreground. The paper should be positioned as a
 Dataset: ChipWhisperer AES, 10 000 traces × 5000 samples, byte 0 (`key = 0x33`).
 `sync` = unprotected (`traces/aes/sync/aes_sync_attack`); `jitter` =
 `loop_iterations` desynchronization (`traces/aes/jitter/aes_jitter_attack`). PoIs
-profiled on `key_30`, attack on `key_01`. Single deterministic run, per-byte rank.
+profiled on `key_30`, attack on `key_01`. Single **deterministic** run, per-byte
+rank, **orientation fixed from the profiling correlation sign** (§3).
 
 **Correct key byte rank (lower is better; out of 256):**
 
 | Dataset | Rank | HW(m) acc | HW(y) acc | Notes |
 |---|--:|--:|--:|---|
-| sync (unprotected) | **3** | 0.37 | 0.49 | σ_HW ≈ 0.71 both channels |
-| jitter (desync) | **6** | 0.31 | 0.20 | 8 PoI/ch; 30 PoI → 131, 100 PoI → 75 |
+| sync (unprotected) | **3** | 0.37 | 0.49 | 8 PoI/ch; σ_HW ≈ 0.71 both channels |
+| jitter (desync) | **6** | 0.31 | 0.20 | 8 PoI/ch |
 
 **Decisive control — Clavier + multi-PoI = ours.** We ran Clavier's *unmodified*
 ML criterion (continuous VA estimate + symmetric-Gaussian Eq. 2–3) on the **same**
@@ -272,7 +301,18 @@ multi-PoI front-end. Single-PoI Clavier (78/88) sits in the classical "fails,
 - Symmetric Clavier `C` *mis-paired* with our biased argmax labels: rank 39 — a
   consistency error **on our side**, not a flaw in Clavier (his unbiased continuous
   labeling + symmetric `C` reaches rank 3, per the control above).
-- More PoIs hurt under jitter (matched filter averages the desync-smeared leak).
+- **Orientation must come from the profiling sign, not a blind max-LL search.** The
+  max-LL search is broken: flipping HW(m) ties `LL.max` but flips the true-key rank
+  (sync 3↔186, jitter 6↔156). Fixed from the signed profiling correlation, the
+  ranks are deterministic (§3).
+- **Projection weighting (with orientation fixed):** the correlation-weighted
+  matched filter is near-optimal on sync (1-D SNR 7.93 vs an oracle-LDA ceiling of
+  8.27, +4%), because the PoI noise is nearly independent (cross-corr ≈ 0.10).
+  Equal/SNR/`r²` weightings do not beat it. Keeping the full 8-D (a multivariate
+  template/LDA) offers essentially no headroom here; only a *nonlinear* model
+  (QDA/DNN) could exploit more, and only where the noise is correlated (e.g. harder
+  jitter). *(Earlier per-weighting rank numbers were confounded by the orientation
+  bug and were discarded.)*
 
 **Comparison with prior blind AES results (honestly-blind only).**
 Per-byte guessing entropy / rank. *Different datasets* (their CW vs. our
@@ -352,7 +392,14 @@ profiling device, deploy on the target. Rezaeezade do not make that argument.)
    overlap by ~⅔σ); the joint 45-group truth is not perfectly recoverable, only
    ranked. Under jitter the attack leans on HW(m); if the jitter also destroyed
    HW(m), the joint fingerprint would collapse.
-5. **Orientation** is resolved heuristically by max-LL (works here, not proven).
+5. **Orientation needs the profiling *sign*, not just PoI locations.** The HW-axis
+   sign is *not* blindly resolvable (a likelihood guess is a `k*`↔`~k*` coin-flip;
+   §3). It is carried for free by the signed profiling correlation in the filter, so
+   there is no separate orientation step — but it does mean the attack uses the
+   profiling *sign*, one small notch more reliance on the known-key profiling.
+6. **True key is not rank 1** even with the correct orientation (sync rank 3 → 2
+   keys score higher; jitter rank 6 → 5 do). It clears `GE ≤ 10` but is not a
+   confident single-byte win — hence the need for enumeration / multi-byte fusion.
 
 ## 9. Future work
 
