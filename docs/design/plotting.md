@@ -420,14 +420,21 @@ New GUI/window rendering behavior is manual-only for Phase 22.
 
 Existing CTest must still pass after implementation.
 
-Manual smoke examples:
+Manual smoke examples. These exercise the `NumpySrc` → `NumpyToTorch` path, so
+first derive a small `.npy` from the tracked HDF5 fixture (needs Python with
+`torch` and `numpy`):
 
 ```bash
-./build/leakflow run 'NumpySrc(path=tests/fixtures/numpy/aes_sync_key_01_traces_first30.npy) ! NumpyToTorch ! TorchConvert(dtype=float32,device=cpu) ! TracePlot(title="AES traces", group=aes)'
+./build/leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5, row_count=30); @d.traces ! TorchFileSink(path=/tmp/aes_traces30.pt)'
+python3 -c "import torch, numpy as np; np.save('/tmp/aes_traces_first30.npy', torch.load('/tmp/aes_traces30.pt').numpy())"
 ```
 
 ```bash
-./build/leakflow run 'NumpySrc(path=tests/fixtures/numpy/aes_sync_key_01_traces_first30.npy) ! NumpyToTorch ! Tee@t; @t.src_0 ! TracePlot(group=compare,label=raw); @t.src_1 ! TorchConvert(dtype=float32,device=cpu) ! TracePlot(group=compare,label=converted,layout=overlay,lock_trace_index=true)'
+./build/leakflow run 'NumpySrc(path=/tmp/aes_traces_first30.npy) ! NumpyToTorch ! TorchConvert(dtype=float32,device=cpu) ! TracePlot(title="AES traces", group=aes)'
+```
+
+```bash
+./build/leakflow run 'NumpySrc(path=/tmp/aes_traces_first30.npy) ! NumpyToTorch ! Tee@t; @t.src_0 ! TracePlot(group=compare,label=raw); @t.src_1 ! TorchConvert(dtype=float32,device=cpu) ! TracePlot(group=compare,label=converted,layout=overlay,lock_trace_index=true)'
 ```
 
 ## Future Plot Elements

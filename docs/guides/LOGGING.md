@@ -114,16 +114,23 @@ Use multiple clauses. Clauses are ANDed:
 ./build/leakflow --log-level debug --log-color never --log-filter 'element=FakeSrc,element_name=src' run 'FakeSrc@src ! FakeSink@sink'
 ```
 
-Filter Torch source logs:
+Filter Torch source logs. `TorchFileSrc` reads a `.pt` tensor; create one from
+the checked-in HDF5 fixture first:
 
 ```bash
-./build/leakflow --log-level info --log-color never --log-filter 'element=TorchFileSrc' run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! FakeSink'
+./build/leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5); @d.traces ! TorchFileSink(path=/tmp/aes_traces.pt)'
 ```
 
-Filter converter logs:
+Then filter its load logs:
 
 ```bash
-./build/leakflow --log-level info --log-color never --log-filter 'element=TorchConvert' run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchConvert(dtype=float32,device=cpu) ! FakeSink'
+./build/leakflow --log-level info --log-color never --log-filter 'element=TorchFileSrc' run 'TorchFileSrc(path=/tmp/aes_traces.pt) ! FakeSink'
+```
+
+Filter converter logs (`TorchConvert` runs directly on the HDF5 trace tensor):
+
+```bash
+./build/leakflow --log-level info --log-color never --log-filter 'element=TorchConvert' run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TorchConvert(dtype=float32,device=cpu) ! FakeSink'
 ```
 
 Use environment variables for repeated debugging:
@@ -207,7 +214,7 @@ Log HDF5 dataset loading only:
 Log Torch conversion only:
 
 ```bash
-./build/leakflow --log-level info --log-color never --log-filter 'element=TorchConvert' run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchConvert(dtype=float32,device=cpu) ! Summary ! FakeSink'
+./build/leakflow --log-level info --log-color never --log-filter 'element=TorchConvert' run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TorchConvert(dtype=float32,device=cpu) ! Summary ! FakeSink'
 ```
 
 Log all source elements and suppress summaries:
@@ -219,7 +226,7 @@ Log all source elements and suppress summaries:
 Save a Torch tensor while logging sink events:
 
 ```bash
-./build/leakflow --log-level info --log-color never --log-filter 'element_kclass=Sink' run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchFileSink(path=/tmp/traces_first_50_roundtrip.pt)'
+./build/leakflow --log-level info --log-color never --log-filter 'element_kclass=Sink' run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TorchFileSink(path=/tmp/aes_traces_roundtrip.pt)'
 ```
 
 ## Invalid Filters

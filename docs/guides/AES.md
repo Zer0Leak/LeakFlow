@@ -12,15 +12,15 @@ cmake --build build -j
 
 ## Fixtures
 
-The tiny fixture set is intentionally small enough for CTest and CLI smoke
-commands:
+The checked-in fixture is one synchronized ChipWhisperer-Husky capture key,
+small enough for CTest and CLI smoke commands:
 
 ```text
 tests/fixtures/aes/sync/key_01.h5
-  /traces       float32 [50,5000]
-  /plaintexts   uint8   [50,16]
+  /traces       float32 [2000,5000]
+  /plaintexts   uint8   [2000,16]
   /keys         uint8   [16]
-  /ciphertexts  uint8   [50,16]
+  /ciphertexts  uint8   [2000,16]
 ```
 
 `Hdf5FileSrc` exposes each present array through a named Torch output pad. One
@@ -49,15 +49,17 @@ The `channels` property chooses any non-empty combination of `HW(m)`,
 `channels=[HW(y)]`. Use commas between properties, for example
 `channels=[HW(m)],units=[0]`.
 
-The output buffer metadata includes:
+The output buffer carries the selected bytes and channels as first-class typed
+envelope values (`units=[...]`, `channels=[...]`) plus this leakage metadata:
 
 ```text
-leakage.model=aes-first-round
-leakage.units=[...]
-leakage.channels=HW(y)
-crypto.algorithm=AES
-crypto.state_bytes=16
-trace.count=N
+payload.leakage.model=aes-first-round
+payload.leakage.byte_indexes=[...]
+payload.leakage.channels=HW(y)
+payload.crypto.algorithm=AES
+payload.crypto.state_bytes=16
+payload.trace.count=N
+payload.trace.input=connected
 ```
 
 The `traces` and `plaintexts` sink pads are required. The `keys` sink pad is
@@ -91,12 +93,16 @@ This computes the default `HW(y)` leakage for AES state byte `0`.
 Expected summary facts include:
 
 ```text
-leakage.model=aes-first-round
-leakage.units=[0]
-leakage.channels=HW(y)
-trace.count=50
-trace.input=connected
+units=[0]
+channels=[HW(y)]
+payload.leakage.model=aes-first-round
+payload.leakage.byte_indexes=[0]
+payload.leakage.channels=HW(y)
+payload.trace.count=2000
+payload.trace.input=connected
 ```
+
+The payload is a `uint8` tensor with shape `[1,2000,1]`.
 
 ## Selected Bytes With Trace Alignment
 
@@ -111,15 +117,16 @@ trace matrix has the same `N` as the plaintexts.
 Expected summary facts include:
 
 ```text
-leakage.units=[0,1,2,3]
-trace.count=50
-trace.input=connected
+units=[0,1,2,3]
+payload.leakage.byte_indexes=[0,1,2,3]
+payload.trace.count=2000
+payload.trace.input=connected
 ```
 
 ## Multiple Channels
 
 Set `channels` to emit more than one target channel per byte. This command emits
-`HW(m)` and `HW(y)` for AES byte `0`, so the output shape is `[1,50,2]`.
+`HW(m)` and `HW(y)` for AES byte `0`, so the output shape is `[1,2000,2]`.
 
 ```bash
 ./build/leakflow run \
@@ -129,14 +136,16 @@ Set `channels` to emit more than one target channel per byte. This command emits
 Expected summary facts include:
 
 ```text
-leakage.units=[0]
-leakage.channels=HW(m),HW(y)
+units=[0]
+channels=[HW(m),HW(y)]
+payload.leakage.byte_indexes=[0]
+payload.leakage.channels=HW(m),HW(y)
 ```
 
 ## All AES State Bytes
 
 Omit `units` to compute all 16 AES state bytes. With the default
-`channels=[HW(y)]`, the output shape is `[16,50,1]` for the checked-in fixture.
+`channels=[HW(y)]`, the output shape is `[16,2000,1]` for the checked-in fixture.
 
 ```bash
 ./build/leakflow run \
@@ -158,7 +167,7 @@ Python can load the result with:
 import torch
 
 leakage = torch.load("/tmp/aes_leakage_bytes_0_1.pt")
-print(leakage.shape)  # torch.Size([2, 50, 1])
+print(leakage.shape)  # torch.Size([2, 2000, 1])
 ```
 
 ## Pearson PoI Annotations For TracePlot
@@ -175,30 +184,23 @@ plot annotations             -> TracePlot.annotations
 trace branch copy            -> TracePlot.sink
 ```
 
-For AES leakage output `[B,N,C]`, flattened PoI target metadata follows byte
-index first, then channel order:
+The selected bytes and channels ride along as first-class typed envelope values.
+A `PoiSelect` buffer for AES bytes `3` and `5` carries `units=[3,5]`,
+`channels=[HW(y)]`, `caps=leakflow/correlation-poi`, and PoI metadata such as:
 
 ```text
-byte_indexes[0].HW(y)
-byte_indexes[1].HW(y)
-...
+payload.poi.method=pearson-correlation
+payload.poi.unit_count=2
+payload.poi.features_count=5000
+payload.poi.observation_count=2000
+payload.leakage.channels=HW(y)
+payload.trace.count=2000
 ```
 
-`PearsonCorrelator` (and `PoiSelect` downstream) forwards the AES byte-index
-metadata and stamps expanded target metadata such as:
-
-```text
-leakage.units=[3,5]
-poi.target.0.label=byte_3.HW(y)
-poi.target.1.label=byte_5.HW(y)
-poi.target.1.byte_index=5
-poi.target.1.channel=HW(y)
-```
-
-`CorrelationPoiToPlotAnnotations` uses those metadata labels to create generic
-plot annotations. `TracePlot` draws one vertical marker per selected sample
-index; if several targets choose the same sample index, their annotations stay
-grouped at that marker.
+`CorrelationPoiToPlotAnnotations` reads those PoI selections and the typed unit
+and channel identity to create generic plot annotations. `TracePlot` draws one
+vertical marker per selected sample index; if several targets choose the same
+sample index, their annotations stay grouped at that marker.
 
 This command plots traces and overlays per-target Pearson PoIs for AES bytes `3`
 and `5`. It opens the interactive TracePlot window after pipeline execution.
@@ -215,12 +217,12 @@ For a non-GUI smoke check, stop at `Summary` after the annotation converter:
   'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); Tee@traces; AesLeakage@leakage(units=[3,5]); PearsonCorrelator@corr; PoiSelect@poi(top_k=[3],rank_by=[abs]); CorrelationPoiToPlotAnnotations@ann(precision=3); Summary@summary(level=3); @data.traces ! @traces; @traces.src_0 ! @corr.features; @traces.src_1 ! @leakage.traces; @data.plaintexts ! @leakage.plaintexts; @data.keys ! @leakage.keys; @leakage ! @corr.targets; @corr ! @poi; @poi ! @ann ! @summary'
 ```
 
-Expected summary facts include:
+With `top_k=[3]` over the two bytes `3` and `5`, the annotation converter emits
+`3 x 2 = 6` markers. Expected summary facts include:
 
 ```text
-leakflow/plot-annotations
-leakage.units=[3,5]
-poi.target.0.label=byte_3.HW(y)
-poi.target.1.label=byte_5.HW(y)
-annotation.count=3
+caps=leakflow/plot-annotations
+payload.annotation.kind=poi
+payload.annotation.count=6
+payload.conversion.id=correlation-poi-to-plot-annotations
 ```

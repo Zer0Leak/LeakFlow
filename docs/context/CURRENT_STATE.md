@@ -560,23 +560,18 @@ Logging:
 
 ## Test Fixtures
 
-The current checked-in AES dataset fixture is:
+The checked-in AES dataset fixture is:
 
-- `tests/fixtures/aes/sync/key_01.h5`, with `/traces` (`float32 [50,5000]`),
-  `/plaintexts` (`uint8 [50,16]`), `/keys` (`uint8 [16]`), and
-  `/ciphertexts` (`uint8 [50,16]`).
+- `tests/fixtures/aes/sync/key_01.h5`, with `/traces` (`float32 [2000,5000]`),
+  `/plaintexts` (`uint8 [2000,16]`), `/keys` (`uint8 [16]`), and
+  `/ciphertexts` (`uint8 [2000,16]`).
 
-Focused Torch file-I/O and Phase 26 correctness tests retain the original tiny
-Torch fixtures under `tests/fixtures/aes/sync/`:
+The standalone per-key Torch `.pt` fixtures were removed; the HDF5 file is the
+single source of truth. The Phase 26 correctness test reads `key_01.h5` and
+slices the leading rows, preserving the numeric character of the historical
+`*_first_50.pt` fixtures while sourcing straight from the tracked HDF5 file.
 
-- `key_01/traces_first_50.pt`: `float32`, shape `(50, 5000)`.
-- `key_01/plain_texts_first_50.pt`: `uint8`, shape `(50, 16)`.
-- `key_01/key_first_50.pt`: `uint8`, shape `(16,)`.
-- `key_02/traces_first_50.pt`: `float32`, shape `(50, 5000)`.
-- `key_02/plain_texts_first_50.pt`: `uint8`, shape `(50, 16)`.
-- `key_02/key_first_50.pt`: `uint8`, shape `(16,)`.
-
-Tests must use these fixtures instead of depending on the ignored local
+Tests must use this fixture instead of depending on the ignored local
 `traces/` tree.
 
 ## Default Commands
@@ -596,7 +591,7 @@ Useful CLI smoke commands:
 ./build/leakflow run 'FakeSrc ! Summary'
 ./build/leakflow run --graph 'FakeSrc ! Tee@t; @t.src_0 ! Summary; @t.src_1 ! FakeSink'
 ./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! Summary ! FakeSink'
-./build/leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! TorchFileSink(path=/tmp/traces_first_50_roundtrip.pt)'
+./build/leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5); @d.traces ! TorchFileSink(path=/tmp/aes_traces_roundtrip.pt)'
 ./build/leakflow run 'Hdf5FileSrc@data(path=tests/fixtures/aes/sync/key_01.h5); @data.traces ! TracePlot(title="AES traces",group=aes,label=trace)'
 ./build/leakflow-ls
 ./build/leakflow-ls TracePlot

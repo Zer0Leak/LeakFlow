@@ -789,13 +789,21 @@ These are intentionally **restart-scoped** (read once when the run starts):
 ## 14. CLI cookbook — drive every feature from the command line
 
 Recipes to *experiment* with sync, queues, threads, states, drops, and provenance.
-This section deliberately retains the focused `.pt`/`FakeLiveSrc` fixtures to
-teach that element and to create independent sources for `Sync`. Current AES
-dataset workflows use `Hdf5FileSrc` or `FakeLiveHdf5Src` instead. All recipes
-below use checked-in fixtures (no hardware):
+This section uses `FakeLiveSrc` on small `.pt` tensors to teach that element and
+to create two independent sources for `Sync`. Current AES dataset workflows use
+`Hdf5FileSrc` or `FakeLiveHdf5Src` instead. The standalone `.pt` fixtures were
+removed in favor of the single tracked HDF5 fixture, so first regenerate two
+small 50-row `.pt` files from it (no hardware needed):
 
-- `tests/fixtures/aes/sync/key_01/traces_first_50.pt` — a `[50, 5000]` trace file.
-- `tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt` — a `[50, 16]` file.
+```bash
+./build/leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5, row_count=50); @d.traces ! TorchFileSink(path=/tmp/aes_traces_50.pt)'
+./build/leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5, row_count=50); @d.plaintexts ! TorchFileSink(path=/tmp/aes_plain_50.pt)'
+```
+
+This gives the two files the recipes below stream:
+
+- `/tmp/aes_traces_50.pt` — a `[50, 5000]` trace file.
+- `/tmp/aes_plain_50.pt` — a `[50, 16]` plaintext file.
 
 Build first: `cmake --build build -j`. Add `--log-level info` to watch buffers flow
 (`--log-level warn` is quieter). Add `--graph` for the interactive window.
@@ -817,11 +825,11 @@ add that as explicit source metadata when the trace sampling rate matters:
 ```bash
 # 50 rows, ~2 traces/sec -> ~25 s, visible in the log
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=2.0) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt, trace_rate=2.0) ! Summary ! FakeSink'
 
 # no rate -> as fast as possible
 ./build/leakflow run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt) ! Summary ! FakeSink'
 ```
 
 ### 14.3 Live + Queue = threaded segments (the core live path)
@@ -839,7 +847,7 @@ pause and property changes remain explicit.
 ```bash
 # Block queue (drop_oldest=false) = lossless backpressure: all 50 rows arrive
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue(max_size=8, drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt) ! Queue(max_size=8, drop_oldest=false) ! Summary ! FakeSink'
 ```
 
 **Lossy capture** (drop oldest under backpressure) — for hardware you cannot slow:
@@ -847,7 +855,7 @@ pause and property changes remain explicit.
 ```bash
 # small, fast, dropping -> far fewer than 50 survive (capture-style)
 ./build/leakflow --log-level warn run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=200.0) ! Queue(max_size=1, drop_oldest=true) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt, trace_rate=200.0) ! Queue(max_size=1, drop_oldest=true) ! Summary ! FakeSink'
 ```
 
 ### 14.4 Cooperative stop (Ctrl+C)
@@ -857,7 +865,7 @@ of a second (it does not wait out the remaining traces, nor hard-kill):
 
 ```bash
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 # ...press Ctrl+C mid-stream
 ```
 
@@ -866,11 +874,11 @@ of a second (it does not wait out the remaining traces, nor hard-kill):
 ```bash
 # opens in Stopped; click Start. Try Pause/Resume, edit trace_rate live, toggle Auto-apply.
 ./build/leakflow run --graph \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 
 # begin running immediately on open
 ./build/leakflow run --graph --auto-start \
-  'FakeLiveSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
+  'FakeLiveSrc(path=/tmp/aes_traces_50.pt, trace_rate=1.0) ! Queue(drop_oldest=false) ! Summary ! FakeSink'
 ```
 
 In the graph: change `trace_rate` while **Running** → re-paces on the next
@@ -887,8 +895,8 @@ declared **before** the join (source-before-sink), then `element.pad` addressing
 
 ```bash
 ./build/leakflow --log-level info run \
-  'FakeLiveSrc@a(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue@qa(drop_oldest=false) ;
-   FakeLiveSrc@b(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt) ! Queue@qb(drop_oldest=false) ;
+  'FakeLiveSrc@a(path=/tmp/aes_traces_50.pt) ! Queue@qa(drop_oldest=false) ;
+   FakeLiveSrc@b(path=/tmp/aes_plain_50.pt) ! Queue@qb(drop_oldest=false) ;
    @qa.src ! Sync@s.in_0 ;
    @qb.src ! @s.in_1 ;
    @s.out_0 ! Summary ! FakeSink ;
@@ -916,8 +924,8 @@ per `Sync`**, not per pad, and it is **restart-scoped** (read once per run — s
 
 ```bash
 ./build/leakflow run \
-  'FakeLiveSrc@a(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Queue@qa(drop_oldest=false) ;
-   FakeLiveSrc@b(path=tests/fixtures/aes/sync/key_01/plain_texts_first_50.pt) ! Queue@qb(drop_oldest=false) ;
+  'FakeLiveSrc@a(path=/tmp/aes_traces_50.pt) ! Queue@qa(drop_oldest=false) ;
+   FakeLiveSrc@b(path=/tmp/aes_plain_50.pt) ! Queue@qb(drop_oldest=false) ;
    @qa.src ! Sync@s(policy=latest).in_0 ;
    @qb.src ! @s.in_1 ;
    @s.out_0 ! Summary ! FakeSink ;

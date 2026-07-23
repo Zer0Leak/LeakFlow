@@ -653,10 +653,12 @@ leakflow run --graph 'FakeLiveHdf5Src@data(path=tests/fixtures/aes/sync/key_01.h
 
 ## Torch Tensor Pipelines
 
-Load one `.pt` tensor file as a `TorchTensorPayload` and summarize it:
+`TorchFileSrc` loads one `.pt` tensor file as a `TorchTensorPayload`. Create a
+`.pt` from the checked-in HDF5 fixture, then load and summarize it:
 
 ```bash
-leakflow run 'TorchFileSrc(path=tests/fixtures/aes/sync/key_01/traces_first_50.pt) ! Summary ! FakeSink'
+leakflow run 'Hdf5FileSrc@d(path=tests/fixtures/aes/sync/key_01.h5); @d.traces ! TorchFileSink(path=/tmp/aes_traces.pt)'
+leakflow run 'TorchFileSrc(path=/tmp/aes_traces.pt) ! Summary ! FakeSink'
 ```
 
 Pad caps annotation:
